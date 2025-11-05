@@ -3,9 +3,16 @@
 ## 戦略概要
 2本のローソク足パターンを使用したゴールド専用の押し目買い戦略（ロングのみ）
 
+**エントリー時間足**: 15分足と1時間足の両方でシグナル確認
+**決済条件**: 1時間足のレジスタンスゾーンで利確
+
 ---
 
 ## エントリー条件（ロング）
+
+### 時間足設定
+- **監視時間足**: M15（15分足）とH1（1時間足）
+- **エントリー判定**: 両方の時間足で2本のローソク足パターンを確認
 
 ### 必須条件
 1. **ローソク足パターン**
@@ -50,18 +57,31 @@
 ## 決済条件
 
 ### 利確（Take Profit）
-**条件付き利確ロジック：**
+
+#### 主要利確条件：1時間足レジスタンスゾーン
+- **レジスタンスゾーンの定義**：
+  - 1時間足の過去100本分の高値を分析
+  - 同じ価格帯（±50ポイント以内）に複数の高値が集中している領域
+  - 最低3回以上タッチされた価格帯をレジスタンスと判定
+
+- **利確ロジック**：
+  - 現在価格がレジスタンスゾーン（±20ポイント以内）に到達
+  - かつ、利益が出ている状態（浮き利益 > 0）
+  - レジスタンスに到達したら即座に決済
+
+#### 補助的利確条件（条件付き）
 - 現在のポジションが利益状態（浮き利益 > 0）
 - かつ、陰線の実体が完成した時
 - 判定：`(Close[1] < Open[1]) AND (PositionProfit > 0)`
+- **注意**: レジスタンスゾーン利確が優先
 
 **注意点：**
 - 損失状態では陰線が出ても決済しない
-- 他の手法と組み合わせる場合は利益率が高い方を優先
+- レジスタンスゾーン検出失敗時は条件付き利確を使用
 
 ### 損切り（Stop Loss）
-- エントリーの2本目（陽線）の安値から35pips下に設定
-- SL価格 = `candle2.Low - 35 * Point * 10`（5桁ブローカー対応）
+- エントリーの2本目（陽線）の安値から35ドル（350ポイント）下に設定
+- SL価格 = `candle2.Low - 350 * Point`
 
 ---
 
@@ -85,14 +105,21 @@ input double MaxUpperWick_points = 50.0;        // 2本目の最大上ひげ（�
 
 ### 決済パラメータ（ゴールド用）
 ```
-input double StopLoss_points = 350.0;       // 損切り（ポイント）※35ドル = 350ポイント
-input bool UseConditionalTP = true;         // 条件付き利確の使用
+input double StopLoss_points = 350.0;           // 損切り（ポイント）※35ドル = 350ポイント
+input bool UseResistanceZone = true;            // レジスタンスゾーン利確の使用
+input int ResistanceZoneLookback = 100;         // レジスタンス検出用の過去足数（H1）
+input double ResistanceZoneRange_Points = 50.0; // レジスタンスゾーン判定範囲（±50pt）
+input int MinResistanceTouches = 3;             // レジスタンス判定の最小タッチ回数
+input double ResistanceExitRange_Points = 20.0; // レジスタンス到達判定範囲（±20pt）
+input bool UseConditionalTP = true;             // 条件付き利確の使用（補助）
 ```
 
 ### トレード設定
 ```
-input int MaxPositions = 1;                 // 最大ポジション数（ロング専用）
-input ENUM_TIMEFRAMES Timeframe = PERIOD_H1; // 推奨時間軸
+input int MaxPositions = 1;                     // 最大ポジション数（ロング専用）
+input ENUM_TIMEFRAMES EntryTimeframe1 = PERIOD_M15; // エントリー時間足1（15分足）
+input ENUM_TIMEFRAMES EntryTimeframe2 = PERIOD_H1;  // エントリー時間足2（1時間足）
+input bool RequireBothTimeframes = true;        // 両方の時間足でシグナル必要
 ```
 
 ---
@@ -100,18 +127,32 @@ input ENUM_TIMEFRAMES Timeframe = PERIOD_H1; // 推奨時間軸
 ## 実装ロジックフロー
 
 ### OnTick()処理
-1. 新しいバーの検出
+1. 新しいバーの検出（各時間足で）
 2. 既存ポジションの確認
-   - ポジションがある場合：条件付き利確のチェック
-   - ポジションがない場合：エントリー条件のチェック
+   - ポジションがある場合：
+     - レジスタンスゾーン到達チェック（最優先）
+     - 条件付き利確のチェック（補助）
+   - ポジションがない場合：
+     - エントリー条件のチェック（複数時間足）
 3. エントリーシグナル判定
 4. オーダー送信
 
-### エントリーチェック関数
+### エントリーチェック関数（複数時間足対応）
 ```
 bool CheckLongEntry()
 {
-   // 1本目（index=2）、2本目（index=1）を確認
+   bool signal_m15 = CheckLongEntryOnTimeframe(PERIOD_M15);
+   bool signal_h1 = CheckLongEntryOnTimeframe(PERIOD_H1);
+
+   if(RequireBothTimeframes)
+      return (signal_m15 && signal_h1);
+   else
+      return (signal_m15 || signal_h1);
+}
+
+bool CheckLongEntryOnTimeframe(ENUM_TIMEFRAMES tf)
+{
+   // 指定時間足で1本目（index=2）、2本目（index=1）を確認
    // 1. 陰線→陽線パターン
    // 2. 安値の差をチェック
    // 3. 実体サイズチェック
@@ -120,14 +161,44 @@ bool CheckLongEntry()
 }
 ```
 
+### レジスタンスゾーン検出関数
+```
+double FindResistanceZone()
+{
+   // 1時間足の過去100本分の高値を取得
+   // 高値を価格帯ごとにグループ化
+   // 各価格帯のタッチ回数をカウント
+   // 最小タッチ回数以上の価格帯をレジスタンスと判定
+   // 最も近いレジスタンスゾーンの価格を返す
+   return resistance_price;
+}
+```
+
 ### 決済チェック関数
 ```
-void CheckConditionalTP()
+void CheckTakeProfit()
 {
-   // ポジション情報取得
-   // 利益状態かチェック
-   // 最新の完成バーが陰線かチェック
-   // 条件を満たせば決済
+   // レジスタンスゾーン利確チェック（優先）
+   if(UseResistanceZone)
+   {
+      double resistance = FindResistanceZone();
+      double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+
+      // レジスタンス到達判定
+      if(MathAbs(currentPrice - resistance) <= ResistanceExitRange_Points * _Point)
+      {
+         if(PositionProfit > 0)
+            ClosePosition(); // 決済
+      }
+   }
+
+   // 条件付き利確チェック（補助）
+   if(UseConditionalTP)
+   {
+      // 利益状態かチェック
+      // 最新の完成バーが陰線かチェック
+      // 条件を満たせば決済
+   }
 }
 ```
 
