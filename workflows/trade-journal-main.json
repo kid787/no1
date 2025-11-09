@@ -1,0 +1,384 @@
+{
+  "name": "Trade Journal Main Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "trade-entry",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trade-entry",
+      "name": "Webhook - Trade Entry",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "trade-journal-webhook"
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "timestamp",
+              "value": "={{ $json.body.timestamp || new Date().toISOString() }}"
+            },
+            {
+              "name": "symbol",
+              "value": "={{ $json.body.symbol }}"
+            },
+            {
+              "name": "direction",
+              "value": "={{ $json.body.direction }}"
+            },
+            {
+              "name": "entryPrice",
+              "value": "={{ $json.body.entryPrice }}"
+            },
+            {
+              "name": "exitPrice",
+              "value": "={{ $json.body.exitPrice }}"
+            },
+            {
+              "name": "lotSize",
+              "value": "={{ $json.body.lotSize }}"
+            },
+            {
+              "name": "profitAmount",
+              "value": "={{ $json.body.profitLoss.amount }}"
+            },
+            {
+              "name": "profitCurrency",
+              "value": "={{ $json.body.profitLoss.currency }}"
+            },
+            {
+              "name": "profitPips",
+              "value": "={{ $json.body.profitLoss.pips }}"
+            },
+            {
+              "name": "notes",
+              "value": "={{ $json.body.notes }}"
+            },
+            {
+              "name": "emotion",
+              "value": "={{ $json.body.emotion || '普通' }}"
+            },
+            {
+              "name": "chartImageUrl",
+              "value": "={{ $json.body.chartImageUrl || '' }}"
+            },
+            {
+              "name": "tags",
+              "value": "={{ $json.body.tags ? $json.body.tags.join(', ') : '' }}"
+            },
+            {
+              "name": "result",
+              "value": "={{ $json.body.profitLoss.amount >= 0 ? '勝ち' : '負け' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-trade-data",
+      "name": "Set - Format Trade Data",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "calendar": "primary",
+        "start": "={{ $json.timestamp }}",
+        "end": "={{ new Date(new Date($json.timestamp).getTime() + 60*60*1000).toISOString() }}",
+        "summary": "={{ $json.symbol }} - {{ $json.direction }} - {{ $json.result }}",
+        "description": "=**トレード詳細**\n\n通貨ペア: {{ $json.symbol }}\n方向: {{ $json.direction }}\nエントリー: {{ $json.entryPrice }}\nエグジット: {{ $json.exitPrice }}\nロット: {{ $json.lotSize }}\n\n**損益**\n金額: {{ $json.profitAmount }} {{ $json.profitCurrency }}\nPips: {{ $json.profitPips }}\n\n**メモ**\n{{ $json.notes }}\n\n**感情**: {{ $json.emotion }}\n**タグ**: {{ $json.tags }}",
+        "options": {
+          "colorName": "={{ $json.profitAmount >= 0 ? '2' : '11' }}"
+        }
+      },
+      "id": "google-calendar",
+      "name": "Google Calendar - Create Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [650, 200],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "1",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Trade Journal"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "日時": "={{ $json.timestamp }}",
+            "通貨ペア": "={{ $json.symbol }}",
+            "方向": "={{ $json.direction }}",
+            "エントリー": "={{ $json.entryPrice }}",
+            "エグジット": "={{ $json.exitPrice }}",
+            "ロット": "={{ $json.lotSize }}",
+            "損益額": "={{ $json.profitAmount }}",
+            "通貨": "={{ $json.profitCurrency }}",
+            "Pips": "={{ $json.profitPips }}",
+            "結果": "={{ $json.result }}",
+            "メモ": "={{ $json.notes }}",
+            "感情": "={{ $json.emotion }}",
+            "タグ": "={{ $json.tags }}",
+            "チャート": "={{ $json.chartImageUrl }}"
+          }
+        },
+        "options": {}
+      },
+      "id": "google-sheets",
+      "name": "Google Sheets - Append Row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [650, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "2",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "page",
+        "databaseId": {
+          "__rl": true,
+          "value": "YOUR_NOTION_DATABASE_ID",
+          "mode": "list",
+          "cachedResultName": "Trade Journal"
+        },
+        "title": "={{ $json.symbol }} - {{ $json.direction }} ({{ $json.timestamp.split('T')[0] }})",
+        "propertiesUi": {
+          "propertyValues": [
+            {
+              "key": "日時",
+              "dateValue": "={{ $json.timestamp }}"
+            },
+            {
+              "key": "通貨ペア",
+              "textValue": "={{ $json.symbol }}"
+            },
+            {
+              "key": "方向",
+              "selectValue": "={{ $json.direction }}"
+            },
+            {
+              "key": "エントリー",
+              "numberValue": "={{ $json.entryPrice }}"
+            },
+            {
+              "key": "エグジット",
+              "numberValue": "={{ $json.exitPrice }}"
+            },
+            {
+              "key": "損益",
+              "numberValue": "={{ $json.profitAmount }}"
+            },
+            {
+              "key": "結果",
+              "selectValue": "={{ $json.result }}"
+            },
+            {
+              "key": "タグ",
+              "multiSelectValue": "={{ $json.tags.split(', ') }}"
+            }
+          ]
+        },
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "paragraph",
+              "richText": "={{ $json.notes }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "notion-create-page",
+      "name": "Notion - Create Page",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2,
+      "position": [650, 600],
+      "credentials": {
+        "notionApi": {
+          "id": "3",
+          "name": "Notion account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAllRows",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SHEET_ID",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "id": "get-all-trades",
+      "name": "Get All Trades",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [850, 400],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "2",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// トレード統計を計算\nconst trades = $input.all();\n\nlet totalTrades = trades.length - 1; // ヘッダー行を除く\nlet wins = 0;\nlet losses = 0;\nlet totalProfit = 0;\nlet totalLoss = 0;\nlet winningProfits = [];\nlet losingLosses = [];\n\nfor (let i = 1; i < trades.length; i++) {\n  const trade = trades[i].json;\n  const profit = parseFloat(trade['損益額']) || 0;\n  \n  totalProfit += profit;\n  \n  if (profit >= 0) {\n    wins++;\n    winningProfits.push(profit);\n  } else {\n    losses++;\n    losingLosses.push(Math.abs(profit));\n  }\n}\n\n// 統計計算\nconst winRate = totalTrades > 0 ? (wins / totalTrades * 100).toFixed(2) : 0;\nconst avgWin = winningProfits.length > 0 ? (winningProfits.reduce((a, b) => a + b, 0) / winningProfits.length).toFixed(2) : 0;\nconst avgLoss = losingLosses.length > 0 ? (losingLosses.reduce((a, b) => a + b, 0) / losingLosses.length).toFixed(2) : 0;\nconst profitFactor = totalLoss !== 0 ? (winningProfits.reduce((a, b) => a + b, 0) / losingLosses.reduce((a, b) => a + b, 0)).toFixed(2) : 0;\nconst riskRewardRatio = avgLoss !== 0 ? (avgWin / avgLoss).toFixed(2) : 0;\n\n// 最大連勝・連敗\nlet maxWinStreak = 0;\nlet maxLossStreak = 0;\nlet currentWinStreak = 0;\nlet currentLossStreak = 0;\n\nfor (let i = 1; i < trades.length; i++) {\n  const profit = parseFloat(trades[i].json['損益額']) || 0;\n  \n  if (profit >= 0) {\n    currentWinStreak++;\n    currentLossStreak = 0;\n    maxWinStreak = Math.max(maxWinStreak, currentWinStreak);\n  } else {\n    currentLossStreak++;\n    currentWinStreak = 0;\n    maxLossStreak = Math.max(maxLossStreak, currentLossStreak);\n  }\n}\n\n// 今日のトレード統計\nconst today = new Date().toISOString().split('T')[0];\nconst todayTrades = trades.filter(t => {\n  const tradeDate = t.json['日時'] ? t.json['日時'].split('T')[0] : '';\n  return tradeDate === today;\n});\n\nconst todayProfit = todayTrades.reduce((sum, t) => {\n  return sum + (parseFloat(t.json['損益額']) || 0);\n}, 0);\n\nreturn [{\n  json: {\n    totalTrades: totalTrades,\n    wins: wins,\n    losses: losses,\n    winRate: winRate,\n    totalProfit: totalProfit.toFixed(2),\n    avgWin: avgWin,\n    avgLoss: avgLoss,\n    profitFactor: profitFactor,\n    riskRewardRatio: riskRewardRatio,\n    maxWinStreak: maxWinStreak,\n    maxLossStreak: maxLossStreak,\n    todayTrades: todayTrades.length,\n    todayProfit: todayProfit.toFixed(2),\n    reportDate: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "calculate-statistics",
+      "name": "Calculate Statistics",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 400]
+    },
+    {
+      "parameters": {
+        "fromEmail": "your-email@gmail.com",
+        "toEmail": "your-email@gmail.com",
+        "subject": "=トレードジャーナル - 統計レポート ({{ $json.reportDate.split('T')[0] }})",
+        "emailType": "html",
+        "message": "=<h2>📊 トレード統計レポート</h2>\n\n<h3>全体統計</h3>\n<ul>\n  <li><strong>総トレード数:</strong> {{ $json.totalTrades }}</li>\n  <li><strong>勝ちトレード:</strong> {{ $json.wins }}</li>\n  <li><strong>負けトレード:</strong> {{ $json.losses }}</li>\n  <li><strong>勝率:</strong> {{ $json.winRate }}%</li>\n  <li><strong>総損益:</strong> {{ $json.totalProfit }}</li>\n</ul>\n\n<h3>パフォーマンス指標</h3>\n<ul>\n  <li><strong>平均勝ちトレード:</strong> {{ $json.avgWin }}</li>\n  <li><strong>平均負けトレード:</strong> {{ $json.avgLoss }}</li>\n  <li><strong>プロフィットファクター:</strong> {{ $json.profitFactor }}</li>\n  <li><strong>リスクリワードレシオ:</strong> {{ $json.riskRewardRatio }}</li>\n  <li><strong>最大連勝:</strong> {{ $json.maxWinStreak }}</li>\n  <li><strong>最大連敗:</strong> {{ $json.maxLossStreak }}</li>\n</ul>\n\n<h3>本日の成績</h3>\n<ul>\n  <li><strong>本日のトレード数:</strong> {{ $json.todayTrades }}</li>\n  <li><strong>本日の損益:</strong> {{ $json.todayProfit }}</li>\n</ul>\n\n<hr>\n<p><small>このレポートは自動生成されました - {{ $json.reportDate }}</small></p>",
+        "options": {}
+      },
+      "id": "send-email-report",
+      "name": "Send Email Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1250, 400],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "4",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"success\": true, \"message\": \"トレードが正常に記録されました\", \"data\": { \"symbol\": $('Set - Format Trade Data').item.json.symbol, \"result\": $('Set - Format Trade Data').item.json.result, \"profit\": $('Set - Format Trade Data').item.json.profitAmount } } }}",
+        "options": {}
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1250, 200]
+    }
+  ],
+  "connections": {
+    "Webhook - Trade Entry": {
+      "main": [
+        [
+          {
+            "node": "Set - Format Trade Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set - Format Trade Data": {
+      "main": [
+        [
+          {
+            "node": "Google Calendar - Create Event",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Sheets - Append Row",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Notion - Create Page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Calendar - Create Event": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - Append Row": {
+      "main": [
+        [
+          {
+            "node": "Get All Trades",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All Trades": {
+      "main": [
+        [
+          {
+            "node": "Calculate Statistics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Statistics": {
+      "main": [
+        [
+          {
+            "node": "Send Email Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-11-09T00:00:00.000Z",
+  "versionId": "1"
+}

@@ -1,0 +1,123 @@
+{
+  "name": "Daily Trade Report",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 20 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule - Every Day 20:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "operation": "getAllRows",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SHEET_ID",
+          "mode": "list"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list"
+        },
+        "options": {}
+      },
+      "id": "get-all-trades-daily",
+      "name": "Get All Trades",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [450, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "2",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 本日と今週、今月の統計を計算\nconst trades = $input.all();\nconst now = new Date();\nconst today = now.toISOString().split('T')[0];\n\n// 週の開始日（月曜日）を計算\nconst weekStart = new Date(now);\nweekStart.setDate(now.getDate() - now.getDay() + (now.getDay() === 0 ? -6 : 1));\nconst weekStartStr = weekStart.toISOString().split('T')[0];\n\n// 月の開始日\nconst monthStart = new Date(now.getFullYear(), now.getMonth(), 1);\nconst monthStartStr = monthStart.toISOString().split('T')[0];\n\nfunction analyzeTradesInPeriod(trades, startDate) {\n  const filtered = trades.filter(t => {\n    const tradeDate = t.json['日時'] ? t.json['日時'].split('T')[0] : '';\n    return tradeDate >= startDate;\n  });\n  \n  let wins = 0;\n  let losses = 0;\n  let totalProfit = 0;\n  let bestTrade = { profit: -Infinity, symbol: '' };\n  let worstTrade = { profit: Infinity, symbol: '' };\n  \n  filtered.forEach(trade => {\n    const profit = parseFloat(trade.json['損益額']) || 0;\n    const symbol = trade.json['通貨ペア'] || '';\n    \n    totalProfit += profit;\n    \n    if (profit >= 0) {\n      wins++;\n    } else {\n      losses++;\n    }\n    \n    if (profit > bestTrade.profit) {\n      bestTrade = { profit, symbol, date: trade.json['日時'] };\n    }\n    \n    if (profit < worstTrade.profit) {\n      worstTrade = { profit, symbol, date: trade.json['日時'] };\n    }\n  });\n  \n  const total = wins + losses;\n  const winRate = total > 0 ? (wins / total * 100).toFixed(2) : 0;\n  \n  return {\n    total,\n    wins,\n    losses,\n    winRate,\n    totalProfit: totalProfit.toFixed(2),\n    bestTrade,\n    worstTrade\n  };\n}\n\nconst todayStats = analyzeTradesInPeriod(trades, today);\nconst weekStats = analyzeTradesInPeriod(trades, weekStartStr);\nconst monthStats = analyzeTradesInPeriod(trades, monthStartStr);\n\n// 通貨ペア別の統計\nconst symbolStats = {};\ntrades.slice(1).forEach(trade => {\n  const symbol = trade.json['通貨ペア'];\n  const profit = parseFloat(trade.json['損益額']) || 0;\n  \n  if (!symbolStats[symbol]) {\n    symbolStats[symbol] = { count: 0, profit: 0, wins: 0 };\n  }\n  \n  symbolStats[symbol].count++;\n  symbolStats[symbol].profit += profit;\n  if (profit >= 0) symbolStats[symbol].wins++;\n});\n\n// 通貨ペアを収益順にソート\nconst topSymbols = Object.entries(symbolStats)\n  .sort((a, b) => b[1].profit - a[1].profit)\n  .slice(0, 5)\n  .map(([symbol, stats]) => ({\n    symbol,\n    count: stats.count,\n    profit: stats.profit.toFixed(2),\n    winRate: ((stats.wins / stats.count) * 100).toFixed(2)\n  }));\n\nreturn [{\n  json: {\n    today: todayStats,\n    week: weekStats,\n    month: monthStats,\n    topSymbols: topSymbols,\n    reportDate: now.toISOString(),\n    reportDateJP: now.toLocaleDateString('ja-JP', { \n      year: 'numeric', \n      month: 'long', \n      day: 'numeric',\n      weekday: 'long'\n    })\n  }\n}];"
+      },
+      "id": "calculate-daily-stats",
+      "name": "Calculate Daily Stats",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "your-email@gmail.com",
+        "toEmail": "your-email@gmail.com",
+        "subject": "=📈 本日のトレードレポート - {{ $json.reportDateJP }}",
+        "emailType": "html",
+        "message": "=<div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">\n  <h1 style=\"color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px;\">📊 トレードレポート</h1>\n  \n  <p style=\"color: #7f8c8d;\">{{ $json.reportDateJP }}</p>\n  \n  <h2 style=\"color: #34495e; margin-top: 30px;\">📅 本日の成績</h2>\n  <div style=\"background: #ecf0f1; padding: 15px; border-radius: 5px;\">\n    <table style=\"width: 100%;\">\n      <tr>\n        <td><strong>トレード数:</strong></td>\n        <td style=\"text-align: right;\">{{ $json.today.total }}</td>\n      </tr>\n      <tr>\n        <td><strong>勝ち/負け:</strong></td>\n        <td style=\"text-align: right;\">{{ $json.today.wins }} / {{ $json.today.losses }}</td>\n      </tr>\n      <tr>\n        <td><strong>勝率:</strong></td>\n        <td style=\"text-align: right;\">{{ $json.today.winRate }}%</td>\n      </tr>\n      <tr style=\"font-size: 18px; {{ $json.today.totalProfit >= 0 ? 'color: #27ae60;' : 'color: #e74c3c;' }}\">\n        <td><strong>本日の損益:</strong></td>\n        <td style=\"text-align: right;\"><strong>{{ $json.today.totalProfit }}</strong></td>\n      </tr>\n    </table>\n  </div>\n  \n  <h2 style=\"color: #34495e; margin-top: 30px;\">📆 今週の成績</h2>\n  <div style=\"background: #e8f5e9; padding: 15px; border-radius: 5px;\">\n    <table style=\"width: 100%;\">\n      <tr>\n        <td><strong>トレード数:</strong></td>\n        <td style=\"text-align: right;\">{{ $json.week.total }}</td>\n      </tr>\n      <tr>\n        <td><strong>勝率:</strong></td>\n        <td style=\"text-align: right;\">{{ $json.week.winRate }}%</td>\n      </tr>\n      <tr style=\"{{ $json.week.totalProfit >= 0 ? 'color: #27ae60;' : 'color: #e74c3c;' }}\">\n        <td><strong>週間損益:</strong></td>\n        <td style=\"text-align: right;\"><strong>{{ $json.week.totalProfit }}</strong></td>\n      </tr>\n    </table>\n  </div>\n  \n  <h2 style=\"color: #34495e; margin-top: 30px;\">📊 今月の成績</h2>\n  <div style=\"background: #fff3e0; padding: 15px; border-radius: 5px;\">\n    <table style=\"width: 100%;\">\n      <tr>\n        <td><strong>トレード数:</strong></td>\n        <td style=\"text-align: right;\">{{ $json.month.total }}</td>\n      </tr>\n      <tr>\n        <td><strong>勝率:</strong></td>\n        <td style=\"text-align: right;\">{{ $json.month.winRate }}%</td>\n      </tr>\n      <tr style=\"{{ $json.month.totalProfit >= 0 ? 'color: #27ae60;' : 'color: #e74c3c;' }}\">\n        <td><strong>月間損益:</strong></td>\n        <td style=\"text-align: right;\"><strong>{{ $json.month.totalProfit }}</strong></td>\n      </tr>\n    </table>\n  </div>\n  \n  <h2 style=\"color: #34495e; margin-top: 30px;\">🏆 通貨ペア別トップ5</h2>\n  <div style=\"background: #f8f9fa; padding: 15px; border-radius: 5px;\">\n    <table style=\"width: 100%; border-collapse: collapse;\">\n      <thead>\n        <tr style=\"background: #34495e; color: white;\">\n          <th style=\"padding: 8px; text-align: left;\">通貨ペア</th>\n          <th style=\"padding: 8px; text-align: right;\">回数</th>\n          <th style=\"padding: 8px; text-align: right;\">勝率</th>\n          <th style=\"padding: 8px; text-align: right;\">損益</th>\n        </tr>\n      </thead>\n      <tbody>\n        {{ $json.topSymbols.map(s => `\n          <tr style=\"border-bottom: 1px solid #ddd;\">\n            <td style=\"padding: 8px;\">${s.symbol}</td>\n            <td style=\"padding: 8px; text-align: right;\">${s.count}</td>\n            <td style=\"padding: 8px; text-align: right;\">${s.winRate}%</td>\n            <td style=\"padding: 8px; text-align: right; ${s.profit >= 0 ? 'color: #27ae60;' : 'color: #e74c3c;'}\">${s.profit}</td>\n          </tr>\n        `).join('') }}\n      </tbody>\n    </table>\n  </div>\n  \n  <div style=\"margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #95a5a6; font-size: 12px; text-align: center;\">\n    <p>このレポートは自動生成されました</p>\n    <p>トレードジャーナル自動化システム by n8n</p>\n  </div>\n</div>",
+        "options": {}
+      },
+      "id": "send-daily-report",
+      "name": "Send Daily Report",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [850, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "4",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule - Every Day 20:00": {
+      "main": [
+        [
+          {
+            "node": "Get All Trades",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All Trades": {
+      "main": [
+        [
+          {
+            "node": "Calculate Daily Stats",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Daily Stats": {
+      "main": [
+        [
+          {
+            "node": "Send Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [],
+  "triggerCount": 1,
+  "updatedAt": "2025-11-09T00:00:00.000Z",
+  "versionId": "1"
+}

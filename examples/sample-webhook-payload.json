@@ -1,0 +1,19 @@
+{
+  "timestamp": "2025-11-09T15:30:00+09:00",
+  "symbol": "USD/JPY",
+  "direction": "買い",
+  "entryPrice": 149.50,
+  "exitPrice": 149.85,
+  "lotSize": 1.0,
+  "stopLoss": 149.20,
+  "takeProfit": 150.00,
+  "profitLoss": {
+    "amount": 3500,
+    "currency": "JPY",
+    "pips": 35
+  },
+  "notes": "上昇トレンド継続中。レジスタンスブレイクでエントリー。利確目標手前で反転の兆しがあったため早めに決済。",
+  "emotion": "冷静",
+  "chartImageUrl": "https://example.com/charts/usdjpy-20251109.png",
+  "tags": ["デイトレード", "トレンドフォロー", "成功"]
+}

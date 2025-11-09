@@ -1,0 +1,19 @@
+{
+  "timestamp": "2025-11-09T10:15:00+09:00",
+  "symbol": "BTC/USD",
+  "direction": "売り",
+  "entryPrice": 43500,
+  "exitPrice": 43700,
+  "lotSize": 0.1,
+  "stopLoss": 43800,
+  "takeProfit": 42800,
+  "profitLoss": {
+    "amount": -20,
+    "currency": "USD",
+    "pips": -200
+  },
+  "notes": "レンジ相場と判断して売りエントリーしたが、突然のニュースで急騰。ストップロスが発動。リスク管理は機能したが、エントリータイミングが悪かった。",
+  "emotion": "少し焦り",
+  "chartImageUrl": "",
+  "tags": ["スキャルピング", "損失", "反省"]
+}
