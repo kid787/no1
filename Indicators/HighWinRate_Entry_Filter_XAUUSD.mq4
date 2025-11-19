@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "High Win Rate Trading System - XAUUSD Edition"
 #property link      ""
-#property version   "1.13"
+#property version   "1.14"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 0
@@ -232,7 +232,7 @@ void DrawHLine(string name, double price, color lineColor, int width, int style,
 
     if(Show_Price_Labels)
     {
-        ObjectSetText(name, label + " " + DoubleToString(price, 2));
+        ObjectSetText(name, label + " " + DoubleToString(price, 2), 8, "MS Gothic", lineColor);
     }
 }
 
@@ -403,7 +403,7 @@ void DrawUniqueLines(double &levels[], string prefix, color lineColor)
 
         if(Show_Price_Labels)
         {
-            ObjectSetText(lineName, prefix + " $" + DoubleToString(uniqueLevels[i], 2));
+            ObjectSetText(lineName, prefix + " $" + DoubleToString(uniqueLevels[i], 2), 8, "MS Gothic", clrYellow);
         }
     }
 }
@@ -541,8 +541,6 @@ void DisplayInfo(bool isOrder, bool isLondon, bool isNY, bool isOverlap, TrendDi
         ObjectSet(labelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
         ObjectSet(labelName, OBJPROP_XDISTANCE, 10);
         ObjectSet(labelName, OBJPROP_YDISTANCE, 30);
-        ObjectSet(labelName, OBJPROP_COLOR, clrGold);
-        ObjectSet(labelName, OBJPROP_FONTSIZE, 9);
     }
 
     string trendKingStr = TrendToString(kingTrend);
@@ -575,7 +573,7 @@ void DisplayInfo(bool isOrder, bool isLondon, bool isNY, bool isOverlap, TrendDi
     else
         info += "★ 待機";
 
-    ObjectSetText(labelName, info);
+    ObjectSetText(labelName, info, 9, "MS Gothic", clrGold);
 }
 
 //+------------------------------------------------------------------+
