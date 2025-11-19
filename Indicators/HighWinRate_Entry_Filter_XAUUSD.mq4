@@ -5,12 +5,12 @@
 //+------------------------------------------------------------------+
 #property copyright "High Win Rate Trading System - XAUUSD Edition"
 #property link      ""
-#property version   "1.12"
+#property version   "1.13"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 0
 #property description "XAUUSDゴールド専用高勝率エントリーフィルター"
-#property description "金特有のボラティリティとトレンド特性に最適化 - MQL4完全互換"
+#property description "金特有のボラティリティとトレンド特性に最適化 - 軽量版"
 
 //--- Input Parameters - XAUUSD Optimized Defaults
 input ENUM_TIMEFRAMES King_TimeFrame = PERIOD_H4;           // 最上位足（4時間足推奨） - 金のトレンド把握
@@ -21,15 +21,14 @@ input int             London_End_Hour = 16;                 // ロンドン時�
 input bool            Enable_NY_Session = true;             // ニューヨーク時間も有効化
 input int             NY_Start_Hour = 13;                   // ニューヨーク時間開始（GMT）
 input int             NY_End_Hour = 21;                     // ニューヨーク時間終了（GMT）
-input int             SR_Lookback_Bars = 100;               // S/Rライン検出用の遡り期間（金は長期）
+input int             SR_Lookback_Bars = 50;                // S/Rライン検出用の遡り期間（軽量化: 100→50）
 input double          SR_Threshold = 0.0008;                // S/Rレベル判定の閾値（金の価格変動に合わせて大きめ）
+input bool            Enable_Cluster_Detection = false;      // クラスター検出（重い処理のため無効化可能）
 input int             Cluster_Min_Bars = 15;                // クラスター判定の最小ローソク足数（金は揉み合いが長い）
 input double          Cluster_Range_Dollars = 15.0;         // クラスター判定の価格幅（ドル単位）
 input double          Entry_Zone_Dollars = 5.0;             // エントリージャッジゾーンの幅（ドル単位）
 input bool            Enable_Sound_Alert = true;            // サウンドアラートを有効化
 input bool            Enable_Popup_Alert = true;            // ポップアップアラートを有効化
-input color           London_BG_Color = C'25,25,50';        // ロンドン時間帯の背景色
-input color           NY_BG_Color = C'50,25,0';             // ニューヨーク時間帯の背景色
 input color           Overlap_BG_Color = C'0,50,0';         // 重複時間帯の背景色（最重要）
 input color           Order_BG_Color = C'0,40,40';          // 秩序あり時の背景色
 input color           SR_Line_Color = clrGold;              // S/Rラインの色（金だから金色）
@@ -40,6 +39,7 @@ input bool            Show_Price_Labels = true;             // 価格ラベル�
 
 //--- Global Variables
 datetime lastAlertTime = 0;
+datetime lastBarTime = 0;  // 新しいバーの検出用
 string indicatorPrefix = "HWEF_GOLD_";
 double dailyHigh = 0;
 double dailyLow = 0;
@@ -58,10 +58,13 @@ enum TrendDirection {
 int OnInit()
 {
     //--- Indicator short name
-    IndicatorShortName("HighWinRate Entry Filter - XAUUSD");
+    IndicatorShortName("HighWinRate Entry Filter - XAUUSD (軽量版)");
 
     //--- Initialize
     CleanupObjects();
+
+    //--- 初回描画
+    lastBarTime = 0;
 
     //--- Symbol check
     if(StringFind(Symbol(), "XAU") < 0 && StringFind(Symbol(), "GOLD") < 0)
@@ -94,6 +97,19 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
+    // 新しいバーが出たときだけ計算（軽量化の鍵）
+    datetime currentBarTime = iTime(Symbol(), Period(), 0);
+    bool isNewBar = (currentBarTime != lastBarTime);
+
+    if(!isNewBar)
+    {
+        // 新しいバーでない場合は、情報パネルのみ更新（軽い処理）
+        UpdateInfoPanel();
+        return(rates_total);
+    }
+
+    lastBarTime = currentBarTime;
+
     //--- 日次データの更新
     UpdateDailyData();
 
@@ -108,25 +124,25 @@ int OnCalculate(const int rates_total,
     bool isNYSession = IsNYSession();
     bool isOverlapSession = (isLondonSession && isNYSession); // 最重要時間帯
 
-    // 3. 背景色の設定
-    DrawBackground(isOrderPresent, isLondonSession, isNYSession, isOverlapSession);
-
-    // 4. S/Rラインの描画（金の主要レベル）
-    DrawSupportResistanceLines(King_TimeFrame, SR_Lookback_Bars);
-
-    // 5. デイリーピボットポイントの描画
+    // 3. デイリーピボットポイントの描画
     if(Show_Daily_Pivot)
     {
         DrawDailyPivots();
     }
 
-    // 6. クラスターボックスの検出と描画
-    DetectAndDrawClusters(Base_TimeFrame);
+    // 4. S/Rラインの描画（軽量化版）
+    DrawSupportResistanceLines(King_TimeFrame, SR_Lookback_Bars);
 
-    // 7. エントリーシグナルの検出
+    // 5. クラスターボックスの検出と描画（オプション）
+    if(Enable_Cluster_Detection)
+    {
+        DetectAndDrawClustersLight(Base_TimeFrame);
+    }
+
+    // 6. エントリーシグナルの検出
     bool entrySignal = CheckEntryConditions(isOrderPresent, isLondonSession, isNYSession, kingTrend);
 
-    // 8. アラート
+    // 7. アラート
     if(entrySignal && ShouldAlert())
     {
         string trendStr = (kingTrend == TREND_UP) ? "上昇トレンド（ロング）" : "下降トレンド（ショート）";
@@ -141,10 +157,25 @@ int OnCalculate(const int rates_total,
         lastAlertTime = TimeCurrent();
     }
 
-    // 9. チャート上に情報表示
+    // 8. チャート上に情報表示
     DisplayInfo(isOrderPresent, isLondonSession, isNYSession, isOverlapSession, kingTrend, baseTrend);
 
     return(rates_total);
+}
+
+//+------------------------------------------------------------------+
+//| 情報パネルのみ更新（軽量）                                        |
+//+------------------------------------------------------------------+
+void UpdateInfoPanel()
+{
+    TrendDirection kingTrend = GetTrendDirection(King_TimeFrame, SMA_Period);
+    TrendDirection baseTrend = GetTrendDirection(Base_TimeFrame, SMA_Period);
+    bool isOrderPresent = (kingTrend == baseTrend && kingTrend != TREND_NEUTRAL);
+    bool isLondonSession = IsLondonSession();
+    bool isNYSession = IsNYSession();
+    bool isOverlapSession = (isLondonSession && isNYSession);
+
+    DisplayInfo(isOrderPresent, isLondonSession, isNYSession, isOverlapSession, kingTrend, baseTrend);
 }
 
 //+------------------------------------------------------------------+
@@ -189,13 +220,15 @@ void DrawHLine(string name, double price, color lineColor, int width, int style,
     if(ObjectFind(name) < 0)
     {
         ObjectCreate(name, OBJ_HLINE, 0, 0, price);
+        ObjectSet(name, OBJPROP_COLOR, lineColor);
+        ObjectSet(name, OBJPROP_WIDTH, width);
+        ObjectSet(name, OBJPROP_STYLE, style);
+        ObjectSet(name, OBJPROP_BACK, true);
     }
-
-    ObjectSet(name, OBJPROP_PRICE1, price);
-    ObjectSet(name, OBJPROP_COLOR, lineColor);
-    ObjectSet(name, OBJPROP_WIDTH, width);
-    ObjectSet(name, OBJPROP_STYLE, style);
-    ObjectSet(name, OBJPROP_BACK, true);
+    else
+    {
+        ObjectSet(name, OBJPROP_PRICE1, price);
+    }
 
     if(Show_Price_Labels)
     {
@@ -241,7 +274,6 @@ bool IsLondonSession()
     }
     else
     {
-        // 日付をまたぐ場合
         return (currentHour >= London_Start_Hour || currentHour < London_End_Hour);
     }
 }
@@ -266,65 +298,7 @@ bool IsNYSession()
 }
 
 //+------------------------------------------------------------------+
-//| 背景色の描画                                                      |
-//+------------------------------------------------------------------+
-void DrawBackground(bool isOrder, bool isLondon, bool isNY, bool isOverlap)
-{
-    string bgName = indicatorPrefix + "Background";
-
-    // 背景色の決定（優先順位: 重複 > 秩序 > セッション）
-    color bgColor = clrNONE;
-
-    if(isOverlap && isOrder)
-    {
-        // 重複時間 + 秩序あり = 最高の条件
-        bgColor = Overlap_BG_Color;
-    }
-    else if(isOverlap)
-    {
-        // 重複時間のみ
-        bgColor = Overlap_BG_Color;
-    }
-    else if(isOrder && (isLondon || isNY))
-    {
-        // 秩序あり + セッション中
-        bgColor = Order_BG_Color;
-    }
-    else if(isLondon)
-    {
-        bgColor = London_BG_Color;
-    }
-    else if(isNY)
-    {
-        bgColor = NY_BG_Color;
-    }
-
-    // 背景矩形の描画
-    if(bgColor != clrNONE)
-    {
-        datetime startTime = iTime(Symbol(), Period(), 0);
-        datetime endTime = startTime + Period() * 60;
-        double highPrice = iHigh(Symbol(), Period(), 0) + 50;
-        double lowPrice = iLow(Symbol(), Period(), 0) - 50;
-
-        if(ObjectFind(bgName) < 0)
-        {
-            ObjectCreate(bgName, OBJ_RECTANGLE, 0, startTime, highPrice, endTime, lowPrice);
-            ObjectSet(bgName, OBJPROP_FILL, true);
-            ObjectSet(bgName, OBJPROP_BACK, true);
-            ObjectSet(bgName, OBJPROP_SELECTABLE, false);
-        }
-
-        ObjectSet(bgName, OBJPROP_TIME1, startTime);
-        ObjectSet(bgName, OBJPROP_PRICE1, highPrice);
-        ObjectSet(bgName, OBJPROP_TIME2, endTime);
-        ObjectSet(bgName, OBJPROP_PRICE2, lowPrice);
-        ObjectSet(bgName, OBJPROP_COLOR, bgColor);
-    }
-}
-
-//+------------------------------------------------------------------+
-//| サポート/レジスタンスラインの描画                                 |
+//| サポート/レジスタンスラインの描画（軽量化版）                     |
 //+------------------------------------------------------------------+
 void DrawSupportResistanceLines(ENUM_TIMEFRAMES timeframe, int lookback)
 {
@@ -334,8 +308,8 @@ void DrawSupportResistanceLines(ENUM_TIMEFRAMES timeframe, int lookback)
     ArrayResize(highLevels, 0);
     ArrayResize(lowLevels, 0);
 
-    // 主要な高値・安値を検出
-    for(int i = 2; i < lookback; i++)
+    // 主要な高値・安値を検出（軽量化: ステップを2に）
+    for(int i = 3; i < lookback; i+=2)  // ステップを2にして処理を半分に
     {
         double high_current = iHigh(Symbol(), timeframe, i);
         double high_prev = iHigh(Symbol(), timeframe, i+1);
@@ -349,7 +323,7 @@ void DrawSupportResistanceLines(ENUM_TIMEFRAMES timeframe, int lookback)
         double low_prev2 = iLow(Symbol(), timeframe, i+2);
         double low_next2 = iLow(Symbol(), timeframe, i-2);
 
-        // スイングハイの検出（より厳密な条件）
+        // スイングハイの検出
         if(high_current > high_prev && high_current > high_next &&
            high_current > high_prev2 && high_current > high_next2)
         {
@@ -358,7 +332,7 @@ void DrawSupportResistanceLines(ENUM_TIMEFRAMES timeframe, int lookback)
             highLevels[size] = high_current;
         }
 
-        // スイングローの検出（より厳密な条件）
+        // スイングローの検出
         if(low_current < low_prev && low_current < low_next &&
            low_current < low_prev2 && low_current < low_next2)
         {
@@ -381,10 +355,8 @@ void DrawUniqueLines(double &levels[], string prefix, color lineColor)
     int levelCount = ArraySize(levels);
     if(levelCount == 0) return;
 
-    // ソート
     ArraySort(levels);
 
-    // 類似レベルを統合
     double uniqueLevels[];
     ArrayResize(uniqueLevels, 0);
 
@@ -409,8 +381,8 @@ void DrawUniqueLines(double &levels[], string prefix, color lineColor)
         }
     }
 
-    // ラインを描画（最大7本まで - 金は重要レベルが多い）
-    int maxLines = MathMin(ArraySize(uniqueLevels), 7);
+    // ラインを描画（最大5本まで - 軽量化）
+    int maxLines = MathMin(ArraySize(uniqueLevels), 5);
 
     for(int i = 0; i < maxLines; i++)
     {
@@ -429,7 +401,6 @@ void DrawUniqueLines(double &levels[], string prefix, color lineColor)
             ObjectSet(lineName, OBJPROP_PRICE1, uniqueLevels[i]);
         }
 
-        // 価格ラベル
         if(Show_Price_Labels)
         {
             ObjectSetText(lineName, prefix + " $" + DoubleToString(uniqueLevels[i], 2));
@@ -438,32 +409,34 @@ void DrawUniqueLines(double &levels[], string prefix, color lineColor)
 }
 
 //+------------------------------------------------------------------+
-//| クラスターの検出と描画                                            |
+//| クラスターの検出と描画（軽量化版）                                |
 //+------------------------------------------------------------------+
-void DetectAndDrawClusters(ENUM_TIMEFRAMES timeframe)
+void DetectAndDrawClustersLight(ENUM_TIMEFRAMES timeframe)
 {
-    int barsToCheck = 150; // 金は長期的なクラスターを見る
+    int barsToCheck = 50; // 軽量化: 150→50
     double clusterRangePrice = Cluster_Range_Dollars;
 
-    for(int i = Cluster_Min_Bars; i < barsToCheck; i++)
+    for(int i = Cluster_Min_Bars; i < barsToCheck; i+=3)  // ステップ3で軽量化
     {
         double maxPrice = iHigh(Symbol(), timeframe, i);
         double minPrice = iLow(Symbol(), timeframe, i);
 
-        // 範囲内の価格変動を確認
         int barsInCluster = 0;
         datetime startTime = iTime(Symbol(), timeframe, i);
         datetime endTime = startTime;
 
-        for(int j = i; j >= 0; j--)
+        // 最大30本までチェック（軽量化）
+        int maxCheck = MathMin(i, 30);
+        for(int j = 0; j < maxCheck; j++)
         {
-            double high = iHigh(Symbol(), timeframe, j);
-            double low = iLow(Symbol(), timeframe, j);
+            int barIndex = i - j;
+            double high = iHigh(Symbol(), timeframe, barIndex);
+            double low = iLow(Symbol(), timeframe, barIndex);
 
             if(high <= maxPrice + clusterRangePrice && low >= minPrice - clusterRangePrice)
             {
                 barsInCluster++;
-                endTime = iTime(Symbol(), timeframe, j);
+                endTime = iTime(Symbol(), timeframe, barIndex);
 
                 if(high > maxPrice) maxPrice = high;
                 if(low < minPrice) minPrice = low;
@@ -474,7 +447,6 @@ void DetectAndDrawClusters(ENUM_TIMEFRAMES timeframe)
             }
         }
 
-        // クラスターボックスの描画
         if(barsInCluster >= Cluster_Min_Bars)
         {
             string boxName = indicatorPrefix + "Cluster_" + TimeToString(startTime);
@@ -486,17 +458,9 @@ void DetectAndDrawClusters(ENUM_TIMEFRAMES timeframe)
                 ObjectSet(boxName, OBJPROP_WIDTH, 2);
                 ObjectSet(boxName, OBJPROP_FILL, false);
                 ObjectSet(boxName, OBJPROP_BACK, true);
-
-                // ラベル追加
-                string labelName = boxName + "_Label";
-                double midPrice = (maxPrice + minPrice) / 2;
-                ObjectCreate(labelName, OBJ_TEXT, 0, startTime, midPrice);
-                ObjectSetText(labelName, "クラスター $" + DoubleToString(minPrice, 2) + "-" + DoubleToString(maxPrice, 2));
-                ObjectSet(labelName, OBJPROP_COLOR, Cluster_Box_Color);
-                ObjectSet(labelName, OBJPROP_FONTSIZE, 8);
             }
 
-            i -= barsInCluster; // 検出済みのクラスターをスキップ
+            i += barsInCluster;
         }
     }
 }
@@ -506,56 +470,37 @@ void DetectAndDrawClusters(ENUM_TIMEFRAMES timeframe)
 //+------------------------------------------------------------------+
 bool CheckEntryConditions(bool isOrder, bool isLondon, bool isNY, TrendDirection trend)
 {
-    // 基本条件: 秩序あり + セッション中 + トレンド方向が明確
     if(!isOrder || trend == TREND_NEUTRAL)
         return false;
 
     if(!isLondon && !isNY)
         return false;
 
-    // 価格がSMAに近い位置にあるか確認（守の状況）
     double sma_base = iMA(Symbol(), Base_TimeFrame, SMA_Period, 0, MODE_SMA, PRICE_CLOSE, 0);
     double close_current = iClose(Symbol(), Period(), 0);
     double distance = MathAbs(close_current - sma_base);
 
-    // SMAから Entry_Zone_Dollars ドル以内に価格がある場合（ジャッジゾーン）
     if(distance < Entry_Zone_Dollars)
     {
-        // 短期足での反転シグナルを確認
         double close_prev = iClose(Symbol(), Period(), 1);
         double open_prev = iOpen(Symbol(), Period(), 1);
 
         if(trend == TREND_UP)
         {
-            // 上昇トレンドでの押し目買い
-            // 価格がSMAの下から上に戻ってきた
             if(close_current > sma_base && close_prev < sma_base)
-            {
                 return true;
-            }
-            // または強い陽線の出現
-            if(close_prev > open_prev && (close_prev - open_prev) > 2.0) // 2ドル以上の陽線
-            {
+            if(close_prev > open_prev && (close_prev - open_prev) > 2.0)
                 return true;
-            }
         }
         else if(trend == TREND_DOWN)
         {
-            // 下降トレンドでの戻り売り
-            // 価格がSMAの上から下に戻ってきた
             if(close_current < sma_base && close_prev > sma_base)
-            {
                 return true;
-            }
-            // または強い陰線の出現
-            if(close_prev < open_prev && (open_prev - close_prev) > 2.0) // 2ドル以上の陰線
-            {
+            if(close_prev < open_prev && (open_prev - close_prev) > 2.0)
                 return true;
-            }
         }
     }
 
-    // ピボットレベル付近でのリバウンド
     if(Show_Daily_Pivot)
     {
         double prevHigh = iHigh(Symbol(), PERIOD_D1, 1);
@@ -563,7 +508,6 @@ bool CheckEntryConditions(bool isOrder, bool isLondon, bool isNY, TrendDirection
         double prevClose = iClose(Symbol(), PERIOD_D1, 1);
         double pivot = (prevHigh + prevLow + prevClose) / 3;
 
-        // ピボットから3ドル以内
         if(MathAbs(close_current - pivot) < 3.0)
         {
             if(trend == TREND_UP && close_current > pivot)
@@ -598,57 +542,38 @@ void DisplayInfo(bool isOrder, bool isLondon, bool isNY, bool isOverlap, TrendDi
         ObjectSet(labelName, OBJPROP_XDISTANCE, 10);
         ObjectSet(labelName, OBJPROP_YDISTANCE, 30);
         ObjectSet(labelName, OBJPROP_COLOR, clrGold);
-        ObjectSet(labelName, OBJPROP_FONTSIZE, 10);
+        ObjectSet(labelName, OBJPROP_FONTSIZE, 9);
     }
 
     string trendKingStr = TrendToString(kingTrend);
     string trendBaseStr = TrendToString(baseTrend);
-    double currentPrice = Bid;  // MQL4互換: SymbolInfoDouble()の代わりにBidを使用
+    double currentPrice = Bid;
     double dailyRange = dailyHigh - dailyLow;
 
-    string info = "【XAUUSD専用 高勝率エントリーフィルター】\n";
-    info += "━━━━━━━━━━━━━━━━━━━━━━\n";
-    info += "現在価格: $" + DoubleToString(currentPrice, 2) + "\n";
-    info += "日足レンジ: $" + DoubleToString(dailyRange, 2) + " (" + DoubleToString(dailyLow, 2) + " - " + DoubleToString(dailyHigh, 2) + ")\n";
-    info += "━━━━━━━━━━━━━━━━━━━━━━\n";
-    info += "上位足トレンド (" + EnumToString(King_TimeFrame) + "): " + trendKingStr + "\n";
-    info += "基準足トレンド (" + EnumToString(Base_TimeFrame) + "): " + trendBaseStr + "\n";
-    info += "秩序: " + (isOrder ? "✓ あり（Order）" : "✗ なし") + "\n";
-    info += "━━━━━━━━━━━━━━━━━━━━━━\n";
+    string info = "【XAUUSD 高勝率エントリーフィルター（軽量版）】\n";
+    info += "現在価格: $" + DoubleToString(currentPrice, 2) + " | レンジ: $" + DoubleToString(dailyRange, 2) + "\n";
+    info += "上位(" + EnumToString(King_TimeFrame) + "): " + trendKingStr + " | 基準(" + EnumToString(Base_TimeFrame) + "): " + trendBaseStr + "\n";
+    info += "秩序: " + (isOrder ? "✓" : "✗") + " | ";
 
-    string session = "";
     if(isOverlap)
-        session = "✪ ロンドン・NY重複（最重要）";
+        info += "✪ 重複時間";
     else if(isLondon)
-        session = "● ロンドンセッション";
+        info += "● ロンドン";
     else if(isNY)
-        session = "● ニューヨークセッション";
+        info += "● ニューヨーク";
     else
-        session = "○ 低ボラティリティ時間";
+        info += "○ 待機";
 
-    info += "時間帯: " + session + "\n";
-    info += "━━━━━━━━━━━━━━━━━━━━━━\n";
+    info += "\n";
 
     if(isOverlap && isOrder)
-    {
-        info += "状態: ★★★★★ 最高のエントリー環境 ★★★★★";
-    }
+        info += "★★★★★ 最高";
     else if(isOrder && (isLondon || isNY))
-    {
-        info += "状態: ★★★★ 優良なエントリー環境";
-    }
+        info += "★★★★ 優良";
     else if(isOrder)
-    {
-        info += "状態: ★★★ 良好（ボラティリティ待ち）";
-    }
-    else if(isLondon || isNY)
-    {
-        info += "状態: ★★ 待機（トレンド確認待ち）";
-    }
+        info += "★★★ 良好";
     else
-    {
-        info += "状態: ★ 待機推奨";
-    }
+        info += "★ 待機";
 
     ObjectSetText(labelName, info);
 }
@@ -660,10 +585,10 @@ string TrendToString(TrendDirection trend)
 {
     switch(trend)
     {
-        case TREND_UP: return "強い上昇 ↑↑";
-        case TREND_DOWN: return "強い下降 ↓↓";
-        case TREND_NEUTRAL: return "中立・レンジ ⇄";
-        default: return "不明";
+        case TREND_UP: return "↑";
+        case TREND_DOWN: return "↓";
+        case TREND_NEUTRAL: return "→";
+        default: return "?";
     }
 }
 
@@ -672,17 +597,14 @@ string TrendToString(TrendDirection trend)
 //+------------------------------------------------------------------+
 void CleanupObjects()
 {
-    // MQL4互換: ObjectsTotal()は引数なし
     int total = ObjectsTotal();
 
     for(int i = total - 1; i >= 0; i--)
     {
-        // MQL4互換: ObjectName()は第1引数のみ
         string name = ObjectName(i);
 
         if(StringFind(name, indicatorPrefix) == 0)
         {
-            // MQL4互換: ObjectDelete()は名前のみ
             ObjectDelete(name);
         }
     }
