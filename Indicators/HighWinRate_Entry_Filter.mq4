@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "High Win Rate Trading System"
 #property link      ""
-#property version   "1.00"
+#property version   "1.01"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 0
@@ -417,14 +417,12 @@ void DisplayInfo(bool isOrder, bool isLondon, TrendDirection kingTrend, TrendDir
 {
     string labelName = indicatorPrefix + "Info";
 
-    if(ObjectFind(0, labelName) < 0)
+    if(ObjectFind(labelName) < 0)
     {
-        ObjectCreate(0, labelName, OBJ_LABEL, 0, 0, 0);
-        ObjectSetInteger(0, labelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-        ObjectSetInteger(0, labelName, OBJPROP_XDISTANCE, 10);
-        ObjectSetInteger(0, labelName, OBJPROP_YDISTANCE, 30);
-        ObjectSetInteger(0, labelName, OBJPROP_COLOR, clrWhite);
-        ObjectSetInteger(0, labelName, OBJPROP_FONTSIZE, 10);
+        ObjectCreate(labelName, OBJ_LABEL, 0, 0, 0);
+        ObjectSet(labelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+        ObjectSet(labelName, OBJPROP_XDISTANCE, 10);
+        ObjectSet(labelName, OBJPROP_YDISTANCE, 30);
     }
 
     string trendKingStr = TrendToString(kingTrend);
@@ -449,7 +447,7 @@ void DisplayInfo(bool isOrder, bool isLondon, TrendDirection kingTrend, TrendDir
         info += "状態: ★ 待機";
     }
 
-    ObjectSetString(0, labelName, OBJPROP_TEXT, info);
+    ObjectSetText(labelName, info, 10, "MS Gothic", clrWhite);
 }
 
 //+------------------------------------------------------------------+
