@@ -5,12 +5,12 @@
 //+------------------------------------------------------------------+
 #property copyright "High Win Rate Trading System - XAUUSD Edition"
 #property link      ""
-#property version   "1.10"
+#property version   "1.12"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 0
 #property description "XAUUSDゴールド専用高勝率エントリーフィルター"
-#property description "金特有のボラティリティとトレンド特性に最適化"
+#property description "金特有のボラティリティとトレンド特性に最適化 - MQL4完全互換"
 
 //--- Input Parameters - XAUUSD Optimized Defaults
 input ENUM_TIMEFRAMES King_TimeFrame = PERIOD_H4;           // 最上位足（4時間足推奨） - 金のトレンド把握
@@ -130,7 +130,7 @@ int OnCalculate(const int rates_total,
     if(entrySignal && ShouldAlert())
     {
         string trendStr = (kingTrend == TREND_UP) ? "上昇トレンド（ロング）" : "下降トレンド（ショート）";
-        string message = "【XAUUSD】高勝率エントリー機会検出！\n方向: " + trendStr + "\n現在価格: " + DoubleToString(SymbolInfoDouble(Symbol(), SYMBOL_BID), 2);
+        string message = "【XAUUSD】高勝率エントリー機会検出！\n方向: " + trendStr + "\n現在価格: " + DoubleToString(Bid, 2);
 
         if(Enable_Popup_Alert)
             Alert(message);
@@ -186,20 +186,20 @@ void DrawDailyPivots()
 //+------------------------------------------------------------------+
 void DrawHLine(string name, double price, color lineColor, int width, int style, string label)
 {
-    if(ObjectFind(0, name) < 0)
+    if(ObjectFind(name) < 0)
     {
-        ObjectCreate(0, name, OBJ_HLINE, 0, 0, price);
+        ObjectCreate(name, OBJ_HLINE, 0, 0, price);
     }
 
-    ObjectSetDouble(0, name, OBJPROP_PRICE, 0, price);
-    ObjectSetInteger(0, name, OBJPROP_COLOR, lineColor);
-    ObjectSetInteger(0, name, OBJPROP_WIDTH, width);
-    ObjectSetInteger(0, name, OBJPROP_STYLE, style);
-    ObjectSetInteger(0, name, OBJPROP_BACK, true);
+    ObjectSet(name, OBJPROP_PRICE1, price);
+    ObjectSet(name, OBJPROP_COLOR, lineColor);
+    ObjectSet(name, OBJPROP_WIDTH, width);
+    ObjectSet(name, OBJPROP_STYLE, style);
+    ObjectSet(name, OBJPROP_BACK, true);
 
     if(Show_Price_Labels)
     {
-        ObjectSetString(0, name, OBJPROP_TEXT, label + " " + DoubleToString(price, 2));
+        ObjectSetText(name, label + " " + DoubleToString(price, 2));
     }
 }
 
@@ -307,19 +307,19 @@ void DrawBackground(bool isOrder, bool isLondon, bool isNY, bool isOverlap)
         double highPrice = iHigh(Symbol(), Period(), 0) + 50;
         double lowPrice = iLow(Symbol(), Period(), 0) - 50;
 
-        if(ObjectFind(0, bgName) < 0)
+        if(ObjectFind(bgName) < 0)
         {
-            ObjectCreate(0, bgName, OBJ_RECTANGLE, 0, startTime, highPrice, endTime, lowPrice);
-            ObjectSetInteger(0, bgName, OBJPROP_FILL, true);
-            ObjectSetInteger(0, bgName, OBJPROP_BACK, true);
-            ObjectSetInteger(0, bgName, OBJPROP_SELECTABLE, false);
+            ObjectCreate(bgName, OBJ_RECTANGLE, 0, startTime, highPrice, endTime, lowPrice);
+            ObjectSet(bgName, OBJPROP_FILL, true);
+            ObjectSet(bgName, OBJPROP_BACK, true);
+            ObjectSet(bgName, OBJPROP_SELECTABLE, false);
         }
 
-        ObjectSetInteger(0, bgName, OBJPROP_TIME, 0, startTime);
-        ObjectSetDouble(0, bgName, OBJPROP_PRICE, 0, highPrice);
-        ObjectSetInteger(0, bgName, OBJPROP_TIME, 1, endTime);
-        ObjectSetDouble(0, bgName, OBJPROP_PRICE, 1, lowPrice);
-        ObjectSetInteger(0, bgName, OBJPROP_COLOR, bgColor);
+        ObjectSet(bgName, OBJPROP_TIME1, startTime);
+        ObjectSet(bgName, OBJPROP_PRICE1, highPrice);
+        ObjectSet(bgName, OBJPROP_TIME2, endTime);
+        ObjectSet(bgName, OBJPROP_PRICE2, lowPrice);
+        ObjectSet(bgName, OBJPROP_COLOR, bgColor);
     }
 }
 
@@ -416,23 +416,23 @@ void DrawUniqueLines(double &levels[], string prefix, color lineColor)
     {
         string lineName = indicatorPrefix + prefix + "_" + IntegerToString(i);
 
-        if(ObjectFind(0, lineName) < 0)
+        if(ObjectFind(lineName) < 0)
         {
-            ObjectCreate(0, lineName, OBJ_HLINE, 0, 0, uniqueLevels[i]);
-            ObjectSetInteger(0, lineName, OBJPROP_COLOR, lineColor);
-            ObjectSetInteger(0, lineName, OBJPROP_WIDTH, 2);
-            ObjectSetInteger(0, lineName, OBJPROP_STYLE, STYLE_DOT);
-            ObjectSetInteger(0, lineName, OBJPROP_BACK, true);
+            ObjectCreate(lineName, OBJ_HLINE, 0, 0, uniqueLevels[i]);
+            ObjectSet(lineName, OBJPROP_COLOR, lineColor);
+            ObjectSet(lineName, OBJPROP_WIDTH, 2);
+            ObjectSet(lineName, OBJPROP_STYLE, STYLE_DOT);
+            ObjectSet(lineName, OBJPROP_BACK, true);
         }
         else
         {
-            ObjectSetDouble(0, lineName, OBJPROP_PRICE, 0, uniqueLevels[i]);
+            ObjectSet(lineName, OBJPROP_PRICE1, uniqueLevels[i]);
         }
 
         // 価格ラベル
         if(Show_Price_Labels)
         {
-            ObjectSetString(0, lineName, OBJPROP_TEXT, prefix + " $" + DoubleToString(uniqueLevels[i], 2));
+            ObjectSetText(lineName, prefix + " $" + DoubleToString(uniqueLevels[i], 2));
         }
     }
 }
@@ -479,21 +479,21 @@ void DetectAndDrawClusters(ENUM_TIMEFRAMES timeframe)
         {
             string boxName = indicatorPrefix + "Cluster_" + TimeToString(startTime);
 
-            if(ObjectFind(0, boxName) < 0)
+            if(ObjectFind(boxName) < 0)
             {
-                ObjectCreate(0, boxName, OBJ_RECTANGLE, 0, startTime, maxPrice, endTime, minPrice);
-                ObjectSetInteger(0, boxName, OBJPROP_COLOR, Cluster_Box_Color);
-                ObjectSetInteger(0, boxName, OBJPROP_WIDTH, 2);
-                ObjectSetInteger(0, boxName, OBJPROP_FILL, false);
-                ObjectSetInteger(0, boxName, OBJPROP_BACK, true);
+                ObjectCreate(boxName, OBJ_RECTANGLE, 0, startTime, maxPrice, endTime, minPrice);
+                ObjectSet(boxName, OBJPROP_COLOR, Cluster_Box_Color);
+                ObjectSet(boxName, OBJPROP_WIDTH, 2);
+                ObjectSet(boxName, OBJPROP_FILL, false);
+                ObjectSet(boxName, OBJPROP_BACK, true);
 
                 // ラベル追加
                 string labelName = boxName + "_Label";
                 double midPrice = (maxPrice + minPrice) / 2;
-                ObjectCreate(0, labelName, OBJ_TEXT, 0, startTime, midPrice);
-                ObjectSetString(0, labelName, OBJPROP_TEXT, "クラスター $" + DoubleToString(minPrice, 2) + "-" + DoubleToString(maxPrice, 2));
-                ObjectSetInteger(0, labelName, OBJPROP_COLOR, Cluster_Box_Color);
-                ObjectSetInteger(0, labelName, OBJPROP_FONTSIZE, 8);
+                ObjectCreate(labelName, OBJ_TEXT, 0, startTime, midPrice);
+                ObjectSetText(labelName, "クラスター $" + DoubleToString(minPrice, 2) + "-" + DoubleToString(maxPrice, 2));
+                ObjectSet(labelName, OBJPROP_COLOR, Cluster_Box_Color);
+                ObjectSet(labelName, OBJPROP_FONTSIZE, 8);
             }
 
             i -= barsInCluster; // 検出済みのクラスターをスキップ
@@ -591,19 +591,19 @@ void DisplayInfo(bool isOrder, bool isLondon, bool isNY, bool isOverlap, TrendDi
 {
     string labelName = indicatorPrefix + "Info";
 
-    if(ObjectFind(0, labelName) < 0)
+    if(ObjectFind(labelName) < 0)
     {
-        ObjectCreate(0, labelName, OBJ_LABEL, 0, 0, 0);
-        ObjectSetInteger(0, labelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-        ObjectSetInteger(0, labelName, OBJPROP_XDISTANCE, 10);
-        ObjectSetInteger(0, labelName, OBJPROP_YDISTANCE, 30);
-        ObjectSetInteger(0, labelName, OBJPROP_COLOR, clrGold);
-        ObjectSetInteger(0, labelName, OBJPROP_FONTSIZE, 10);
+        ObjectCreate(labelName, OBJ_LABEL, 0, 0, 0);
+        ObjectSet(labelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+        ObjectSet(labelName, OBJPROP_XDISTANCE, 10);
+        ObjectSet(labelName, OBJPROP_YDISTANCE, 30);
+        ObjectSet(labelName, OBJPROP_COLOR, clrGold);
+        ObjectSet(labelName, OBJPROP_FONTSIZE, 10);
     }
 
     string trendKingStr = TrendToString(kingTrend);
     string trendBaseStr = TrendToString(baseTrend);
-    double currentPrice = SymbolInfoDouble(Symbol(), SYMBOL_BID);
+    double currentPrice = Bid;  // MQL4互換: SymbolInfoDouble()の代わりにBidを使用
     double dailyRange = dailyHigh - dailyLow;
 
     string info = "【XAUUSD専用 高勝率エントリーフィルター】\n";
@@ -650,7 +650,7 @@ void DisplayInfo(bool isOrder, bool isLondon, bool isNY, bool isOverlap, TrendDi
         info += "状態: ★ 待機推奨";
     }
 
-    ObjectSetString(0, labelName, OBJPROP_TEXT, info);
+    ObjectSetText(labelName, info);
 }
 
 //+------------------------------------------------------------------+
@@ -672,15 +672,18 @@ string TrendToString(TrendDirection trend)
 //+------------------------------------------------------------------+
 void CleanupObjects()
 {
-    int total = ObjectsTotal(0);
+    // MQL4互換: ObjectsTotal()は引数なし
+    int total = ObjectsTotal();
 
     for(int i = total - 1; i >= 0; i--)
     {
-        string name = ObjectName(0, i);
+        // MQL4互換: ObjectName()は第1引数のみ
+        string name = ObjectName(i);
 
         if(StringFind(name, indicatorPrefix) == 0)
         {
-            ObjectDelete(0, name);
+            // MQL4互換: ObjectDelete()は名前のみ
+            ObjectDelete(name);
         }
     }
 }
