@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "High Win Rate Trading System - XAUUSD Edition"
 #property link      ""
-#property version   "1.14"
+#property version   "1.15"
 #property strict
 #property indicator_chart_window
 #property indicator_buffers 0
@@ -36,6 +36,10 @@ input color           Cluster_Box_Color = clrOrange;        // クラスター�
 input int             Alert_Cooldown_Seconds = 600;         // アラートのクールダウン時間（10分）
 input bool            Show_Daily_Pivot = true;              // 日足ピボットポイント表示
 input bool            Show_Price_Labels = true;             // 価格ラベル表示
+input bool            Enable_Double_Pattern = true;         // ダブルトップ/ボトム検出を有効化
+input int             Double_Pattern_Lookback = 50;         // ダブルパターン検出範囲（バー数）
+input double          Double_Pattern_Tolerance_Dollars = 5.0; // 価格許容範囲（ドル単位）
+input double          Double_Pattern_Min_Retrace_Percent = 30.0; // 中間戻しの最小値（%）
 
 //--- Global Variables
 datetime lastAlertTime = 0;
@@ -137,6 +141,12 @@ int OnCalculate(const int rates_total,
     if(Enable_Cluster_Detection)
     {
         DetectAndDrawClustersLight(Base_TimeFrame);
+    }
+
+    // 5.5. ダブルトップ/ボトムの検出と描画
+    if(Enable_Double_Pattern)
+    {
+        DetectDoublePatterns(Base_TimeFrame);
     }
 
     // 6. エントリーシグナルの検出
@@ -587,6 +597,242 @@ string TrendToString(TrendDirection trend)
         case TREND_DOWN: return "↓";
         case TREND_NEUTRAL: return "→";
         default: return "?";
+    }
+}
+
+//+------------------------------------------------------------------+
+//| ダブルトップ/ボトムのパターン検出                                 |
+//+------------------------------------------------------------------+
+void DetectDoublePatterns(ENUM_TIMEFRAMES timeframe)
+{
+    if(Double_Pattern_Lookback < 10) return;
+
+    // 既存のダブルパターンオブジェクトをクリア
+    int total = ObjectsTotal();
+    for(int i = total - 1; i >= 0; i--)
+    {
+        string name = ObjectName(i);
+        if(StringFind(name, indicatorPrefix + "DT_") == 0 || StringFind(name, indicatorPrefix + "DB_") == 0)
+        {
+            ObjectDelete(name);
+        }
+    }
+
+    // スイング高値・安値を検出
+    double swingHighs[];
+    int swingHighBars[];
+    double swingLows[];
+    int swingLowBars[];
+
+    ArrayResize(swingHighs, 0);
+    ArrayResize(swingHighBars, 0);
+    ArrayResize(swingLows, 0);
+    ArrayResize(swingLowBars, 0);
+
+    // スイングポイントを検出（3バーの比較）
+    for(int i = 3; i < Double_Pattern_Lookback; i++)
+    {
+        double high0 = iHigh(Symbol(), timeframe, i);
+        double high1 = iHigh(Symbol(), timeframe, i-1);
+        double high2 = iHigh(Symbol(), timeframe, i+1);
+
+        double low0 = iLow(Symbol(), timeframe, i);
+        double low1 = iLow(Symbol(), timeframe, i-1);
+        double low2 = iLow(Symbol(), timeframe, i+1);
+
+        // スイング高値（ローカルピーク）
+        if(high0 > high1 && high0 > high2)
+        {
+            int size = ArraySize(swingHighs);
+            ArrayResize(swingHighs, size + 1);
+            ArrayResize(swingHighBars, size + 1);
+            swingHighs[size] = high0;
+            swingHighBars[size] = i;
+        }
+
+        // スイング安値（ローカルボトム）
+        if(low0 < low1 && low0 < low2)
+        {
+            int size = ArraySize(swingLows);
+            ArrayResize(swingLows, size + 1);
+            ArrayResize(swingLowBars, size + 1);
+            swingLows[size] = low0;
+            swingLowBars[size] = i;
+        }
+    }
+
+    // ダブルトップの検出
+    int highCount = ArraySize(swingHighs);
+    for(int i = 0; i < highCount - 1; i++)
+    {
+        for(int j = i + 1; j < highCount; j++)
+        {
+            double high1 = swingHighs[i];
+            double high2 = swingHighs[j];
+            int bar1 = swingHighBars[i];
+            int bar2 = swingHighBars[j];
+
+            // 価格が近似しているか
+            double priceDiff = MathAbs(high1 - high2);
+            if(priceDiff <= Double_Pattern_Tolerance_Dollars)
+            {
+                // 中間に十分な戻しがあるか確認
+                double minBetween = high1;
+                for(int k = bar1 - 1; k > bar2; k--)
+                {
+                    double low = iLow(Symbol(), timeframe, k);
+                    if(low < minBetween)
+                        minBetween = low;
+                }
+
+                double retrace = ((MathMin(high1, high2) - minBetween) / MathMin(high1, high2)) * 100.0;
+
+                if(retrace >= Double_Pattern_Min_Retrace_Percent)
+                {
+                    // ダブルトップ検出！
+                    DrawDoubleTop(timeframe, bar1, high1, bar2, high2, minBetween);
+                    break; // 1つ見つかれば十分
+                }
+            }
+        }
+    }
+
+    // ダブルボトムの検出
+    int lowCount = ArraySize(swingLows);
+    for(int i = 0; i < lowCount - 1; i++)
+    {
+        for(int j = i + 1; j < lowCount; j++)
+        {
+            double low1 = swingLows[i];
+            double low2 = swingLows[j];
+            int bar1 = swingLowBars[i];
+            int bar2 = swingLowBars[j];
+
+            // 価格が近似しているか
+            double priceDiff = MathAbs(low1 - low2);
+            if(priceDiff <= Double_Pattern_Tolerance_Dollars)
+            {
+                // 中間に十分な戻しがあるか確認
+                double maxBetween = low1;
+                for(int k = bar1 - 1; k > bar2; k--)
+                {
+                    double high = iHigh(Symbol(), timeframe, k);
+                    if(high > maxBetween)
+                        maxBetween = high;
+                }
+
+                double retrace = ((maxBetween - MathMax(low1, low2)) / MathMax(low1, low2)) * 100.0;
+
+                if(retrace >= Double_Pattern_Min_Retrace_Percent)
+                {
+                    // ダブルボトム検出！
+                    DrawDoubleBottom(timeframe, bar1, low1, bar2, low2, maxBetween);
+                    break; // 1つ見つかれば十分
+                }
+            }
+        }
+    }
+}
+
+//+------------------------------------------------------------------+
+//| ダブルトップの描画                                                |
+//+------------------------------------------------------------------+
+void DrawDoubleTop(ENUM_TIMEFRAMES timeframe, int bar1, double price1, int bar2, double price2, double middlePrice)
+{
+    datetime time1 = iTime(Symbol(), timeframe, bar1);
+    datetime time2 = iTime(Symbol(), timeframe, bar2);
+
+    // 第1の高値マーカー
+    string arrow1Name = indicatorPrefix + "DT_Arrow1";
+    if(ObjectFind(arrow1Name) < 0)
+    {
+        ObjectCreate(arrow1Name, OBJ_ARROW, 0, time1, price1);
+        ObjectSet(arrow1Name, OBJPROP_ARROWCODE, 234); // 下向き三角
+        ObjectSet(arrow1Name, OBJPROP_COLOR, clrRed);
+        ObjectSet(arrow1Name, OBJPROP_WIDTH, 3);
+    }
+
+    // 第2の高値マーカー
+    string arrow2Name = indicatorPrefix + "DT_Arrow2";
+    if(ObjectFind(arrow2Name) < 0)
+    {
+        ObjectCreate(arrow2Name, OBJ_ARROW, 0, time2, price2);
+        ObjectSet(arrow2Name, OBJPROP_ARROWCODE, 234);
+        ObjectSet(arrow2Name, OBJPROP_COLOR, clrRed);
+        ObjectSet(arrow2Name, OBJPROP_WIDTH, 3);
+    }
+
+    // ネックライン（高値を結ぶ線）
+    string lineName = indicatorPrefix + "DT_Line";
+    if(ObjectFind(lineName) < 0)
+    {
+        ObjectCreate(lineName, OBJ_TREND, 0, time1, price1, time2, price2);
+        ObjectSet(lineName, OBJPROP_COLOR, clrRed);
+        ObjectSet(lineName, OBJPROP_WIDTH, 2);
+        ObjectSet(lineName, OBJPROP_STYLE, STYLE_SOLID);
+        ObjectSet(lineName, OBJPROP_RAY, false);
+    }
+
+    // テキストラベル
+    string labelName = indicatorPrefix + "DT_Label";
+    datetime midTime = (time1 + time2) / 2;
+    double labelPrice = MathMax(price1, price2) + (10.0 * Point);
+
+    if(ObjectFind(labelName) < 0)
+    {
+        ObjectCreate(labelName, OBJ_TEXT, 0, midTime, labelPrice);
+        ObjectSetText(labelName, "Double Top ▼", 10, "MS Gothic", clrRed);
+    }
+}
+
+//+------------------------------------------------------------------+
+//| ダブルボトムの描画                                                |
+//+------------------------------------------------------------------+
+void DrawDoubleBottom(ENUM_TIMEFRAMES timeframe, int bar1, double price1, int bar2, double price2, double middlePrice)
+{
+    datetime time1 = iTime(Symbol(), timeframe, bar1);
+    datetime time2 = iTime(Symbol(), timeframe, bar2);
+
+    // 第1の安値マーカー
+    string arrow1Name = indicatorPrefix + "DB_Arrow1";
+    if(ObjectFind(arrow1Name) < 0)
+    {
+        ObjectCreate(arrow1Name, OBJ_ARROW, 0, time1, price1);
+        ObjectSet(arrow1Name, OBJPROP_ARROWCODE, 233); // 上向き三角
+        ObjectSet(arrow1Name, OBJPROP_COLOR, clrDodgerBlue);
+        ObjectSet(arrow1Name, OBJPROP_WIDTH, 3);
+    }
+
+    // 第2の安値マーカー
+    string arrow2Name = indicatorPrefix + "DB_Arrow2";
+    if(ObjectFind(arrow2Name) < 0)
+    {
+        ObjectCreate(arrow2Name, OBJ_ARROW, 0, time2, price2);
+        ObjectSet(arrow2Name, OBJPROP_ARROWCODE, 233);
+        ObjectSet(arrow2Name, OBJPROP_COLOR, clrDodgerBlue);
+        ObjectSet(arrow2Name, OBJPROP_WIDTH, 3);
+    }
+
+    // ネックライン（安値を結ぶ線）
+    string lineName = indicatorPrefix + "DB_Line";
+    if(ObjectFind(lineName) < 0)
+    {
+        ObjectCreate(lineName, OBJ_TREND, 0, time1, price1, time2, price2);
+        ObjectSet(lineName, OBJPROP_COLOR, clrDodgerBlue);
+        ObjectSet(lineName, OBJPROP_WIDTH, 2);
+        ObjectSet(lineName, OBJPROP_STYLE, STYLE_SOLID);
+        ObjectSet(lineName, OBJPROP_RAY, false);
+    }
+
+    // テキストラベル
+    string labelName = indicatorPrefix + "DB_Label";
+    datetime midTime = (time1 + time2) / 2;
+    double labelPrice = MathMin(price1, price2) - (10.0 * Point);
+
+    if(ObjectFind(labelName) < 0)
+    {
+        ObjectCreate(labelName, OBJ_TEXT, 0, midTime, labelPrice);
+        ObjectSetText(labelName, "Double Bottom ▲", 10, "MS Gothic", clrDodgerBlue);
     }
 }
 
