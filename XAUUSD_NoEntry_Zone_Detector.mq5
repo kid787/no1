@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "XAUUSD No-Entry Zone Detector"
 #property link      ""
-#property version   "1.00"
+#property version   "1.01"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -29,13 +29,14 @@ struct HaramiZone
    double   low;
    bool     is_low_volatility;
    int      bar_index;
+   bool     high_break_alerted;
+   bool     low_break_alerted;
 };
 
 HaramiZone zones[];
 int zones_count = 0;
 datetime last_check_time = 0;
-double last_high_break = 0;
-double last_low_break = 0;
+datetime last_bar_time = 0;
 
 //+------------------------------------------------------------------+
 //| Custom indicator initialization function                         |
@@ -81,6 +82,15 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
+   //--- Check for new bar on current timeframe
+   datetime current_bar_time = time[rates_total-1];
+   bool is_new_bar = (current_bar_time != last_bar_time);
+
+   if(is_new_bar)
+   {
+      last_bar_time = current_bar_time;
+   }
+
    //--- Check for new bar on higher timeframe
    datetime current_htf_time = iTime(_Symbol, Harami_Timeframe, 0);
 
@@ -91,8 +101,8 @@ int OnCalculate(const int rates_total,
       DrawAllZones();
    }
 
-   //--- Check for breakouts if alert is enabled
-   if(Alert_Breakout && rates_total > 0)
+   //--- Check for breakouts only on new bar if alert is enabled
+   if(Alert_Breakout && is_new_bar && rates_total > 0)
    {
       CheckBreakouts(close[rates_total-1]);
    }
@@ -143,6 +153,8 @@ void ScanHaramiPatterns()
          zones[zones_count-1].low = parent_low;
          zones[zones_count-1].is_low_volatility = is_low_vol;
          zones[zones_count-1].bar_index = i;
+         zones[zones_count-1].high_break_alerted = false;
+         zones[zones_count-1].low_break_alerted = false;
 
          // Check for mid-range engulfing pattern if enabled
          if(Enable_MidRange_Alert)
@@ -314,20 +326,20 @@ void CheckBreakouts(double current_close)
 {
    for(int i = 0; i < zones_count; i++)
    {
-      // Check for breakout above zone
-      if(current_close > zones[i].high && last_high_break != zones[i].high)
+      // Check for breakout above zone (only alert once per zone)
+      if(current_close > zones[i].high && !zones[i].high_break_alerted)
       {
-         last_high_break = zones[i].high;
+         zones[i].high_break_alerted = true;
          string message = "ブレイクアウト検出: " + _Symbol + " が非エントリーゾーン上限 " +
                          DoubleToString(zones[i].high, _Digits) + " を上抜けました";
          Alert(message);
          SendNotification(message);
       }
 
-      // Check for breakout below zone
-      if(current_close < zones[i].low && last_low_break != zones[i].low)
+      // Check for breakout below zone (only alert once per zone)
+      if(current_close < zones[i].low && !zones[i].low_break_alerted)
       {
-         last_low_break = zones[i].low;
+         zones[i].low_break_alerted = true;
          string message = "ブレイクアウト検出: " + _Symbol + " が非エントリーゾーン下限 " +
                          DoubleToString(zones[i].low, _Digits) + " を下抜けました";
          Alert(message);
