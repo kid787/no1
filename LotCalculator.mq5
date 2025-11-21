@@ -166,8 +166,8 @@ void UpdateCalculations()
    currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
 
    //--- Get line prices
-   double slPrice = ObjectGetDouble(0, slLineName, OBJPROP_PRICE1);
-   double tpPrice = ObjectGetDouble(0, tpLineName, OBJPROP_PRICE1);
+   double slPrice = ObjectGetDouble(0, slLineName, OBJPROP_PRICE);
+   double tpPrice = ObjectGetDouble(0, tpLineName, OBJPROP_PRICE);
 
    //--- Calculate distances in pips
    double pipSize = GetPipSize();
