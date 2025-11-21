@@ -30,66 +30,125 @@ double currentPrice = 0;
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   Print("=== LotCalculator OnInit START ===");
+
    //--- Get current price
    currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   Print("Current Price: ", currentPrice);
 
    //--- Calculate pip size
    double pipSize = GetPipSize();
+   Print("Pip Size: ", pipSize);
 
    //--- Calculate initial line positions
    double slPrice = currentPrice - (InitialSL_Pips * pipSize);
    double tpPrice = currentPrice + (InitialTP_Pips * pipSize);
+   Print("Initial SL Price: ", slPrice, " TP Price: ", tpPrice);
 
    //--- Create Stop Loss line (Red)
    if(ObjectFind(0, slLineName) < 0)
    {
-      ObjectCreate(0, slLineName, OBJ_HLINE, 0, 0, slPrice);
-      ObjectSetInteger(0, slLineName, OBJPROP_COLOR, clrRed);
-      ObjectSetInteger(0, slLineName, OBJPROP_STYLE, STYLE_SOLID);
-      ObjectSetInteger(0, slLineName, OBJPROP_WIDTH, LineWidth);
-      ObjectSetInteger(0, slLineName, OBJPROP_SELECTABLE, true);
-      ObjectSetInteger(0, slLineName, OBJPROP_SELECTED, false);
-      ObjectSetString(0, slLineName, OBJPROP_TEXT, "損切りライン");
+      bool created = ObjectCreate(0, slLineName, OBJ_HLINE, 0, 0, slPrice);
+      Print("SL Line Create Result: ", created, " at price: ", slPrice);
+      if(created)
+      {
+         ObjectSetInteger(0, slLineName, OBJPROP_COLOR, clrRed);
+         ObjectSetInteger(0, slLineName, OBJPROP_STYLE, STYLE_SOLID);
+         ObjectSetInteger(0, slLineName, OBJPROP_WIDTH, LineWidth);
+         ObjectSetInteger(0, slLineName, OBJPROP_SELECTABLE, true);
+         ObjectSetInteger(0, slLineName, OBJPROP_SELECTED, false);
+         ObjectSetString(0, slLineName, OBJPROP_TEXT, "損切りライン");
+         Print("SL Line configured successfully");
+      }
+      else
+      {
+         Print("ERROR: Failed to create SL Line! Error code: ", GetLastError());
+      }
+   }
+   else
+   {
+      Print("SL Line already exists");
    }
 
    //--- Create Take Profit line (Green)
    if(ObjectFind(0, tpLineName) < 0)
    {
-      ObjectCreate(0, tpLineName, OBJ_HLINE, 0, 0, tpPrice);
-      ObjectSetInteger(0, tpLineName, OBJPROP_COLOR, clrLime);
-      ObjectSetInteger(0, tpLineName, OBJPROP_STYLE, STYLE_SOLID);
-      ObjectSetInteger(0, tpLineName, OBJPROP_WIDTH, LineWidth);
-      ObjectSetInteger(0, tpLineName, OBJPROP_SELECTABLE, true);
-      ObjectSetInteger(0, tpLineName, OBJPROP_SELECTED, false);
-      ObjectSetString(0, tpLineName, OBJPROP_TEXT, "利確ライン");
+      bool created = ObjectCreate(0, tpLineName, OBJ_HLINE, 0, 0, tpPrice);
+      Print("TP Line Create Result: ", created, " at price: ", tpPrice);
+      if(created)
+      {
+         ObjectSetInteger(0, tpLineName, OBJPROP_COLOR, clrLime);
+         ObjectSetInteger(0, tpLineName, OBJPROP_STYLE, STYLE_SOLID);
+         ObjectSetInteger(0, tpLineName, OBJPROP_WIDTH, LineWidth);
+         ObjectSetInteger(0, tpLineName, OBJPROP_SELECTABLE, true);
+         ObjectSetInteger(0, tpLineName, OBJPROP_SELECTED, false);
+         ObjectSetString(0, tpLineName, OBJPROP_TEXT, "利確ライン");
+         Print("TP Line configured successfully");
+      }
+      else
+      {
+         Print("ERROR: Failed to create TP Line! Error code: ", GetLastError());
+      }
+   }
+   else
+   {
+      Print("TP Line already exists");
    }
 
    //--- Create info label
    if(ObjectFind(0, infoLabelName) < 0)
    {
-      ObjectCreate(0, infoLabelName, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, infoLabelName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-      ObjectSetInteger(0, infoLabelName, OBJPROP_XDISTANCE, 10);
-      ObjectSetInteger(0, infoLabelName, OBJPROP_YDISTANCE, 30);
-      ObjectSetInteger(0, infoLabelName, OBJPROP_COLOR, clrWhite);
-      ObjectSetInteger(0, infoLabelName, OBJPROP_FONTSIZE, 10);
-      ObjectSetString(0, infoLabelName, OBJPROP_FONT, "Courier New");
+      bool created = ObjectCreate(0, infoLabelName, OBJ_LABEL, 0, 0, 0);
+      Print("Info Label Create Result: ", created);
+      if(created)
+      {
+         ObjectSetInteger(0, infoLabelName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+         ObjectSetInteger(0, infoLabelName, OBJPROP_XDISTANCE, 10);
+         ObjectSetInteger(0, infoLabelName, OBJPROP_YDISTANCE, 30);
+         ObjectSetInteger(0, infoLabelName, OBJPROP_COLOR, clrWhite);
+         ObjectSetInteger(0, infoLabelName, OBJPROP_FONTSIZE, 10);
+         ObjectSetString(0, infoLabelName, OBJPROP_FONT, "Courier New");
+         Print("Info Label configured successfully");
+      }
+      else
+      {
+         Print("ERROR: Failed to create Info Label! Error code: ", GetLastError());
+      }
+   }
+   else
+   {
+      Print("Info Label already exists");
    }
 
    //--- Create TP label
    if(ObjectFind(0, tpLabelName) < 0)
    {
-      ObjectCreate(0, tpLabelName, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, tpLabelName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
-      ObjectSetInteger(0, tpLabelName, OBJPROP_XDISTANCE, 10);
-      ObjectSetInteger(0, tpLabelName, OBJPROP_YDISTANCE, 200);
-      ObjectSetInteger(0, tpLabelName, OBJPROP_COLOR, clrLime);
-      ObjectSetInteger(0, tpLabelName, OBJPROP_FONTSIZE, 10);
-      ObjectSetString(0, tpLabelName, OBJPROP_FONT, "Courier New");
+      bool created = ObjectCreate(0, tpLabelName, OBJ_LABEL, 0, 0, 0);
+      Print("TP Label Create Result: ", created);
+      if(created)
+      {
+         ObjectSetInteger(0, tpLabelName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+         ObjectSetInteger(0, tpLabelName, OBJPROP_XDISTANCE, 10);
+         ObjectSetInteger(0, tpLabelName, OBJPROP_YDISTANCE, 200);
+         ObjectSetInteger(0, tpLabelName, OBJPROP_COLOR, clrLime);
+         ObjectSetInteger(0, tpLabelName, OBJPROP_FONTSIZE, 10);
+         ObjectSetString(0, tpLabelName, OBJPROP_FONT, "Courier New");
+         Print("TP Label configured successfully");
+      }
+      else
+      {
+         Print("ERROR: Failed to create TP Label! Error code: ", GetLastError());
+      }
+   }
+   else
+   {
+      Print("TP Label already exists");
    }
 
    //--- Initial calculation
    UpdateCalculations();
+
+   Print("=== LotCalculator OnInit END ===");
 
    return(INIT_SUCCEEDED);
 }
@@ -220,7 +279,12 @@ void UpdateCalculations()
    displayText += StringFormat("推奨ロット: %." + IntegerToString(LotDigits) + "f Lot\n", normalizedLots);
    displayText += StringFormat("最大損失額: %.2f JPY", maxLossAmount);
 
-   ObjectSetString(0, infoLabelName, OBJPROP_TEXT, displayText);
+   bool infoSet = ObjectSetString(0, infoLabelName, OBJPROP_TEXT, displayText);
+   if(debugCounter % 100 == 0)
+   {
+      Print("Info Label Text Set Result: ", infoSet);
+      if(!infoSet) Print("ERROR: Failed to set info label text! Error: ", GetLastError());
+   }
 
    //--- Update TP label
    string tpText = "";
@@ -231,7 +295,12 @@ void UpdateCalculations()
    tpText += StringFormat("リスクリワード: 1:%.2f\n", rrRatio);
    tpText += StringFormat("想定利益: %.2f JPY", expectedProfit);
 
-   ObjectSetString(0, tpLabelName, OBJPROP_TEXT, tpText);
+   bool tpSet = ObjectSetString(0, tpLabelName, OBJPROP_TEXT, tpText);
+   if(debugCounter % 100 == 0)
+   {
+      Print("TP Label Text Set Result: ", tpSet);
+      if(!tpSet) Print("ERROR: Failed to set TP label text! Error: ", GetLastError());
+   }
 
    //--- Force chart redraw
    ChartRedraw(0);
