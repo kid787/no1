@@ -93,9 +93,6 @@ int OnInit()
       Print("TP Line already exists");
    }
 
-   //--- Display initial message
-   Comment("MT5 ロット計算ツール v2.0\n初期化中...");
-
    //--- Initial calculation
    UpdateCalculations();
 
@@ -113,8 +110,11 @@ void OnDeinit(const int reason)
    ObjectDelete(0, slLineName);
    ObjectDelete(0, tpLineName);
 
-   //--- Clear comment display
-   Comment("");
+   //--- Delete label objects
+   ObjectDelete(0, "LC_LotDisplay");
+   ObjectDelete(0, "LC_Info1");
+   ObjectDelete(0, "LC_Info2");
+   ObjectDelete(0, "LC_Info3");
 
    ChartRedraw();
 }
@@ -218,33 +218,58 @@ void UpdateCalculations()
    }
    debugCounter++;
 
-   //--- Display using Comment() function (supports multi-line text)
-   string displayText = "";
-   displayText += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
-   displayText += "   MT5 ロット計算ツール v2.0\n";
-   displayText += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
-   displayText += "\n";
-   displayText += "[基本情報]\n";
-   displayText += StringFormat("現在価格: %s\n", DoubleToString(currentPrice, _Digits));
-   displayText += StringFormat("口座残高: %.2f JPY\n", accountBalance);
-   displayText += "\n";
-   displayText += "[損切りライン]\n";
-   displayText += StringFormat("損切り価格: %s\n", DoubleToString(slPrice, _Digits));
-   displayText += StringFormat("損切り幅: %.1f Pips\n", slPips);
-   displayText += StringFormat("許容損失: %.2f JPY (%.1f%%)\n", maxLossAmount, RiskPercent);
-   displayText += "\n";
-   displayText += "[推奨ロット]\n";
-   displayText += StringFormat("ロット数: %." + IntegerToString(LotDigits) + "f Lot\n", normalizedLots);
-   displayText += StringFormat("最大損失額: %.2f JPY\n", maxLossAmount);
-   displayText += "\n";
-   displayText += "[利確ライン]\n";
-   displayText += StringFormat("利確価格: %s\n", DoubleToString(tpPrice, _Digits));
-   displayText += StringFormat("利確幅: %.1f Pips\n", tpPips);
-   displayText += StringFormat("リスクリワード: 1:%.2f\n", rrRatio);
-   displayText += StringFormat("想定利益: %.2f JPY\n", expectedProfit);
-   displayText += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+   //--- Create or update display labels at lower left corner
+   int yPos = 30;  // Starting Y position from bottom
+   int yStep = 15; // Line spacing
 
-   Comment(displayText);
+   // Main lot size display (large font)
+   string lotLabel = "LC_LotDisplay";
+   if(ObjectFind(0, lotLabel) < 0)
+      ObjectCreate(0, lotLabel, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, lotLabel, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+   ObjectSetInteger(0, lotLabel, OBJPROP_XDISTANCE, 10);
+   ObjectSetInteger(0, lotLabel, OBJPROP_YDISTANCE, yPos);
+   ObjectSetInteger(0, lotLabel, OBJPROP_COLOR, clrYellow);
+   ObjectSetInteger(0, lotLabel, OBJPROP_FONTSIZE, 24);
+   ObjectSetString(0, lotLabel, OBJPROP_FONT, "Arial Black");
+   ObjectSetString(0, lotLabel, OBJPROP_TEXT, StringFormat("推奨: %." + IntegerToString(LotDigits) + "f Lot", normalizedLots));
+   yPos += 35;
+
+   // Supporting information (smaller font)
+   string info1 = "LC_Info1";
+   if(ObjectFind(0, info1) < 0)
+      ObjectCreate(0, info1, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, info1, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+   ObjectSetInteger(0, info1, OBJPROP_XDISTANCE, 10);
+   ObjectSetInteger(0, info1, OBJPROP_YDISTANCE, yPos);
+   ObjectSetInteger(0, info1, OBJPROP_COLOR, clrWhite);
+   ObjectSetInteger(0, info1, OBJPROP_FONTSIZE, 9);
+   ObjectSetString(0, info1, OBJPROP_FONT, "Courier New");
+   ObjectSetString(0, info1, OBJPROP_TEXT, StringFormat("SL: %.1f pips | 損失: %.0f円 (%.1f%%)", slPips, maxLossAmount, RiskPercent));
+   yPos += yStep;
+
+   string info2 = "LC_Info2";
+   if(ObjectFind(0, info2) < 0)
+      ObjectCreate(0, info2, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, info2, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+   ObjectSetInteger(0, info2, OBJPROP_XDISTANCE, 10);
+   ObjectSetInteger(0, info2, OBJPROP_YDISTANCE, yPos);
+   ObjectSetInteger(0, info2, OBJPROP_COLOR, clrLime);
+   ObjectSetInteger(0, info2, OBJPROP_FONTSIZE, 9);
+   ObjectSetString(0, info2, OBJPROP_FONT, "Courier New");
+   ObjectSetString(0, info2, OBJPROP_TEXT, StringFormat("TP: %.1f pips | RR 1:%.2f | 利益: %.0f円", tpPips, rrRatio, expectedProfit));
+   yPos += yStep;
+
+   string info3 = "LC_Info3";
+   if(ObjectFind(0, info3) < 0)
+      ObjectCreate(0, info3, OBJ_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, info3, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+   ObjectSetInteger(0, info3, OBJPROP_XDISTANCE, 10);
+   ObjectSetInteger(0, info3, OBJPROP_YDISTANCE, yPos);
+   ObjectSetInteger(0, info3, OBJPROP_COLOR, clrSilver);
+   ObjectSetInteger(0, info3, OBJPROP_FONTSIZE, 8);
+   ObjectSetString(0, info3, OBJPROP_FONT, "Courier New");
+   ObjectSetString(0, info3, OBJPROP_TEXT, StringFormat("残高: %.0f円 | 価格: %s", accountBalance, DoubleToString(currentPrice, _Digits)));
 }
 
 //+------------------------------------------------------------------+
