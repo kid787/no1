@@ -30,9 +30,6 @@ double currentPrice = 0;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   //--- Enable chart events
-   ChartSetInteger(0, CHART_EVENT_OBJECT_DRAG, true);
-
    //--- Get current price
    currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
 
