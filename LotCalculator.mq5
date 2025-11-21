@@ -71,7 +71,7 @@ int OnInit()
    if(ObjectFind(0, infoLabelName) < 0)
    {
       ObjectCreate(0, infoLabelName, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, infoLabelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, infoLabelName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
       ObjectSetInteger(0, infoLabelName, OBJPROP_XDISTANCE, 10);
       ObjectSetInteger(0, infoLabelName, OBJPROP_YDISTANCE, 30);
       ObjectSetInteger(0, infoLabelName, OBJPROP_COLOR, clrWhite);
@@ -83,7 +83,7 @@ int OnInit()
    if(ObjectFind(0, tpLabelName) < 0)
    {
       ObjectCreate(0, tpLabelName, OBJ_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, tpLabelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, tpLabelName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
       ObjectSetInteger(0, tpLabelName, OBJPROP_XDISTANCE, 10);
       ObjectSetInteger(0, tpLabelName, OBJPROP_YDISTANCE, 200);
       ObjectSetInteger(0, tpLabelName, OBJPROP_COLOR, clrLime);
