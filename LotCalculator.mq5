@@ -121,17 +121,8 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
-   //--- Update current price
-   currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-
-   //--- Update calculations periodically
-   static datetime lastUpdate = 0;
-   datetime currentTime = TimeCurrent();
-   if(currentTime - lastUpdate >= 1)  // Update every second
-   {
-      UpdateCalculations();
-      lastUpdate = currentTime;
-   }
+   //--- Update calculations on every tick
+   UpdateCalculations();
 
    return(rates_total);
 }
@@ -166,6 +157,13 @@ void UpdateCalculations()
    double slPrice = ObjectGetDouble(0, slLineName, OBJPROP_PRICE);
    double tpPrice = ObjectGetDouble(0, tpLineName, OBJPROP_PRICE);
 
+   //--- Check if lines exist and have valid prices
+   if(slPrice == 0 || tpPrice == 0)
+   {
+      Print("Error: Line prices are zero. SL=", slPrice, " TP=", tpPrice);
+      return;
+   }
+
    //--- Calculate distances in pips
    double pipSize = GetPipSize();
    double slPips = MathAbs(currentPrice - slPrice) / pipSize;
@@ -194,6 +192,20 @@ void UpdateCalculations()
    double profitPerLot = CalculateProfitPerLot(tpPips);
    double expectedProfit = profitPerLot * normalizedLots;
 
+   //--- Debug output (comment out after testing)
+   static int debugCounter = 0;
+   if(debugCounter % 100 == 0)  // Print every 100 ticks to avoid spam
+   {
+      Print("=== LOT CALCULATOR DEBUG ===");
+      Print("CurrentPrice=", currentPrice, " SL=", slPrice, " TP=", tpPrice);
+      Print("SLPips=", slPips, " TPPips=", tpPips);
+      Print("Balance=", accountBalance, " MaxLoss=", maxLossAmount);
+      Print("LossPerLot=", lossPerLot, " CalcLots=", calculatedLots);
+      Print("NormalizedLots=", normalizedLots, " RR=", rrRatio);
+      Print("===========================");
+   }
+   debugCounter++;
+
    //--- Update info label
    string displayText = "";
    displayText += "[ロット計算結果]\n";
@@ -221,7 +233,8 @@ void UpdateCalculations()
 
    ObjectSetString(0, tpLabelName, OBJPROP_TEXT, tpText);
 
-   ChartRedraw();
+   //--- Force chart redraw
+   ChartRedraw(0);
 }
 
 //+------------------------------------------------------------------+
