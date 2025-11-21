@@ -102,9 +102,9 @@ int OnInit()
       Print("Info Label Create Result: ", created);
       if(created)
       {
-         ObjectSetInteger(0, infoLabelName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+         ObjectSetInteger(0, infoLabelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
          ObjectSetInteger(0, infoLabelName, OBJPROP_XDISTANCE, 10);
-         ObjectSetInteger(0, infoLabelName, OBJPROP_YDISTANCE, 30);
+         ObjectSetInteger(0, infoLabelName, OBJPROP_YDISTANCE, 250);
          ObjectSetInteger(0, infoLabelName, OBJPROP_COLOR, clrWhite);
          ObjectSetInteger(0, infoLabelName, OBJPROP_FONTSIZE, 10);
          ObjectSetString(0, infoLabelName, OBJPROP_FONT, "Courier New");
@@ -127,9 +127,9 @@ int OnInit()
       Print("TP Label Create Result: ", created);
       if(created)
       {
-         ObjectSetInteger(0, tpLabelName, OBJPROP_CORNER, CORNER_LEFT_LOWER);
+         ObjectSetInteger(0, tpLabelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
          ObjectSetInteger(0, tpLabelName, OBJPROP_XDISTANCE, 10);
-         ObjectSetInteger(0, tpLabelName, OBJPROP_YDISTANCE, 200);
+         ObjectSetInteger(0, tpLabelName, OBJPROP_YDISTANCE, 30);
          ObjectSetInteger(0, tpLabelName, OBJPROP_COLOR, clrLime);
          ObjectSetInteger(0, tpLabelName, OBJPROP_FONTSIZE, 10);
          ObjectSetString(0, tpLabelName, OBJPROP_FONT, "Courier New");
@@ -144,6 +144,11 @@ int OnInit()
    {
       Print("TP Label already exists");
    }
+
+   //--- Set initial text to verify labels are visible
+   ObjectSetString(0, infoLabelName, OBJPROP_TEXT, "Loading...");
+   ObjectSetString(0, tpLabelName, OBJPROP_TEXT, "Initializing...");
+   ChartRedraw(0);
 
    //--- Initial calculation
    UpdateCalculations();
