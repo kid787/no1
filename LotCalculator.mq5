@@ -19,8 +19,6 @@ input int      LineWidth        = 2;      // ラインの太さ (1-5)
 //--- Object names
 string slLineName = "LC_StopLoss";
 string tpLineName = "LC_TakeProfit";
-string infoLabelName = "LC_InfoLabel";
-string tpLabelName = "LC_TPLabel";
 
 //--- Global variables
 double currentPrice = 0;
@@ -95,60 +93,8 @@ int OnInit()
       Print("TP Line already exists");
    }
 
-   //--- Create info label
-   if(ObjectFind(0, infoLabelName) < 0)
-   {
-      bool created = ObjectCreate(0, infoLabelName, OBJ_LABEL, 0, 0, 0);
-      Print("Info Label Create Result: ", created);
-      if(created)
-      {
-         ObjectSetInteger(0, infoLabelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-         ObjectSetInteger(0, infoLabelName, OBJPROP_XDISTANCE, 10);
-         ObjectSetInteger(0, infoLabelName, OBJPROP_YDISTANCE, 250);
-         ObjectSetInteger(0, infoLabelName, OBJPROP_COLOR, clrWhite);
-         ObjectSetInteger(0, infoLabelName, OBJPROP_FONTSIZE, 10);
-         ObjectSetString(0, infoLabelName, OBJPROP_FONT, "Courier New");
-         Print("Info Label configured successfully");
-      }
-      else
-      {
-         Print("ERROR: Failed to create Info Label! Error code: ", GetLastError());
-      }
-   }
-   else
-   {
-      Print("Info Label already exists");
-   }
-
-   //--- Create TP label
-   if(ObjectFind(0, tpLabelName) < 0)
-   {
-      bool created = ObjectCreate(0, tpLabelName, OBJ_LABEL, 0, 0, 0);
-      Print("TP Label Create Result: ", created);
-      if(created)
-      {
-         ObjectSetInteger(0, tpLabelName, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-         ObjectSetInteger(0, tpLabelName, OBJPROP_XDISTANCE, 10);
-         ObjectSetInteger(0, tpLabelName, OBJPROP_YDISTANCE, 30);
-         ObjectSetInteger(0, tpLabelName, OBJPROP_COLOR, clrLime);
-         ObjectSetInteger(0, tpLabelName, OBJPROP_FONTSIZE, 10);
-         ObjectSetString(0, tpLabelName, OBJPROP_FONT, "Courier New");
-         Print("TP Label configured successfully");
-      }
-      else
-      {
-         Print("ERROR: Failed to create TP Label! Error code: ", GetLastError());
-      }
-   }
-   else
-   {
-      Print("TP Label already exists");
-   }
-
-   //--- Set initial text to verify labels are visible
-   ObjectSetString(0, infoLabelName, OBJPROP_TEXT, "Loading...");
-   ObjectSetString(0, tpLabelName, OBJPROP_TEXT, "Initializing...");
-   ChartRedraw(0);
+   //--- Display initial message
+   Comment("MT5 ロット計算ツール v2.0\n初期化中...");
 
    //--- Initial calculation
    UpdateCalculations();
@@ -163,11 +109,13 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   //--- Delete all objects
+   //--- Delete line objects
    ObjectDelete(0, slLineName);
    ObjectDelete(0, tpLineName);
-   ObjectDelete(0, infoLabelName);
-   ObjectDelete(0, tpLabelName);
+
+   //--- Clear comment display
+   Comment("");
+
    ChartRedraw();
 }
 
@@ -270,45 +218,33 @@ void UpdateCalculations()
    }
    debugCounter++;
 
-   //--- Update info label
+   //--- Display using Comment() function (supports multi-line text)
    string displayText = "";
-   displayText += "[ロット計算結果]\n";
-   displayText += "───────────────────\n";
+   displayText += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+   displayText += "   MT5 ロット計算ツール v2.0\n";
+   displayText += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
+   displayText += "\n";
+   displayText += "[基本情報]\n";
    displayText += StringFormat("現在価格: %s\n", DoubleToString(currentPrice, _Digits));
    displayText += StringFormat("口座残高: %.2f JPY\n", accountBalance);
    displayText += "\n";
+   displayText += "[損切りライン]\n";
    displayText += StringFormat("損切り価格: %s\n", DoubleToString(slPrice, _Digits));
    displayText += StringFormat("損切り幅: %.1f Pips\n", slPips);
    displayText += StringFormat("許容損失: %.2f JPY (%.1f%%)\n", maxLossAmount, RiskPercent);
    displayText += "\n";
-   displayText += StringFormat("推奨ロット: %." + IntegerToString(LotDigits) + "f Lot\n", normalizedLots);
-   displayText += StringFormat("最大損失額: %.2f JPY", maxLossAmount);
+   displayText += "[推奨ロット]\n";
+   displayText += StringFormat("ロット数: %." + IntegerToString(LotDigits) + "f Lot\n", normalizedLots);
+   displayText += StringFormat("最大損失額: %.2f JPY\n", maxLossAmount);
+   displayText += "\n";
+   displayText += "[利確ライン]\n";
+   displayText += StringFormat("利確価格: %s\n", DoubleToString(tpPrice, _Digits));
+   displayText += StringFormat("利確幅: %.1f Pips\n", tpPips);
+   displayText += StringFormat("リスクリワード: 1:%.2f\n", rrRatio);
+   displayText += StringFormat("想定利益: %.2f JPY\n", expectedProfit);
+   displayText += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
 
-   bool infoSet = ObjectSetString(0, infoLabelName, OBJPROP_TEXT, displayText);
-   if(debugCounter % 100 == 0)
-   {
-      Print("Info Label Text Set Result: ", infoSet);
-      if(!infoSet) Print("ERROR: Failed to set info label text! Error: ", GetLastError());
-   }
-
-   //--- Update TP label
-   string tpText = "";
-   tpText += "[利確ライン情報]\n";
-   tpText += "───────────────────\n";
-   tpText += StringFormat("利確価格: %s\n", DoubleToString(tpPrice, _Digits));
-   tpText += StringFormat("利確幅: %.1f Pips\n", tpPips);
-   tpText += StringFormat("リスクリワード: 1:%.2f\n", rrRatio);
-   tpText += StringFormat("想定利益: %.2f JPY", expectedProfit);
-
-   bool tpSet = ObjectSetString(0, tpLabelName, OBJPROP_TEXT, tpText);
-   if(debugCounter % 100 == 0)
-   {
-      Print("TP Label Text Set Result: ", tpSet);
-      if(!tpSet) Print("ERROR: Failed to set TP label text! Error: ", GetLastError());
-   }
-
-   //--- Force chart redraw
-   ChartRedraw(0);
+   Comment(displayText);
 }
 
 //+------------------------------------------------------------------+
