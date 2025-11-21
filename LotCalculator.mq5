@@ -218,8 +218,8 @@ void UpdateCalculations()
    }
    debugCounter++;
 
-   //--- Create or update display labels at lower left corner
-   int yPos = 30;  // Starting Y position from bottom
+   //--- Create or update display labels at left center
+   int yPos = 150;  // Starting Y position from bottom (enough margin to avoid cutoff)
    int yStep = 15; // Line spacing
 
    // Main lot size display (large font)
