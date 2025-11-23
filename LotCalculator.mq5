@@ -12,9 +12,9 @@
 //--- Input parameters
 input double   RiskPercent      = 2.0;    // リスク許容度 (%)
 input int      LotDigits        = 2;      // 表示桁数
-input double   InitialSL_Pips   = 30.0;   // 初期損切り幅 (Pips)
-input double   InitialTP_Pips   = 90.0;   // 初期利確幅 (Pips)
-input int      LineWidth        = 2;      // ラインの太さ (1-5)
+input double   InitialSL_Pips   = 300.0;  // 初期損切り幅 (Pips)
+input double   InitialTP_Pips   = 900.0;  // 初期利確幅 (Pips)
+input int      LineWidth        = 5;      // ラインの太さ (1-5)
 
 //--- Object names
 string slLineName = "LC_StopLoss";
@@ -43,18 +43,18 @@ int OnInit()
    double tpPrice = currentPrice + (InitialTP_Pips * pipSize);
    Print("Initial SL Price: ", slPrice, " TP Price: ", tpPrice);
 
-   //--- Create Stop Loss line (Red)
+   //--- Create Stop Loss line (Green-Yellow: RGB 124,252,0)
    if(ObjectFind(0, slLineName) < 0)
    {
       bool created = ObjectCreate(0, slLineName, OBJ_HLINE, 0, 0, slPrice);
       Print("SL Line Create Result: ", created, " at price: ", slPrice);
       if(created)
       {
-         ObjectSetInteger(0, slLineName, OBJPROP_COLOR, clrRed);
+         ObjectSetInteger(0, slLineName, OBJPROP_COLOR, C'124,252,0');
          ObjectSetInteger(0, slLineName, OBJPROP_STYLE, STYLE_SOLID);
          ObjectSetInteger(0, slLineName, OBJPROP_WIDTH, LineWidth);
          ObjectSetInteger(0, slLineName, OBJPROP_SELECTABLE, true);
-         ObjectSetInteger(0, slLineName, OBJPROP_SELECTED, false);
+         ObjectSetInteger(0, slLineName, OBJPROP_SELECTED, true);  // Always selected for easy dragging
          ObjectSetString(0, slLineName, OBJPROP_TEXT, "損切りライン");
          Print("SL Line configured successfully");
       }
@@ -66,20 +66,22 @@ int OnInit()
    else
    {
       Print("SL Line already exists");
+      // Ensure existing line is selected
+      ObjectSetInteger(0, slLineName, OBJPROP_SELECTED, true);
    }
 
-   //--- Create Take Profit line (Green)
+   //--- Create Take Profit line (Lime Green: RGB 50,205,50)
    if(ObjectFind(0, tpLineName) < 0)
    {
       bool created = ObjectCreate(0, tpLineName, OBJ_HLINE, 0, 0, tpPrice);
       Print("TP Line Create Result: ", created, " at price: ", tpPrice);
       if(created)
       {
-         ObjectSetInteger(0, tpLineName, OBJPROP_COLOR, clrLime);
+         ObjectSetInteger(0, tpLineName, OBJPROP_COLOR, C'50,205,50');
          ObjectSetInteger(0, tpLineName, OBJPROP_STYLE, STYLE_SOLID);
          ObjectSetInteger(0, tpLineName, OBJPROP_WIDTH, LineWidth);
          ObjectSetInteger(0, tpLineName, OBJPROP_SELECTABLE, true);
-         ObjectSetInteger(0, tpLineName, OBJPROP_SELECTED, false);
+         ObjectSetInteger(0, tpLineName, OBJPROP_SELECTED, true);  // Always selected for easy dragging
          ObjectSetString(0, tpLineName, OBJPROP_TEXT, "利確ライン");
          Print("TP Line configured successfully");
       }
@@ -91,6 +93,8 @@ int OnInit()
    else
    {
       Print("TP Line already exists");
+      // Ensure existing line is selected
+      ObjectSetInteger(0, tpLineName, OBJPROP_SELECTED, true);
    }
 
    //--- Initial calculation
