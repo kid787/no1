@@ -43,14 +43,14 @@ int OnInit()
    double tpPrice = currentPrice + (InitialTP_Pips * pipSize);
    Print("Initial SL Price: ", slPrice, " TP Price: ", tpPrice);
 
-   //--- Create Stop Loss line (Green-Yellow: RGB 124,252,0)
+   //--- Create Stop Loss line (Magenta: RGB 255,0,255)
    if(ObjectFind(0, slLineName) < 0)
    {
       bool created = ObjectCreate(0, slLineName, OBJ_HLINE, 0, 0, slPrice);
       Print("SL Line Create Result: ", created, " at price: ", slPrice);
       if(created)
       {
-         ObjectSetInteger(0, slLineName, OBJPROP_COLOR, C'124,252,0');
+         ObjectSetInteger(0, slLineName, OBJPROP_COLOR, C'255,0,255');
          ObjectSetInteger(0, slLineName, OBJPROP_STYLE, STYLE_SOLID);
          ObjectSetInteger(0, slLineName, OBJPROP_WIDTH, LineWidth);
          ObjectSetInteger(0, slLineName, OBJPROP_SELECTABLE, true);
