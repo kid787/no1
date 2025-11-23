@@ -10,8 +10,7 @@
 #property indicator_plots 0
 
 //--- Input Parameters
-// 機能A: 上位足の強力な抵抗帯ゾーン設定
-input group "=== HTF Resistance/Support Zones ==="
+//=== HTF Resistance/Support Zones ===
 input ENUM_TIMEFRAMES HTF1_Timeframe = PERIOD_H1;      // 上位足1の時間軸
 input ENUM_TIMEFRAMES HTF2_Timeframe = PERIOD_H4;      // 上位足2の時間軸
 input int HTF_Lookback_Bars = 100;                     // 遡るバー数
@@ -20,15 +19,13 @@ input color HTF_Resistance_Color = clrDarkRed;         // レジスタンスゾ�
 input color HTF_Support_Color = clrDarkGreen;          // サポートゾーン色
 input int HTF_Zone_Transparency = 220;                 // ゾーン透明度 (0-255)
 
-// 機能B: レンジ相場の中央ゾーン設定
-input group "=== Range Center Zone ==="
+//=== Range Center Zone ===
 input ENUM_TIMEFRAMES Range_Timeframe = PERIOD_H4;     // レンジ計算用時間軸
 input double Range_Center_Percentage = 0.4;            // 中央ゾーンの割合 (0.4=40%)
 input color Range_Center_Color = clrYellow;            // レンジ中央ゾーン色
 input int Range_Zone_Transparency = 230;               // ゾーン透明度 (0-255)
 
-// 機能C: 構造崩壊ライン設定
-input group "=== Neckline/Structural Break Line ==="
+//=== Neckline/Structural Break Line ===
 input ENUM_TIMEFRAMES Neckline_Timeframe = PERIOD_H4;  // ネックライン計算用時間軸
 input color Neckline_Color = clrBlue;                  // ネックライン色
 input color Neckline_Alert_Color = clrOrange;          // 接近時の警告色
@@ -36,8 +33,7 @@ input double Neckline_Alert_Pips = 10.0;               // 警告距離 (Pips)
 input int Neckline_Width = 2;                          // ライン幅
 input ENUM_LINE_STYLE Neckline_Style = STYLE_DASH;     // ラインスタイル
 
-// 一般設定
-input group "=== General Settings ==="
+//=== General Settings ===
 input bool Show_HTF_Zones = true;                      // 上位足ゾーンを表示
 input bool Show_Range_Zone = true;                     // レンジ中央ゾーンを表示
 input bool Show_Neckline = true;                       // ネックラインを表示
