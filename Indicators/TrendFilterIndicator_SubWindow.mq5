@@ -1,9 +1,7 @@
 //+------------------------------------------------------------------+
-//|                                        TrendFilterIndicator.mq5 |
-//|                                  軽量トレンドフィルターインジケーター |
-//|                  このファイルは旧バージョンです。以下の新バージョンを使用してください：  |
-//|                  - TrendFilterIndicator_SubWindow.mq5 (推奨)     |
-//|                  - TrendFilterIndicator_MainChart.mq5            |
+//|                              TrendFilterIndicator_SubWindow.mq5 |
+//|                     軽量トレンドフィルターインジケーター（サブウィンドウ版） |
+//|                                                                  |
 //+------------------------------------------------------------------+
 #property copyright "2025"
 #property link      ""
@@ -131,6 +129,11 @@ int OnCalculate(const int rates_total,
 
    //--- 計算開始位置の決定
    int start_pos = prev_calculated > 0 ? prev_calculated - 1 : max_period;
+
+   //--- コピーするバー数の計算
+   int to_copy = rates_total - start_pos;
+   if(to_copy <= 0)
+      return(rates_total);
 
    //--- EMAとATRのデータをコピー
    double ema_fast_data[], ema_slow_data[], atr_data[];

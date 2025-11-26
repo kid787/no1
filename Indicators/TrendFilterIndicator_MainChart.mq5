@@ -1,41 +1,55 @@
 //+------------------------------------------------------------------+
-//|                                        TrendFilterIndicator.mq5 |
-//|                                  軽量トレンドフィルターインジケーター |
-//|                  このファイルは旧バージョンです。以下の新バージョンを使用してください：  |
-//|                  - TrendFilterIndicator_SubWindow.mq5 (推奨)     |
-//|                  - TrendFilterIndicator_MainChart.mq5            |
+//|                               TrendFilterIndicator_MainChart.mq5 |
+//|                軽量トレンドフィルターインジケーター（メインチャート版）        |
+//|                                                                  |
 //+------------------------------------------------------------------+
 #property copyright "2025"
 #property link      ""
 #property version   "1.10"
-#property indicator_separate_window
-#property indicator_buffers 4
-#property indicator_plots   2
+#property indicator_chart_window
+#property indicator_buffers 7
+#property indicator_plots   4
 
-// EMA Trend Histogram (トレンド状態ヒストグラム)
-#property indicator_label1  "Trend State"
-#property indicator_type1   DRAW_COLOR_HISTOGRAM
-#property indicator_color1  clrGray,clrLimeGreen,clrRed
+// EMA Fast Line (短期EMA)
+#property indicator_label1  "EMA Fast"
+#property indicator_type1   DRAW_LINE
+#property indicator_color1  clrDodgerBlue
 #property indicator_style1  STYLE_SOLID
-#property indicator_width1  3
+#property indicator_width1  2
 
-// Zero Line (ゼロライン)
-#property indicator_label2  "Zero Line"
+// EMA Slow Line (長期EMA)
+#property indicator_label2  "EMA Slow"
 #property indicator_type2   DRAW_LINE
-#property indicator_color2  clrDarkGray
-#property indicator_style2  STYLE_DOT
-#property indicator_width2  1
+#property indicator_color2  clrOrange
+#property indicator_style2  STYLE_SOLID
+#property indicator_width2  2
+
+// Long Signal Arrow (ロングシグナル矢印)
+#property indicator_label3  "Long Signal"
+#property indicator_type3   DRAW_ARROW
+#property indicator_color3  clrLimeGreen
+#property indicator_width3  3
+
+// Short Signal Arrow (ショートシグナル矢印)
+#property indicator_label4  "Short Signal"
+#property indicator_type4   DRAW_ARROW
+#property indicator_color4  clrRed
+#property indicator_width4  3
 
 //--- 入力パラメータ
 input int    FastEMA_Period   = 5;      // 短期EMA期間
 input int    SlowEMA_Period   = 15;     // 長期EMA期間
 input int    ATR_Period       = 14;     // ATR期間
 input double ATR_Multiplier   = 0.5;    // ATR乗数
+input bool   ShowSignalArrows = true;   // シグナル矢印を表示
 
 //--- インジケーターバッファ
-double Trend_Buffer[];         // トレンド状態値（+1, 0, -1）
-double Trend_Color_Buffer[];   // トレンドカラーインデックス
-double Zero_Buffer[];          // ゼロライン
+double EMA_Fast_Buffer[];      // EMA Fast値
+double EMA_Slow_Buffer[];      // EMA Slow値
+double Long_Signal_Buffer[];   // ロングシグナル
+double Short_Signal_Buffer[];  // ショートシグナル
+double Trend_State[];          // トレンド状態（内部計算用）
+double Prev_Trend_State[];     // 前のバーのトレンド状態
 double ATR_Buffer[];           // ATR値（内部計算用）
 
 //--- ハンドル
@@ -44,9 +58,9 @@ int handle_EMA_Slow;
 int handle_ATR;
 
 //--- ゾーン定義用定数
-#define ZONE_NO_TRADE  0  // レンジ相場（灰色）
-#define ZONE_LONG      1  // 上昇トレンド（緑色）
-#define ZONE_SHORT     2  // 下降トレンド（赤色）
+#define ZONE_NO_TRADE  0  // レンジ相場
+#define ZONE_LONG      1  // 上昇トレンド
+#define ZONE_SHORT    -1  // 下降トレンド
 
 //+------------------------------------------------------------------+
 //| カスタムインジケーター初期化関数                                        |
@@ -54,17 +68,34 @@ int handle_ATR;
 int OnInit()
 {
    //--- インジケーターバッファのマッピング
-   SetIndexBuffer(0, Trend_Buffer, INDICATOR_DATA);
-   SetIndexBuffer(1, Trend_Color_Buffer, INDICATOR_COLOR_INDEX);
-   SetIndexBuffer(2, Zero_Buffer, INDICATOR_DATA);
-   SetIndexBuffer(3, ATR_Buffer, INDICATOR_CALCULATIONS);
+   SetIndexBuffer(0, EMA_Fast_Buffer, INDICATOR_DATA);
+   SetIndexBuffer(1, EMA_Slow_Buffer, INDICATOR_DATA);
+   SetIndexBuffer(2, Long_Signal_Buffer, INDICATOR_DATA);
+   SetIndexBuffer(3, Short_Signal_Buffer, INDICATOR_DATA);
+   SetIndexBuffer(4, Trend_State, INDICATOR_CALCULATIONS);
+   SetIndexBuffer(5, Prev_Trend_State, INDICATOR_CALCULATIONS);
+   SetIndexBuffer(6, ATR_Buffer, INDICATOR_CALCULATIONS);
+
+   //--- 矢印の設定
+   PlotIndexSetInteger(2, PLOT_ARROW, 233);  // 上向き矢印
+   PlotIndexSetInteger(3, PLOT_ARROW, 234);  // 下向き矢印
 
    //--- プロットの設定
-   PlotIndexSetString(0, PLOT_LABEL, "Trend State");
-   PlotIndexSetString(1, PLOT_LABEL, "Zero");
+   PlotIndexSetString(0, PLOT_LABEL, "EMA " + IntegerToString(FastEMA_Period));
+   PlotIndexSetString(1, PLOT_LABEL, "EMA " + IntegerToString(SlowEMA_Period));
+   PlotIndexSetString(2, PLOT_LABEL, "Long Signal");
+   PlotIndexSetString(3, PLOT_LABEL, "Short Signal");
 
-   //--- ゼロラインの初期化
-   ArrayInitialize(Zero_Buffer, 0.0);
+   //--- 矢印の表示/非表示
+   if(!ShowSignalArrows)
+   {
+      PlotIndexSetInteger(2, PLOT_DRAW_TYPE, DRAW_NONE);
+      PlotIndexSetInteger(3, PLOT_DRAW_TYPE, DRAW_NONE);
+   }
+
+   //--- バッファの初期化
+   ArrayInitialize(Long_Signal_Buffer, EMPTY_VALUE);
+   ArrayInitialize(Short_Signal_Buffer, EMPTY_VALUE);
 
    //--- EMAハンドルの作成
    handle_EMA_Fast = iMA(_Symbol, _Period, FastEMA_Period, 0, MODE_EMA, PRICE_CLOSE);
@@ -81,7 +112,9 @@ int OnInit()
    //--- 描画開始位置の設定
    int max_period = MathMax(FastEMA_Period, MathMax(SlowEMA_Period, ATR_Period));
    PlotIndexSetInteger(0, PLOT_DRAW_BEGIN, max_period);
-   PlotIndexSetInteger(1, PLOT_DRAW_BEGIN, 0);
+   PlotIndexSetInteger(1, PLOT_DRAW_BEGIN, max_period);
+   PlotIndexSetInteger(2, PLOT_DRAW_BEGIN, max_period + 1);
+   PlotIndexSetInteger(3, PLOT_DRAW_BEGIN, max_period + 1);
 
    //--- インジケーター名の設定
    IndicatorSetString(INDICATOR_SHORTNAME,
@@ -89,23 +122,7 @@ int OnInit()
       FastEMA_Period, SlowEMA_Period, ATR_Period, ATR_Multiplier));
 
    //--- 小数点桁数の設定
-   IndicatorSetInteger(INDICATOR_DIGITS, 0);
-
-   //--- レベルの設定
-   IndicatorSetInteger(INDICATOR_LEVELS, 3);
-   IndicatorSetDouble(INDICATOR_LEVELVALUE, 0, 1.0);   // Long Zone
-   IndicatorSetDouble(INDICATOR_LEVELVALUE, 1, 0.0);   // Zero Line
-   IndicatorSetDouble(INDICATOR_LEVELVALUE, 2, -1.0);  // Short Zone
-   IndicatorSetInteger(INDICATOR_LEVELCOLOR, 0, clrLimeGreen);
-   IndicatorSetInteger(INDICATOR_LEVELCOLOR, 1, clrDarkGray);
-   IndicatorSetInteger(INDICATOR_LEVELCOLOR, 2, clrRed);
-   IndicatorSetInteger(INDICATOR_LEVELSTYLE, 0, STYLE_DOT);
-   IndicatorSetInteger(INDICATOR_LEVELSTYLE, 1, STYLE_SOLID);
-   IndicatorSetInteger(INDICATOR_LEVELSTYLE, 2, STYLE_DOT);
-
-   //--- ウィンドウの最小・最大値を設定
-   IndicatorSetDouble(INDICATOR_MINIMUM, -1.5);
-   IndicatorSetDouble(INDICATOR_MAXIMUM, 1.5);
+   IndicatorSetInteger(INDICATOR_DIGITS, _Digits);
 
    return(INIT_SUCCEEDED);
 }
@@ -156,39 +173,59 @@ int OnCalculate(const int rates_total,
    //--- 各バーの計算
    for(int i = start_pos; i < rates_total; i++)
    {
-      //--- ゼロラインの設定
-      Zero_Buffer[i] = 0.0;
+      //--- EMAバッファに値を設定
+      EMA_Fast_Buffer[i] = ema_fast_data[i];
+      EMA_Slow_Buffer[i] = ema_slow_data[i];
 
-      //--- EMAとATR値の取得
-      double ema_fast = ema_fast_data[i];
-      double ema_slow = ema_slow_data[i];
+      //--- ATR値の取得
       double atr_value = atr_data[i];
-
-      //--- ATRバッファに保存
       ATR_Buffer[i] = atr_value;
 
       //--- 乖離度とATR基準距離の計算
+      double ema_fast = ema_fast_data[i];
+      double ema_slow = ema_slow_data[i];
       double ema_diff = MathAbs(ema_fast - ema_slow);
       double distance = atr_value * ATR_Multiplier;
+
+      //--- 前のバーのトレンド状態を保存
+      if(i > 0)
+         Prev_Trend_State[i] = Trend_State[i - 1];
+      else
+         Prev_Trend_State[i] = ZONE_NO_TRADE;
 
       //--- ゾーン判定
       if(ema_diff < distance)
       {
          // レンジ相場（トレード禁止ゾーン）
-         Trend_Buffer[i] = 0.0;
-         Trend_Color_Buffer[i] = ZONE_NO_TRADE;
+         Trend_State[i] = ZONE_NO_TRADE;
       }
       else if(ema_fast > ema_slow)
       {
          // 上昇トレンド（ロングのみ）
-         Trend_Buffer[i] = 1.0;
-         Trend_Color_Buffer[i] = ZONE_LONG;
+         Trend_State[i] = ZONE_LONG;
       }
       else
       {
          // 下降トレンド（ショートのみ）
-         Trend_Buffer[i] = -1.0;
-         Trend_Color_Buffer[i] = ZONE_SHORT;
+         Trend_State[i] = ZONE_SHORT;
+      }
+
+      //--- シグナル矢印の設定（トレンド状態が変化した時）
+      Long_Signal_Buffer[i] = EMPTY_VALUE;
+      Short_Signal_Buffer[i] = EMPTY_VALUE;
+
+      if(ShowSignalArrows && i > max_period)
+      {
+         // レンジからロングトレンドへの変化
+         if(Trend_State[i] == ZONE_LONG && Prev_Trend_State[i] != ZONE_LONG)
+         {
+            Long_Signal_Buffer[i] = low[i] - atr_value * 0.5;
+         }
+         // レンジからショートトレンドへの変化
+         else if(Trend_State[i] == ZONE_SHORT && Prev_Trend_State[i] != ZONE_SHORT)
+         {
+            Short_Signal_Buffer[i] = high[i] + atr_value * 0.5;
+         }
       }
    }
 
