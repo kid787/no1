@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "MT5 Lot Calculator"
 #property link      ""
-#property version   "2.00"
+#property version   "2.10"
 #property indicator_chart_window
 #property indicator_plots 0
 
@@ -28,44 +28,29 @@ double currentPrice = 0;
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   Print("=== LotCalculator OnInit START ===");
-
    //--- Get current price
    currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   Print("Current Price: ", currentPrice);
 
    //--- Calculate pip size
    double pipSize = GetPipSize();
-   Print("Pip Size: ", pipSize);
 
    //--- Calculate initial line positions
    double slPrice = currentPrice - (InitialSL_Pips * pipSize);
    double tpPrice = currentPrice + (InitialTP_Pips * pipSize);
-   Print("Initial SL Price: ", slPrice, " TP Price: ", tpPrice);
 
    //--- Create Stop Loss line (Magenta: RGB 255,0,255)
    if(ObjectFind(0, slLineName) < 0)
    {
-      bool created = ObjectCreate(0, slLineName, OBJ_HLINE, 0, 0, slPrice);
-      Print("SL Line Create Result: ", created, " at price: ", slPrice);
-      if(created)
-      {
-         ObjectSetInteger(0, slLineName, OBJPROP_COLOR, C'255,0,255');
-         ObjectSetInteger(0, slLineName, OBJPROP_STYLE, STYLE_SOLID);
-         ObjectSetInteger(0, slLineName, OBJPROP_WIDTH, LineWidth);
-         ObjectSetInteger(0, slLineName, OBJPROP_SELECTABLE, true);
-         ObjectSetInteger(0, slLineName, OBJPROP_SELECTED, true);  // Always selected for easy dragging
-         ObjectSetString(0, slLineName, OBJPROP_TEXT, "損切りライン");
-         Print("SL Line configured successfully");
-      }
-      else
-      {
-         Print("ERROR: Failed to create SL Line! Error code: ", GetLastError());
-      }
+      ObjectCreate(0, slLineName, OBJ_HLINE, 0, 0, slPrice);
+      ObjectSetInteger(0, slLineName, OBJPROP_COLOR, C'255,0,255');
+      ObjectSetInteger(0, slLineName, OBJPROP_STYLE, STYLE_SOLID);
+      ObjectSetInteger(0, slLineName, OBJPROP_WIDTH, LineWidth);
+      ObjectSetInteger(0, slLineName, OBJPROP_SELECTABLE, true);
+      ObjectSetInteger(0, slLineName, OBJPROP_SELECTED, true);  // Always selected for easy dragging
+      ObjectSetString(0, slLineName, OBJPROP_TEXT, "損切りライン");
    }
    else
    {
-      Print("SL Line already exists");
       // Ensure existing line is selected
       ObjectSetInteger(0, slLineName, OBJPROP_SELECTED, true);
    }
@@ -73,34 +58,22 @@ int OnInit()
    //--- Create Take Profit line (Lime Green: RGB 50,205,50)
    if(ObjectFind(0, tpLineName) < 0)
    {
-      bool created = ObjectCreate(0, tpLineName, OBJ_HLINE, 0, 0, tpPrice);
-      Print("TP Line Create Result: ", created, " at price: ", tpPrice);
-      if(created)
-      {
-         ObjectSetInteger(0, tpLineName, OBJPROP_COLOR, C'50,205,50');
-         ObjectSetInteger(0, tpLineName, OBJPROP_STYLE, STYLE_SOLID);
-         ObjectSetInteger(0, tpLineName, OBJPROP_WIDTH, LineWidth);
-         ObjectSetInteger(0, tpLineName, OBJPROP_SELECTABLE, true);
-         ObjectSetInteger(0, tpLineName, OBJPROP_SELECTED, true);  // Always selected for easy dragging
-         ObjectSetString(0, tpLineName, OBJPROP_TEXT, "利確ライン");
-         Print("TP Line configured successfully");
-      }
-      else
-      {
-         Print("ERROR: Failed to create TP Line! Error code: ", GetLastError());
-      }
+      ObjectCreate(0, tpLineName, OBJ_HLINE, 0, 0, tpPrice);
+      ObjectSetInteger(0, tpLineName, OBJPROP_COLOR, C'50,205,50');
+      ObjectSetInteger(0, tpLineName, OBJPROP_STYLE, STYLE_SOLID);
+      ObjectSetInteger(0, tpLineName, OBJPROP_WIDTH, LineWidth);
+      ObjectSetInteger(0, tpLineName, OBJPROP_SELECTABLE, true);
+      ObjectSetInteger(0, tpLineName, OBJPROP_SELECTED, true);  // Always selected for easy dragging
+      ObjectSetString(0, tpLineName, OBJPROP_TEXT, "利確ライン");
    }
    else
    {
-      Print("TP Line already exists");
       // Ensure existing line is selected
       ObjectSetInteger(0, tpLineName, OBJPROP_SELECTED, true);
    }
 
    //--- Initial calculation
    UpdateCalculations();
-
-   Print("=== LotCalculator OnInit END ===");
 
    return(INIT_SUCCEEDED);
 }
@@ -137,8 +110,8 @@ int OnCalculate(const int rates_total,
                 const long &volume[],
                 const int &spread[])
 {
-   //--- Update calculations on every tick
-   UpdateCalculations();
+   //--- No automatic updates to reduce CPU load
+   //--- Calculations only occur when lines are dragged (see OnChartEvent)
 
    return(rates_total);
 }
@@ -176,8 +149,7 @@ void UpdateCalculations()
    //--- Check if lines exist and have valid prices
    if(slPrice == 0 || tpPrice == 0)
    {
-      Print("Error: Line prices are zero. SL=", slPrice, " TP=", tpPrice);
-      return;
+      return;  // Skip calculation if lines are not properly initialized
    }
 
    //--- Calculate distances in pips
@@ -207,20 +179,6 @@ void UpdateCalculations()
    //--- Calculate expected profit
    double profitPerLot = CalculateProfitPerLot(tpPips);
    double expectedProfit = profitPerLot * normalizedLots;
-
-   //--- Debug output (comment out after testing)
-   static int debugCounter = 0;
-   if(debugCounter % 100 == 0)  // Print every 100 ticks to avoid spam
-   {
-      Print("=== LOT CALCULATOR DEBUG ===");
-      Print("CurrentPrice=", currentPrice, " SL=", slPrice, " TP=", tpPrice);
-      Print("SLPips=", slPips, " TPPips=", tpPips);
-      Print("Balance=", accountBalance, " MaxLoss=", maxLossAmount);
-      Print("LossPerLot=", lossPerLot, " CalcLots=", calculatedLots);
-      Print("NormalizedLots=", normalizedLots, " RR=", rrRatio);
-      Print("===========================");
-   }
-   debugCounter++;
 
    //--- Create or update display labels at left center
    int yPos = 150;  // Starting Y position from bottom (enough margin to avoid cutoff)
