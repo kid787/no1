@@ -8,7 +8,281 @@
 #property version   "1.00"
 
 #include <Trade/Trade.mqh>
-#include <NZoneCommon.mqh>
+
+//+------------------------------------------------------------------+
+//| Structures and Classes                                            |
+//+------------------------------------------------------------------+
+struct SwingPoint
+{
+   datetime time;
+   double   price;
+   int      bar_index;
+   bool     is_high;
+};
+
+struct NWavePattern
+{
+   SwingPoint A;
+   SwingPoint B;
+   SwingPoint C;
+   SwingPoint D_target;
+   double     retracement_percent;
+   double     tp1_price;
+   double     tp2_price;
+   bool       is_bullish;
+   bool       is_valid;
+   datetime   detected_time;
+};
+
+class CNZoneDetector
+{
+private:
+   string m_symbol;
+   ENUM_TIMEFRAMES m_timeframe;
+   int m_swing_strength;
+   double m_min_retracement;
+   double m_max_retracement;
+   double m_extension_100;
+   double m_extension_161;
+
+public:
+   CNZoneDetector(string symbol = NULL, ENUM_TIMEFRAMES timeframe = PERIOD_H1)
+   {
+      m_symbol = (symbol == NULL) ? _Symbol : symbol;
+      m_timeframe = timeframe;
+      m_swing_strength = 5;
+      m_min_retracement = 0.382;
+      m_max_retracement = 0.618;
+      m_extension_100 = 1.000;
+      m_extension_161 = 1.618;
+   }
+   ~CNZoneDetector() {}
+
+   void SetParameters(int swing_strength, double min_ret, double max_ret)
+   {
+      m_swing_strength = swing_strength;
+      m_min_retracement = min_ret;
+      m_max_retracement = max_ret;
+   }
+
+   bool IsSwingHigh(int bar_index, int strength)
+   {
+      if(bar_index < strength) return false;
+      double high = iHigh(m_symbol, m_timeframe, bar_index);
+      for(int i = 1; i <= strength; i++)
+      {
+         if(iHigh(m_symbol, m_timeframe, bar_index - i) >= high) return false;
+         if(iHigh(m_symbol, m_timeframe, bar_index + i) >= high) return false;
+      }
+      return true;
+   }
+
+   bool IsSwingLow(int bar_index, int strength)
+   {
+      if(bar_index < strength) return false;
+      double low = iLow(m_symbol, m_timeframe, bar_index);
+      for(int i = 1; i <= strength; i++)
+      {
+         if(iLow(m_symbol, m_timeframe, bar_index - i) <= low) return false;
+         if(iLow(m_symbol, m_timeframe, bar_index + i) <= low) return false;
+      }
+      return true;
+   }
+
+   SwingPoint FindLastSwingHigh(int start_bar, int strength)
+   {
+      SwingPoint point;
+      point.time = 0; point.price = 0; point.bar_index = -1; point.is_high = true;
+      int bars_count = iBars(m_symbol, m_timeframe);
+      for(int i = start_bar; i < bars_count - strength; i++)
+      {
+         if(IsSwingHigh(i, strength))
+         {
+            point.time = iTime(m_symbol, m_timeframe, i);
+            point.price = iHigh(m_symbol, m_timeframe, i);
+            point.bar_index = i;
+            break;
+         }
+      }
+      return point;
+   }
+
+   SwingPoint FindLastSwingLow(int start_bar, int strength)
+   {
+      SwingPoint point;
+      point.time = 0; point.price = 0; point.bar_index = -1; point.is_high = false;
+      int bars_count = iBars(m_symbol, m_timeframe);
+      for(int i = start_bar; i < bars_count - strength; i++)
+      {
+         if(IsSwingLow(i, strength))
+         {
+            point.time = iTime(m_symbol, m_timeframe, i);
+            point.price = iLow(m_symbol, m_timeframe, i);
+            point.bar_index = i;
+            break;
+         }
+      }
+      return point;
+   }
+
+   double CalculateFibExtension(double A, double B, double C, double level)
+   {
+      double wave_ab = MathAbs(B - A);
+      if(B > A) return C + (wave_ab * level);
+      else return C - (wave_ab * level);
+   }
+
+   bool ValidateRetracement(const NWavePattern &pattern)
+   {
+      double retracement = pattern.retracement_percent;
+      if(retracement >= m_min_retracement && retracement <= m_max_retracement) return true;
+      if(retracement > 0.786) return false;
+      return false;
+   }
+
+   void CalculateTPZone(NWavePattern &pattern)
+   {
+      pattern.tp1_price = CalculateFibExtension(pattern.A.price, pattern.B.price, pattern.C.price, m_extension_100);
+      pattern.tp2_price = CalculateFibExtension(pattern.A.price, pattern.B.price, pattern.C.price, m_extension_161);
+      pattern.D_target.price = pattern.tp1_price;
+      pattern.D_target.time = 0;
+      pattern.D_target.bar_index = -1;
+      pattern.D_target.is_high = !pattern.C.is_high;
+   }
+
+   bool IsPriceInZone(double price, double zone_start, double zone_end)
+   {
+      double min_price = MathMin(zone_start, zone_end);
+      double max_price = MathMax(zone_start, zone_end);
+      return (price >= min_price && price <= max_price);
+   }
+
+   bool DetectNWave(NWavePattern &pattern)
+   {
+      pattern.is_valid = false;
+      SwingPoint last_high = FindLastSwingHigh(m_swing_strength + 1, m_swing_strength);
+      SwingPoint last_low = FindLastSwingLow(m_swing_strength + 1, m_swing_strength);
+      if(last_high.bar_index < 0 || last_low.bar_index < 0) return false;
+
+      if(last_high.bar_index < last_low.bar_index)
+      {
+         pattern.C = last_high;
+         pattern.B = FindLastSwingLow(last_high.bar_index + 1, m_swing_strength);
+         if(pattern.B.bar_index < 0) return false;
+         pattern.A = FindLastSwingHigh(pattern.B.bar_index + 1, m_swing_strength);
+         if(pattern.A.bar_index < 0) return false;
+         pattern.is_bullish = false;
+         double wave_ab = pattern.A.price - pattern.B.price;
+         double wave_bc = pattern.C.price - pattern.B.price;
+         pattern.retracement_percent = wave_bc / wave_ab;
+      }
+      else
+      {
+         pattern.C = last_low;
+         pattern.B = FindLastSwingHigh(last_low.bar_index + 1, m_swing_strength);
+         if(pattern.B.bar_index < 0) return false;
+         pattern.A = FindLastSwingLow(pattern.B.bar_index + 1, m_swing_strength);
+         if(pattern.A.bar_index < 0) return false;
+         pattern.is_bullish = true;
+         double wave_ab = pattern.B.price - pattern.A.price;
+         double wave_bc = pattern.B.price - pattern.C.price;
+         pattern.retracement_percent = wave_bc / wave_ab;
+      }
+
+      if(!ValidateRetracement(pattern)) return false;
+      CalculateTPZone(pattern);
+      pattern.is_valid = true;
+      pattern.detected_time = TimeCurrent();
+      return true;
+   }
+};
+
+class CReversalDetector
+{
+public:
+   static bool IsPinBar(string symbol, ENUM_TIMEFRAMES timeframe, int bar_index, bool bullish_pin)
+   {
+      double open = iOpen(symbol, timeframe, bar_index);
+      double close = iClose(symbol, timeframe, bar_index);
+      double high = iHigh(symbol, timeframe, bar_index);
+      double low = iLow(symbol, timeframe, bar_index);
+      double body = MathAbs(close - open);
+      double upper_wick = high - MathMax(open, close);
+      double lower_wick = MathMin(open, close) - low;
+      double total_range = high - low;
+      if(total_range == 0) return false;
+      if(bullish_pin) return (lower_wick > body * 2 && lower_wick > total_range * 0.6);
+      else return (upper_wick > body * 2 && upper_wick > total_range * 0.6);
+   }
+
+   static bool IsEngulfing(string symbol, ENUM_TIMEFRAMES timeframe, int bar_index, bool bullish_engulfing)
+   {
+      if(bar_index < 1) return false;
+      double open1 = iOpen(symbol, timeframe, bar_index);
+      double close1 = iClose(symbol, timeframe, bar_index);
+      double open2 = iOpen(symbol, timeframe, bar_index + 1);
+      double close2 = iClose(symbol, timeframe, bar_index + 1);
+      if(bullish_engulfing)
+         return (close1 > open1 && open2 > close2 && close1 > open2 && open1 < close2);
+      else
+         return (open1 > close1 && close2 > open2 && open1 > close2 && close1 < open2);
+   }
+
+   static bool IsMiniReversal(string symbol, ENUM_TIMEFRAMES timeframe, int bar_index, bool bullish_reversal)
+   {
+      if(bar_index < 3) return false;
+      if(bullish_reversal)
+      {
+         double low1 = iLow(symbol, timeframe, bar_index + 2);
+         double low2 = iLow(symbol, timeframe, bar_index + 1);
+         double low3 = iLow(symbol, timeframe, bar_index);
+         return (low2 < low1 && low3 > low2);
+      }
+      else
+      {
+         double high1 = iHigh(symbol, timeframe, bar_index + 2);
+         double high2 = iHigh(symbol, timeframe, bar_index + 1);
+         double high3 = iHigh(symbol, timeframe, bar_index);
+         return (high2 > high1 && high3 < high2);
+      }
+   }
+
+   static bool DetectReversal(string symbol, ENUM_TIMEFRAMES timeframe, int bar_index, bool bullish_reversal)
+   {
+      return IsPinBar(symbol, timeframe, bar_index, bullish_reversal) ||
+             IsEngulfing(symbol, timeframe, bar_index, bullish_reversal) ||
+             IsMiniReversal(symbol, timeframe, bar_index, bullish_reversal);
+   }
+};
+
+class CRiskManager
+{
+public:
+   static double CalculateLotSize(string symbol, double entry_price, double sl_price, double risk_percent, double account_balance)
+   {
+      double tick_size = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+      double tick_value = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
+      double lot_step = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
+      double min_lot = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
+      double max_lot = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
+      double risk_amount = account_balance * risk_percent / 100.0;
+      double sl_distance = MathAbs(entry_price - sl_price);
+      if(sl_distance == 0) return min_lot;
+      double lot_size = risk_amount / (sl_distance / tick_size * tick_value);
+      lot_size = MathFloor(lot_size / lot_step) * lot_step;
+      if(lot_size < min_lot) lot_size = min_lot;
+      if(lot_size > max_lot) lot_size = max_lot;
+      return lot_size;
+   }
+
+   static double CalculateTPByRR(double entry_price, double sl_price, double rr_ratio, bool is_buy)
+   {
+      double sl_distance = MathAbs(entry_price - sl_price);
+      double tp_distance = sl_distance * rr_ratio;
+      if(is_buy) return entry_price + tp_distance;
+      else return entry_price - tp_distance;
+   }
+};
 
 //--- Input parameters
 // H1 Analysis parameters
