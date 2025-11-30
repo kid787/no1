@@ -8,7 +8,7 @@
 #property version   "1.00"
 
 #include <Trade/Trade.mqh>
-#include <../Include/NZoneCommon.mqh>
+#include <NZoneCommon.mqh>
 
 //--- Input parameters
 // H1 Analysis parameters

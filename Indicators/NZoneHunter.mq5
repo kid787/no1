@@ -10,7 +10,7 @@
 #property indicator_buffers 0
 #property indicator_plots   0
 
-#include <../Include/NZoneCommon.mqh>
+#include <NZoneCommon.mqh>
 
 //--- Input parameters
 input int      InpSwingStrength = 5;           // Swing detection strength
