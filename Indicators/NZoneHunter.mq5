@@ -144,8 +144,10 @@ void DrawZone(const NWavePattern &pattern)
 
    if(!ObjectCreate(0, name, OBJ_RECTANGLE, 0, start_time, pattern.tp1_price, end_time, pattern.tp2_price))
    {
-      ObjectMove(0, name, 0, start_time, pattern.tp1_price);
-      ObjectMove(0, name, 1, end_time, pattern.tp2_price);
+      ObjectSetInteger(0, name, OBJPROP_TIME, 0, start_time);
+      ObjectSetDouble(0, name, OBJPROP_PRICE, 0, pattern.tp1_price);
+      ObjectSetInteger(0, name, OBJPROP_TIME, 1, end_time);
+      ObjectSetDouble(0, name, OBJPROP_PRICE, 1, pattern.tp2_price);
    }
 
    ObjectSetInteger(0, name, OBJPROP_COLOR, InpZoneColor);
@@ -172,8 +174,10 @@ void DrawLine(string name, datetime time1, double price1, datetime time2, double
 {
    if(!ObjectCreate(0, name, OBJ_TREND, 0, time1, price1, time2, price2))
    {
-      ObjectMove(0, name, 0, time1, price1);
-      ObjectMove(0, name, 1, time2, price2);
+      ObjectSetInteger(0, name, OBJPROP_TIME, 0, time1);
+      ObjectSetDouble(0, name, OBJPROP_PRICE, 0, price1);
+      ObjectSetInteger(0, name, OBJPROP_TIME, 1, time2);
+      ObjectSetDouble(0, name, OBJPROP_PRICE, 1, price2);
    }
 
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
@@ -193,7 +197,8 @@ void DrawLabel(string name, datetime time, double price, string text, color clr)
 {
    if(!ObjectCreate(0, name, OBJ_TEXT, 0, time, price))
    {
-      ObjectMove(0, name, 0, time, price);
+      ObjectSetInteger(0, name, OBJPROP_TIME, 0, time);
+      ObjectSetDouble(0, name, OBJPROP_PRICE, 0, price);
    }
 
    ObjectSetString(0, name, OBJPROP_TEXT, text);
@@ -212,7 +217,8 @@ void DrawText(string name, datetime time, double price, string text, color clr)
 {
    if(!ObjectCreate(0, name, OBJ_TEXT, 0, time, price))
    {
-      ObjectMove(0, name, 0, time, price);
+      ObjectSetInteger(0, name, OBJPROP_TIME, 0, time);
+      ObjectSetDouble(0, name, OBJPROP_PRICE, 0, price);
    }
 
    ObjectSetString(0, name, OBJPROP_TEXT, text);
