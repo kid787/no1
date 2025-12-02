@@ -19,13 +19,15 @@ input ENUM_TIMEFRAMES MTF_Timeframe = PERIOD_H4;   // MTFトレンド確認用�
 input int      MA_Proximity_Pips = 250;            // MA近接と見なす許容範囲 (Point単位)
 input double   TakeProfit_Ratio = 2.0;             // リスクリワード比率
 input int      EMA_Short_Period = 20;              // 短期EMA（反発/反落確認用）
+input int      ADX_Period = 14;                    // ADX期間
+input double   ADX_Min_Level = 25.0;               // ADX最小値（トレンド強度フィルター）
 input int      Magic_Number = 123456;              // マジックナンバー
 input string   EA_Comment = "Granville EA";        // EAコメント
 input int      Slippage_Points = 30;               // スリッページ許容値
 
 // グローバル変数
 CTrade trade;
-int ma75Handle, ma200Handle, mtfMA75Handle, emaShortHandle;
+int ma75Handle, ma200Handle, mtfMA75Handle, emaShortHandle, adxHandle;
 datetime lastBarTime = 0;
 
 //+------------------------------------------------------------------+
@@ -50,11 +52,13 @@ int OnInit()
    ma200Handle = iMA(Symbol_to_Trade, PERIOD_H1, MA_Period_Long, 0, MODE_EMA, PRICE_CLOSE);
    mtfMA75Handle = iMA(Symbol_to_Trade, MTF_Timeframe, MA_Period_Mid, 0, MODE_EMA, PRICE_CLOSE);
    emaShortHandle = iMA(Symbol_to_Trade, PERIOD_H1, EMA_Short_Period, 0, MODE_EMA, PRICE_CLOSE);
+   adxHandle = iADX(Symbol_to_Trade, PERIOD_H1, ADX_Period);
 
    if(ma75Handle == INVALID_HANDLE || ma200Handle == INVALID_HANDLE ||
-      mtfMA75Handle == INVALID_HANDLE || emaShortHandle == INVALID_HANDLE)
+      mtfMA75Handle == INVALID_HANDLE || emaShortHandle == INVALID_HANDLE ||
+      adxHandle == INVALID_HANDLE)
    {
-      Print("MAハンドルの作成に失敗しました");
+      Print("インジケーターハンドルの作成に失敗しました");
       return(INIT_FAILED);
    }
 
@@ -75,6 +79,7 @@ void OnDeinit(const int reason)
    if(ma200Handle != INVALID_HANDLE) IndicatorRelease(ma200Handle);
    if(mtfMA75Handle != INVALID_HANDLE) IndicatorRelease(mtfMA75Handle);
    if(emaShortHandle != INVALID_HANDLE) IndicatorRelease(emaShortHandle);
+   if(adxHandle != INVALID_HANDLE) IndicatorRelease(adxHandle);
 
    Print("Granville EA が終了しました");
 }
@@ -170,10 +175,11 @@ int AnalyzeTrend()
 //+------------------------------------------------------------------+
 bool CheckBuySignal()
 {
-   double close[], ma75[], ma200[];
+   double close[], ma75[], ma200[], adxValue[];
    ArraySetAsSeries(close, true);
    ArraySetAsSeries(ma75, true);
    ArraySetAsSeries(ma200, true);
+   ArraySetAsSeries(adxValue, true);
 
    // 価格とMAデータの取得
    if(CopyClose(Symbol_to_Trade, PERIOD_H1, 0, 5, close) < 5)
@@ -181,6 +187,10 @@ bool CheckBuySignal()
    if(CopyBuffer(ma75Handle, 0, 0, 5, ma75) < 5)
       return false;
    if(CopyBuffer(ma200Handle, 0, 0, 3, ma200) < 3)
+      return false;
+
+   // ADXデータの取得（MAIN_LINE = バッファ0）
+   if(CopyBuffer(adxHandle, 0, 0, 2, adxValue) < 2)
       return false;
 
    double proximityPoints = MA_Proximity_Pips * SymbolInfoDouble(Symbol_to_Trade, SYMBOL_POINT);
@@ -198,7 +208,10 @@ bool CheckBuySignal()
    // 4. 200 EMAフィルター: 価格が200 EMAの上にある（上昇トレンド確認）
    bool above200EMA = close[0] > ma200[0];
 
-   return (wasNearMA && bounced && aboveMA75 && above200EMA);
+   // 5. ADXフィルター: トレンドが十分に強い
+   bool strongTrend = adxValue[0] >= ADX_Min_Level;
+
+   return (wasNearMA && bounced && aboveMA75 && above200EMA && strongTrend);
 }
 
 //+------------------------------------------------------------------+
@@ -206,10 +219,11 @@ bool CheckBuySignal()
 //+------------------------------------------------------------------+
 bool CheckSellSignal()
 {
-   double close[], ma75[], ma200[];
+   double close[], ma75[], ma200[], adxValue[];
    ArraySetAsSeries(close, true);
    ArraySetAsSeries(ma75, true);
    ArraySetAsSeries(ma200, true);
+   ArraySetAsSeries(adxValue, true);
 
    // 価格とMAデータの取得
    if(CopyClose(Symbol_to_Trade, PERIOD_H1, 0, 5, close) < 5)
@@ -217,6 +231,10 @@ bool CheckSellSignal()
    if(CopyBuffer(ma75Handle, 0, 0, 5, ma75) < 5)
       return false;
    if(CopyBuffer(ma200Handle, 0, 0, 3, ma200) < 3)
+      return false;
+
+   // ADXデータの取得（MAIN_LINE = バッファ0）
+   if(CopyBuffer(adxHandle, 0, 0, 2, adxValue) < 2)
       return false;
 
    double proximityPoints = MA_Proximity_Pips * SymbolInfoDouble(Symbol_to_Trade, SYMBOL_POINT);
@@ -234,7 +252,10 @@ bool CheckSellSignal()
    // 4. 200 EMAフィルター: 価格が200 EMAの下にある（下降トレンド確認）
    bool below200EMA = close[0] < ma200[0];
 
-   return (wasNearMA && bounced && belowMA75 && below200EMA);
+   // 5. ADXフィルター: トレンドが十分に強い
+   bool strongTrend = adxValue[0] >= ADX_Min_Level;
+
+   return (wasNearMA && bounced && belowMA75 && below200EMA && strongTrend);
 }
 
 //+------------------------------------------------------------------+
