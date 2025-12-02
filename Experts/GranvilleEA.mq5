@@ -11,12 +11,12 @@
 
 // 入力パラメータ
 input string   Symbol_to_Trade = "XAUUSD";        // 取引対象銘柄
-input double   Trade_Lots = 0.01;                  // 取引ロット数
+input double   Risk_Percent = 2.0;                 // リスク（口座残高の％）
+input double   Max_Lot_Size = 10.0;                // 最大ロット数
 input int      MA_Period_Mid = 75;                 // H1中期MA期間 (EMA)
 input int      MA_Period_Long = 200;               // H1長期MA期間 (EMA)
 input ENUM_TIMEFRAMES MTF_Timeframe = PERIOD_H4;   // MTFトレンド確認用時間足
 input int      MA_Proximity_Pips = 100;            // MA近接と見なす許容範囲 (Point単位)
-input int      StopLoss_Pips = 200;                // 損切り幅 (Point単位)
 input double   TakeProfit_Ratio = 2.0;             // リスクリワード比率
 input int      EMA_Short_Period = 20;              // 短期EMA（反発/反落確認用）
 input int      Magic_Number = 123456;              // マジックナンバー
@@ -60,7 +60,7 @@ int OnInit()
 
    Print("Granville EA が正常に初期化されました");
    Print("取引銘柄: ", Symbol_to_Trade);
-   Print("ロット数: ", Trade_Lots);
+   Print("リスク設定: ", Risk_Percent, "%");
 
    return(INIT_SUCCEEDED);
 }
@@ -290,22 +290,20 @@ void ExecuteBuyOrder()
 
    // ストップロスの計算
    double sl = 0;
-   if(swingLow > 0)
+   if(swingLow > 0 && swingLow < ask)
    {
       sl = swingLow - (10 * point); // スイングローより少し下
-      double slDistance = ask - sl;
-      double maxSL = StopLoss_Pips * point;
-
-      // 最大SL幅を超える場合は、固定SLを使用
-      if(slDistance > maxSL)
-      {
-         sl = ask - maxSL;
-      }
    }
    else
    {
-      // スイングローが見つからない場合は固定SL
-      sl = ask - (StopLoss_Pips * point);
+      // スイングローが見つからない場合は、エントリー価格から2%下を使用
+      sl = ask * 0.98;
+   }
+
+   // SLが現在価格より上にならないように制限
+   if(sl >= ask)
+   {
+      sl = ask - (ask * 0.01); // 最低1%のSL
    }
 
    // テイクプロフィットの計算
@@ -316,10 +314,19 @@ void ExecuteBuyOrder()
    sl = NormalizeDouble(sl, (int)SymbolInfoInteger(Symbol_to_Trade, SYMBOL_DIGITS));
    tp = NormalizeDouble(tp, (int)SymbolInfoInteger(Symbol_to_Trade, SYMBOL_DIGITS));
 
-   // 注文実行
-   if(trade.Buy(Trade_Lots, Symbol_to_Trade, ask, sl, tp, EA_Comment))
+   // ロット数の計算
+   double lotSize = CalculateLotSize(ask, sl);
+
+   if(lotSize <= 0)
    {
-      Print("買い注文が成功しました: Price=", ask, ", SL=", sl, ", TP=", tp);
+      Print("エラー: ロット数の計算に失敗しました");
+      return;
+   }
+
+   // 注文実行
+   if(trade.Buy(lotSize, Symbol_to_Trade, ask, sl, tp, EA_Comment))
+   {
+      Print("買い注文が成功しました: ロット=", lotSize, ", Price=", ask, ", SL=", sl, ", TP=", tp);
    }
    else
    {
@@ -340,22 +347,20 @@ void ExecuteSellOrder()
 
    // ストップロスの計算
    double sl = 0;
-   if(swingHigh > 0)
+   if(swingHigh > 0 && swingHigh > bid)
    {
       sl = swingHigh + (10 * point); // スイングハイより少し上
-      double slDistance = sl - bid;
-      double maxSL = StopLoss_Pips * point;
-
-      // 最大SL幅を超える場合は、固定SLを使用
-      if(slDistance > maxSL)
-      {
-         sl = bid + maxSL;
-      }
    }
    else
    {
-      // スイングハイが見つからない場合は固定SL
-      sl = bid + (StopLoss_Pips * point);
+      // スイングハイが見つからない場合は、エントリー価格から2%上を使用
+      sl = bid * 1.02;
+   }
+
+   // SLが現在価格より下にならないように制限
+   if(sl <= bid)
+   {
+      sl = bid + (bid * 0.01); // 最低1%のSL
    }
 
    // テイクプロフィットの計算
@@ -366,10 +371,19 @@ void ExecuteSellOrder()
    sl = NormalizeDouble(sl, (int)SymbolInfoInteger(Symbol_to_Trade, SYMBOL_DIGITS));
    tp = NormalizeDouble(tp, (int)SymbolInfoInteger(Symbol_to_Trade, SYMBOL_DIGITS));
 
-   // 注文実行
-   if(trade.Sell(Trade_Lots, Symbol_to_Trade, bid, sl, tp, EA_Comment))
+   // ロット数の計算
+   double lotSize = CalculateLotSize(bid, sl);
+
+   if(lotSize <= 0)
    {
-      Print("売り注文が成功しました: Price=", bid, ", SL=", sl, ", TP=", tp);
+      Print("エラー: ロット数の計算に失敗しました");
+      return;
+   }
+
+   // 注文実行
+   if(trade.Sell(lotSize, Symbol_to_Trade, bid, sl, tp, EA_Comment))
+   {
+      Print("売り注文が成功しました: ロット=", lotSize, ", Price=", bid, ", SL=", sl, ", TP=", tp);
    }
    else
    {
@@ -417,5 +431,59 @@ double FindSwingHigh()
    }
 
    return swingHigh;
+}
+
+//+------------------------------------------------------------------+
+//| ロット数の計算（口座残高の％ベース）                                 |
+//+------------------------------------------------------------------+
+double CalculateLotSize(double entryPrice, double stopLoss)
+{
+   // 口座残高の取得
+   double accountBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+
+   // リスク額の計算
+   double riskAmount = accountBalance * Risk_Percent / 100.0;
+
+   // SL距離の計算（価格単位）
+   double slDistance = MathAbs(entryPrice - stopLoss);
+
+   if(slDistance <= 0)
+   {
+      Print("エラー: SL距離が無効です");
+      return 0.01; // 最小ロット
+   }
+
+   // ティック価値の取得
+   double tickValue = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_TRADE_TICK_VALUE);
+   double tickSize = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_TRADE_TICK_SIZE);
+   double point = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_POINT);
+
+   // ロット数の計算
+   // ロット数 = リスク額 / (SL距離 / tickSize × tickValue)
+   double lotSize = riskAmount / (slDistance / tickSize * tickValue);
+
+   // ロット数の正規化
+   double minLot = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_VOLUME_MIN);
+   double maxLot = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_VOLUME_MAX);
+   double lotStep = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_VOLUME_STEP);
+
+   // ステップに合わせて丸める
+   lotSize = MathFloor(lotSize / lotStep) * lotStep;
+
+   // 最小・最大ロットの制限
+   if(lotSize < minLot)
+      lotSize = minLot;
+   if(lotSize > maxLot)
+      lotSize = maxLot;
+   if(lotSize > Max_Lot_Size)
+      lotSize = Max_Lot_Size;
+
+   // 正規化
+   lotSize = NormalizeDouble(lotSize, 2);
+
+   Print("ロット計算: 残高=", accountBalance, ", リスク額=", riskAmount,
+         ", SL距離=", slDistance, ", ロット=", lotSize);
+
+   return lotSize;
 }
 //+------------------------------------------------------------------+
