@@ -17,10 +17,10 @@ input int      MA_Period_Mid = 75;                 // H1中期MA期間 (EMA)
 input int      MA_Period_Long = 200;               // H1長期MA期間 (EMA)
 input ENUM_TIMEFRAMES MTF_Timeframe = PERIOD_H4;   // MTFトレンド確認用時間足
 input int      MA_Proximity_Pips = 250;            // MA近接と見なす許容範囲 (Point単位)
-input double   TakeProfit_Ratio = 2.0;             // リスクリワード比率
+input double   TakeProfit_Ratio = 1.5;             // リスクリワード比率
 input int      EMA_Short_Period = 20;              // 短期EMA（反発/反落確認用）
 input int      ADX_Period = 14;                    // ADX期間
-input double   ADX_Min_Level = 25.0;               // ADX最小値（トレンド強度フィルター）
+input double   ADX_Min_Level = 20.0;               // ADX最小値（トレンド強度フィルター）
 input int      Magic_Number = 123456;              // マジックナンバー
 input string   EA_Comment = "Granville EA";        // EAコメント
 input int      Slippage_Points = 30;               // スリッページ許容値
@@ -211,7 +211,8 @@ bool CheckBuySignal()
    // 5. ADXフィルター: トレンドが十分に強い
    bool strongTrend = adxValue[0] >= ADX_Min_Level;
 
-   return (wasNearMA && bounced && aboveMA75 && above200EMA && strongTrend);
+   // 条件緩和: MA接近 OR 反発のいずれかでOK（エントリー機会増加）
+   return ((wasNearMA || bounced) && aboveMA75 && above200EMA && strongTrend);
 }
 
 //+------------------------------------------------------------------+
@@ -255,7 +256,8 @@ bool CheckSellSignal()
    // 5. ADXフィルター: トレンドが十分に強い
    bool strongTrend = adxValue[0] >= ADX_Min_Level;
 
-   return (wasNearMA && bounced && belowMA75 && below200EMA && strongTrend);
+   // 条件緩和: MA接近 OR 反落のいずれかでOK（エントリー機会増加）
+   return ((wasNearMA || bounced) && belowMA75 && below200EMA && strongTrend);
 }
 
 //+------------------------------------------------------------------+
