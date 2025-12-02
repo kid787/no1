@@ -7,7 +7,7 @@
 #property link      ""
 #property version   "1.00"
 #property indicator_chart_window
-#property indicator_buffers 7
+#property indicator_buffers 9
 #property indicator_plots   5
 
 // インジケータープロット設定
@@ -187,7 +187,7 @@ int OnCalculate(const int rates_total,
       // 平均足の計算
       if(HEIKIN_ASHI_ENABLED)
       {
-         CalculateHeikinAshi(i, idx, open, high, low, close);
+         CalculateHeikinAshi(i, idx, rates_total, open, high, low, close);
       }
    }
 
@@ -301,7 +301,7 @@ void DetectGranvilleSignal(int i, int idx, const double &close[], const double &
 //+------------------------------------------------------------------+
 //| 平均足の計算                                                        |
 //+------------------------------------------------------------------+
-void CalculateHeikinAshi(int i, int idx, const double &open[], const double &high[],
+void CalculateHeikinAshi(int i, int idx, int rates_total, const double &open[], const double &high[],
                          const double &low[], const double &close[])
 {
    double haOpen, haHigh, haLow, haClose;
