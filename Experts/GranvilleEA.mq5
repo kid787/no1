@@ -48,11 +48,11 @@ int OnInit()
    }
 
    // MAハンドルの作成
-   ma75Handle = iMA(Symbol_to_Trade, PERIOD_H1, MA_Period_Mid, 0, MODE_EMA, PRICE_CLOSE);
-   ma200Handle = iMA(Symbol_to_Trade, PERIOD_H1, MA_Period_Long, 0, MODE_EMA, PRICE_CLOSE);
+   ma75Handle = iMA(Symbol_to_Trade, PERIOD_M30, MA_Period_Mid, 0, MODE_EMA, PRICE_CLOSE);
+   ma200Handle = iMA(Symbol_to_Trade, PERIOD_M30, MA_Period_Long, 0, MODE_EMA, PRICE_CLOSE);
    mtfMA75Handle = iMA(Symbol_to_Trade, MTF_Timeframe, MA_Period_Mid, 0, MODE_EMA, PRICE_CLOSE);
-   emaShortHandle = iMA(Symbol_to_Trade, PERIOD_H1, EMA_Short_Period, 0, MODE_EMA, PRICE_CLOSE);
-   adxHandle = iADX(Symbol_to_Trade, PERIOD_H1, ADX_Period);
+   emaShortHandle = iMA(Symbol_to_Trade, PERIOD_M30, EMA_Short_Period, 0, MODE_EMA, PRICE_CLOSE);
+   adxHandle = iADX(Symbol_to_Trade, PERIOD_M30, ADX_Period);
 
    if(ma75Handle == INVALID_HANDLE || ma200Handle == INVALID_HANDLE ||
       mtfMA75Handle == INVALID_HANDLE || emaShortHandle == INVALID_HANDLE ||
@@ -90,7 +90,7 @@ void OnDeinit(const int reason)
 void OnTick()
 {
    // 新しいバーの確認
-   datetime currentBarTime = iTime(Symbol_to_Trade, PERIOD_H1, 0);
+   datetime currentBarTime = iTime(Symbol_to_Trade, PERIOD_M30, 0);
    if(currentBarTime == lastBarTime)
       return;
 
@@ -182,7 +182,7 @@ bool CheckBuySignal()
    ArraySetAsSeries(adxValue, true);
 
    // 価格とMAデータの取得
-   if(CopyClose(Symbol_to_Trade, PERIOD_H1, 0, 5, close) < 5)
+   if(CopyClose(Symbol_to_Trade, PERIOD_M30, 0, 5, close) < 5)
       return false;
    if(CopyBuffer(ma75Handle, 0, 0, 5, ma75) < 5)
       return false;
@@ -195,24 +195,26 @@ bool CheckBuySignal()
 
    double proximityPoints = MA_Proximity_Pips * SymbolInfoDouble(Symbol_to_Trade, SYMBOL_POINT);
 
-   // Rule 3: 押し目形成の確認
-   // 1. 前足がMA75に接近していた
-   bool wasNearMA = (close[1] > ma75[1]) && (MathAbs(close[1] - ma75[1]) <= proximityPoints);
-
-   // 2. 現在足がMA75から反発
-   bool bounced = (close[0] > ma75[0]) && (close[0] > close[1]);
-
-   // 3. 価格がMA75の上にある
-   bool aboveMA75 = close[0] > ma75[0];
-
-   // 4. 200 EMAフィルター: 価格が200 EMAの上にある（上昇トレンド確認）
+   // 共通フィルター
    bool above200EMA = close[0] > ma200[0];
-
-   // 5. ADXフィルター: トレンドが十分に強い
    bool strongTrend = adxValue[0] >= ADX_Min_Level;
+   bool maTrendUp = (ma75[0] > ma75[1]) && (ma75[1] > ma75[2]);
 
-   // 条件緩和: MA接近 OR 反発のいずれかでOK（エントリー機会増加）
-   return ((wasNearMA || bounced) && aboveMA75 && above200EMA && strongTrend);
+   // Rule 1: MAブレイクアウト（新トレンド開始）
+   // MA上向き + 前足がMAより下 + 現在足がMAより上
+   bool rule1 = maTrendUp && (close[1] <= ma75[1]) && (close[0] > ma75[0]);
+
+   // Rule 2: MA反転後の初押し（ダマシからの回復）
+   // MA上向き + 前足がMAを下抜け + 現在足がMAより上に戻った
+   bool rule2 = maTrendUp && (close[2] > ma75[2]) && (close[1] < ma75[1]) && (close[0] > ma75[0]);
+
+   // Rule 3: 押し目買い（既存）
+   bool wasNearMA = (close[1] > ma75[1]) && (MathAbs(close[1] - ma75[1]) <= proximityPoints);
+   bool bounced = (close[0] > ma75[0]) && (close[0] > close[1]);
+   bool rule3 = (wasNearMA || bounced);
+
+   // いずれかのルールに該当 + 共通フィルター
+   return ((rule1 || rule2 || rule3) && above200EMA && strongTrend);
 }
 
 //+------------------------------------------------------------------+
@@ -227,7 +229,7 @@ bool CheckSellSignal()
    ArraySetAsSeries(adxValue, true);
 
    // 価格とMAデータの取得
-   if(CopyClose(Symbol_to_Trade, PERIOD_H1, 0, 5, close) < 5)
+   if(CopyClose(Symbol_to_Trade, PERIOD_M30, 0, 5, close) < 5)
       return false;
    if(CopyBuffer(ma75Handle, 0, 0, 5, ma75) < 5)
       return false;
@@ -240,24 +242,26 @@ bool CheckSellSignal()
 
    double proximityPoints = MA_Proximity_Pips * SymbolInfoDouble(Symbol_to_Trade, SYMBOL_POINT);
 
-   // Rule 7: 戻り形成の確認
-   // 1. 前足がMA75に接近していた
-   bool wasNearMA = (close[1] < ma75[1]) && (MathAbs(close[1] - ma75[1]) <= proximityPoints);
-
-   // 2. 現在足がMA75から反落
-   bool bounced = (close[0] < ma75[0]) && (close[0] < close[1]);
-
-   // 3. 価格がMA75の下にある
-   bool belowMA75 = close[0] < ma75[0];
-
-   // 4. 200 EMAフィルター: 価格が200 EMAの下にある（下降トレンド確認）
+   // 共通フィルター
    bool below200EMA = close[0] < ma200[0];
-
-   // 5. ADXフィルター: トレンドが十分に強い
    bool strongTrend = adxValue[0] >= ADX_Min_Level;
+   bool maTrendDown = (ma75[0] < ma75[1]) && (ma75[1] < ma75[2]);
 
-   // 条件緩和: MA接近 OR 反落のいずれかでOK（エントリー機会増加）
-   return ((wasNearMA || bounced) && belowMA75 && below200EMA && strongTrend);
+   // Rule 5: MAブレイクアウト（新トレンド開始）
+   // MA下向き + 前足がMAより上 + 現在足がMAより下
+   bool rule5 = maTrendDown && (close[1] >= ma75[1]) && (close[0] < ma75[0]);
+
+   // Rule 6: MA反転後の初戻り（ダマシからの回復）
+   // MA下向き + 前足がMAを上抜け + 現在足がMAより下に戻った
+   bool rule6 = maTrendDown && (close[2] < ma75[2]) && (close[1] > ma75[1]) && (close[0] < ma75[0]);
+
+   // Rule 7: 戻り売り（既存）
+   bool wasNearMA = (close[1] < ma75[1]) && (MathAbs(close[1] - ma75[1]) <= proximityPoints);
+   bool bounced = (close[0] < ma75[0]) && (close[0] < close[1]);
+   bool rule7 = (wasNearMA || bounced);
+
+   // いずれかのルールに該当 + 共通フィルター
+   return ((rule5 || rule6 || rule7) && below200EMA && strongTrend);
 }
 
 //+------------------------------------------------------------------+
