@@ -16,7 +16,7 @@ input double   Max_Lot_Size = 10.0;                // 最大ロット数
 input int      MA_Period_Mid = 75;                 // H1中期MA期間 (EMA)
 input int      MA_Period_Long = 200;               // H1長期MA期間 (EMA)
 input ENUM_TIMEFRAMES MTF_Timeframe = PERIOD_H4;   // MTFトレンド確認用時間足
-input int      MA_Proximity_Pips = 100;            // MA近接と見なす許容範囲 (Point単位)
+input int      MA_Proximity_Pips = 250;            // MA近接と見なす許容範囲 (Point単位)
 input double   TakeProfit_Ratio = 2.0;             // リスクリワード比率
 input int      EMA_Short_Period = 20;              // 短期EMA（反発/反落確認用）
 input int      Magic_Number = 123456;              // マジックナンバー
@@ -170,17 +170,17 @@ int AnalyzeTrend()
 //+------------------------------------------------------------------+
 bool CheckBuySignal()
 {
-   double close[], ma75[], emaShort[];
+   double close[], ma75[], ma200[];
    ArraySetAsSeries(close, true);
    ArraySetAsSeries(ma75, true);
-   ArraySetAsSeries(emaShort, true);
+   ArraySetAsSeries(ma200, true);
 
    // 価格とMAデータの取得
    if(CopyClose(Symbol_to_Trade, PERIOD_H1, 0, 5, close) < 5)
       return false;
    if(CopyBuffer(ma75Handle, 0, 0, 5, ma75) < 5)
       return false;
-   if(CopyBuffer(emaShortHandle, 0, 0, 3, emaShort) < 3)
+   if(CopyBuffer(ma200Handle, 0, 0, 3, ma200) < 3)
       return false;
 
    double proximityPoints = MA_Proximity_Pips * SymbolInfoDouble(Symbol_to_Trade, SYMBOL_POINT);
@@ -192,33 +192,13 @@ bool CheckBuySignal()
    // 2. 現在足がMA75から反発
    bool bounced = (close[0] > ma75[0]) && (close[0] > close[1]);
 
-   // 3. 短期EMAが上向きに転じた（追加フィルター）
-   bool emaUp = emaShort[0] > emaShort[1];
+   // 3. 価格がMA75の上にある
+   bool aboveMA75 = close[0] > ma75[0];
 
-   // 4. 価格がMA75の上にある
-   bool aboveMA = close[0] > ma75[0];
+   // 4. 200 EMAフィルター: 価格が200 EMAの上にある（上昇トレンド確認）
+   bool above200EMA = close[0] > ma200[0];
 
-   // 5. ダウ理論チェック（オプション）: 安値の切り上げ
-   bool higherLow = true;
-   if(close[2] != 0)
-   {
-      MqlRates rates[];
-      ArraySetAsSeries(rates, true);
-      if(CopyRates(Symbol_to_Trade, PERIOD_H1, 0, 5, rates) == 5)
-      {
-         double recentLow = rates[0].low;
-         for(int i = 1; i < 5; i++)
-         {
-            if(rates[i].low < recentLow)
-            {
-               higherLow = false;
-               break;
-            }
-         }
-      }
-   }
-
-   return (wasNearMA && bounced && emaUp && aboveMA);
+   return (wasNearMA && bounced && aboveMA75 && above200EMA);
 }
 
 //+------------------------------------------------------------------+
@@ -226,17 +206,17 @@ bool CheckBuySignal()
 //+------------------------------------------------------------------+
 bool CheckSellSignal()
 {
-   double close[], ma75[], emaShort[];
+   double close[], ma75[], ma200[];
    ArraySetAsSeries(close, true);
    ArraySetAsSeries(ma75, true);
-   ArraySetAsSeries(emaShort, true);
+   ArraySetAsSeries(ma200, true);
 
    // 価格とMAデータの取得
    if(CopyClose(Symbol_to_Trade, PERIOD_H1, 0, 5, close) < 5)
       return false;
    if(CopyBuffer(ma75Handle, 0, 0, 5, ma75) < 5)
       return false;
-   if(CopyBuffer(emaShortHandle, 0, 0, 3, emaShort) < 3)
+   if(CopyBuffer(ma200Handle, 0, 0, 3, ma200) < 3)
       return false;
 
    double proximityPoints = MA_Proximity_Pips * SymbolInfoDouble(Symbol_to_Trade, SYMBOL_POINT);
@@ -248,33 +228,13 @@ bool CheckSellSignal()
    // 2. 現在足がMA75から反落
    bool bounced = (close[0] < ma75[0]) && (close[0] < close[1]);
 
-   // 3. 短期EMAが下向きに転じた（追加フィルター）
-   bool emaDown = emaShort[0] < emaShort[1];
+   // 3. 価格がMA75の下にある
+   bool belowMA75 = close[0] < ma75[0];
 
-   // 4. 価格がMA75の下にある
-   bool belowMA = close[0] < ma75[0];
+   // 4. 200 EMAフィルター: 価格が200 EMAの下にある（下降トレンド確認）
+   bool below200EMA = close[0] < ma200[0];
 
-   // 5. ダウ理論チェック（オプション）: 高値の切り下げ
-   bool lowerHigh = true;
-   if(close[2] != 0)
-   {
-      MqlRates rates[];
-      ArraySetAsSeries(rates, true);
-      if(CopyRates(Symbol_to_Trade, PERIOD_H1, 0, 5, rates) == 5)
-      {
-         double recentHigh = rates[0].high;
-         for(int i = 1; i < 5; i++)
-         {
-            if(rates[i].high > recentHigh)
-            {
-               lowerHigh = false;
-               break;
-            }
-         }
-      }
-   }
-
-   return (wasNearMA && bounced && emaDown && belowMA);
+   return (wasNearMA && bounced && belowMA75 && below200EMA);
 }
 
 //+------------------------------------------------------------------+
