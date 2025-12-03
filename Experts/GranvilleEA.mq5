@@ -27,10 +27,13 @@ input int      BreakEven_Offset_Pips = 10;         // オフセット（Pips）
 input bool     PartialTP_Enable = true;            // 部分利確有効/無効
 input double   PartialTP_Close_Percent = 50.0;     // 決済する割合（％）
 input double   PartialTP_Trigger_Percent = 50.0;   // トリガー（TP距離の％）
-input bool     TimeFilter_Enable = false;          // 時間帯フィルター有効/無効
-input int      Trade_Start_Hour = 8;               // 取引開始時刻（時）
+input bool     TrailingStop_Enable = true;         // トレーリングストップ有効/無効
+input int      TrailingStop_Start_Pips = 300;      // トレーリング開始（Pips）
+input int      TrailingStop_Distance_Pips = 200;   // トレーリング距離（Pips）
+input bool     TimeFilter_Enable = true;           // 時間帯フィルター有効/無効
+input int      Trade_Start_Hour = 12;              // 取引開始時刻（時）
 input int      Trade_Start_Minute = 0;             // 取引開始時刻（分）
-input int      Trade_End_Hour = 17;                // 取引終了時刻（時）
+input int      Trade_End_Hour = 5;                 // 取引終了時刻（時）
 input int      Trade_End_Minute = 0;               // 取引終了時刻（分）
 input int      Magic_Number = 123456;              // マジックナンバー
 input string   EA_Comment = "Granville EA";        // EAコメント
@@ -121,6 +124,12 @@ void OnTick()
       if(BreakEven_Enable)
       {
          CheckAndSetBreakEven();
+      }
+
+      // トレーリングストップ機能
+      if(TrailingStop_Enable)
+      {
+         CheckAndSetTrailingStop();
       }
       return; // 既にポジションがある場合は新規エントリーしない
    }
@@ -702,6 +711,82 @@ bool IsWithinTradingHours()
    {
       // 通常の場合（例: 08:00 - 17:00）
       return (currentTotalMinutes >= startTotalMinutes && currentTotalMinutes < endTotalMinutes);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| トレーリングストップ: 利益が伸びた時にSLを自動追従                      |
+//+------------------------------------------------------------------+
+void CheckAndSetTrailingStop()
+{
+   if(!PositionSelect(Symbol_to_Trade))
+      return;
+
+   ulong ticket = PositionGetInteger(POSITION_TICKET);
+   double positionOpenPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+   double positionSL = PositionGetDouble(POSITION_SL);
+   double positionTP = PositionGetDouble(POSITION_TP);
+   ENUM_POSITION_TYPE positionType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+
+   double point = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_POINT);
+   double startDistance = TrailingStop_Start_Pips * point * 10;
+   double trailDistance = TrailingStop_Distance_Pips * point * 10;
+
+   // 買いポジションの場合
+   if(positionType == POSITION_TYPE_BUY)
+   {
+      double currentPrice = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_BID);
+      double currentProfit = currentPrice - positionOpenPrice;
+
+      // トレーリング開始条件: 利益が開始ポイント以上
+      if(currentProfit >= startDistance)
+      {
+         double newSL = currentPrice - trailDistance;
+
+         // SLは後退させない（ラチェット効果）
+         // 初期SLより高い位置にある場合のみ更新
+         if(newSL > positionSL)
+         {
+            if(trade.PositionModify(ticket, newSL, positionTP))
+            {
+               Print("🔄 トレーリングストップ更新 [BUY]: Ticket=", ticket,
+                     ", 新SL=", DoubleToString(newSL, 2),
+                     ", 距離=", DoubleToString((currentPrice - newSL)/point/10, 1), " Pips");
+            }
+            else
+            {
+               Print("❌ トレーリングストップ失敗 [BUY]: ", trade.ResultRetcodeDescription());
+            }
+         }
+      }
+   }
+   // 売りポジションの場合
+   else if(positionType == POSITION_TYPE_SELL)
+   {
+      double currentPrice = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_ASK);
+      double currentProfit = positionOpenPrice - currentPrice;
+
+      // トレーリング開始条件: 利益が開始ポイント以上
+      if(currentProfit >= startDistance)
+      {
+         double newSL = currentPrice + trailDistance;
+
+         // SLは後退させない（ラチェット効果）
+         // 初期SLより低い位置にある場合のみ更新
+         if(newSL < positionSL || positionSL == 0)
+         {
+            if(trade.PositionModify(ticket, newSL, positionTP))
+            {
+               Print("🔄 トレーリングストップ更新 [SELL]: Ticket=", ticket,
+                     ", 新SL=", DoubleToString(newSL, 2),
+                     ", 距離=", DoubleToString((newSL - currentPrice)/point/10, 1), " Pips");
+            }
+            else
+            {
+               Print("❌ トレーリングストップ失敗 [SELL]: ", trade.ResultRetcodeDescription());
+            }
+         }
+      }
    }
 }
 //+------------------------------------------------------------------+
