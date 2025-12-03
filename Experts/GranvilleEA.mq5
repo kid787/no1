@@ -24,6 +24,9 @@ input double   ADX_Min_Level = 20.0;               // ADX最小値（トレン�
 input bool     BreakEven_Enable = true;            // ブレイクイーブン有効/無効
 input double   BreakEven_Trigger_Percent = 50.0;   // トリガー（SL幅の％）
 input int      BreakEven_Offset_Pips = 10;         // オフセット（Pips）
+input bool     PartialTP_Enable = true;            // 部分利確有効/無効
+input double   PartialTP_Close_Percent = 50.0;     // 決済する割合（％）
+input double   PartialTP_Trigger_Percent = 50.0;   // トリガー（TP距離の％）
 input int      Magic_Number = 123456;              // マジックナンバー
 input string   EA_Comment = "Granville EA";        // EAコメント
 input int      Slippage_Points = 30;               // スリッページ許容値
@@ -32,6 +35,7 @@ input int      Slippage_Points = 30;               // スリッページ許容�
 CTrade trade;
 int ma75Handle, ma200Handle, mtfMA75Handle, emaShortHandle, adxHandle;
 datetime lastBarTime = 0;
+bool partialTPExecuted = false;  // 部分利確が実行されたかのフラグ
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -102,6 +106,12 @@ void OnTick()
    // 既存のポジションチェック
    if(PositionSelect(Symbol_to_Trade))
    {
+      // 部分利確機能（ブレイクイーブンより先に実行）
+      if(PartialTP_Enable && !partialTPExecuted)
+      {
+         CheckAndSetPartialTP();
+      }
+
       // ブレイクイーブン機能
       if(BreakEven_Enable)
       {
@@ -109,6 +119,9 @@ void OnTick()
       }
       return; // 既にポジションがある場合は新規エントリーしない
    }
+
+   // ポジションがない場合はフラグをリセット
+   partialTPExecuted = false;
 
    // トレンド分析
    int trendDirection = AnalyzeTrend();
@@ -552,6 +565,101 @@ void CheckAndSetBreakEven()
          else
          {
             Print("❌ ブレイクイーブン失敗 [SELL]: ", trade.ResultRetcodeDescription());
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| 部分利確管理                                                       |
+//+------------------------------------------------------------------+
+void CheckAndSetPartialTP()
+{
+   // ポジション情報の取得
+   double positionOpenPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+   double positionSL = PositionGetDouble(POSITION_SL);
+   double positionTP = PositionGetDouble(POSITION_TP);
+   double positionVolume = PositionGetDouble(POSITION_VOLUME);
+   long positionType = PositionGetInteger(POSITION_TYPE);
+   ulong ticket = PositionGetInteger(POSITION_TICKET);
+
+   double point = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_POINT);
+   int digits = (int)SymbolInfoInteger(Symbol_to_Trade, SYMBOL_DIGITS);
+
+   // TPが設定されていない場合は終了
+   if(positionTP == 0) return;
+
+   // TP距離の計算
+   double tpDistance = MathAbs(positionTP - positionOpenPrice);
+   if(tpDistance == 0) return;
+
+   // トリガー距離の計算
+   double triggerDistance = tpDistance * PartialTP_Trigger_Percent / 100.0;
+
+   // 決済ロット数の計算
+   double minLot = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_VOLUME_MIN);
+   double lotStep = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_VOLUME_STEP);
+   double closeVolume = positionVolume * PartialTP_Close_Percent / 100.0;
+
+   // ロット数を正規化
+   closeVolume = MathFloor(closeVolume / lotStep) * lotStep;
+   closeVolume = NormalizeDouble(closeVolume, 2);
+
+   // 最小ロット未満または残りが最小ロット未満になる場合はスキップ
+   double remainVolume = positionVolume - closeVolume;
+   if(closeVolume < minLot || remainVolume < minLot)
+   {
+      Print("⚠️ 部分利確スキップ: ロット数が小さすぎます (決済: ", closeVolume,
+            ", 残り: ", remainVolume, ", 最小: ", minLot, ")");
+      partialTPExecuted = true; // 実行不可能なのでフラグを立てる
+      return;
+   }
+
+   // 買いポジションの場合
+   if(positionType == POSITION_TYPE_BUY)
+   {
+      double currentPrice = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_BID);
+      double currentProfit = currentPrice - positionOpenPrice;
+
+      // トリガー条件: 利益がTP距離の指定％以上
+      if(currentProfit >= triggerDistance)
+      {
+         // 部分決済を実行
+         if(trade.PositionClosePartial(ticket, closeVolume))
+         {
+            partialTPExecuted = true;
+            Print("✅ 部分利確実行 [BUY]: Ticket=", ticket,
+                  ", 決済ロット=", closeVolume, " / ", positionVolume,
+                  " (", PartialTP_Close_Percent, "%), 価格=", currentPrice,
+                  ", 利益=", DoubleToString(currentProfit/point/10, 1), " Pips");
+         }
+         else
+         {
+            Print("❌ 部分利確失敗 [BUY]: ", trade.ResultRetcodeDescription());
+         }
+      }
+   }
+   // 売りポジションの場合
+   else if(positionType == POSITION_TYPE_SELL)
+   {
+      double currentPrice = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_ASK);
+      double currentProfit = positionOpenPrice - currentPrice;
+
+      // トリガー条件: 利益がTP距離の指定％以上
+      if(currentProfit >= triggerDistance)
+      {
+         // 部分決済を実行
+         if(trade.PositionClosePartial(ticket, closeVolume))
+         {
+            partialTPExecuted = true;
+            Print("✅ 部分利確実行 [SELL]: Ticket=", ticket,
+                  ", 決済ロット=", closeVolume, " / ", positionVolume,
+                  " (", PartialTP_Close_Percent, "%), 価格=", currentPrice,
+                  ", 利益=", DoubleToString(currentProfit/point/10, 1), " Pips");
+         }
+         else
+         {
+            Print("❌ 部分利確失敗 [SELL]: ", trade.ResultRetcodeDescription());
          }
       }
    }
