@@ -21,6 +21,9 @@ input double   TakeProfit_Ratio = 1.5;             // リスクリワード比�
 input int      EMA_Short_Period = 20;              // 短期EMA（反発/反落確認用）
 input int      ADX_Period = 14;                    // ADX期間
 input double   ADX_Min_Level = 20.0;               // ADX最小値（トレンド強度フィルター）
+input bool     BreakEven_Enable = true;            // ブレイクイーブン有効/無効
+input double   BreakEven_Trigger_Percent = 50.0;   // トリガー（SL幅の％）
+input int      BreakEven_Offset_Pips = 10;         // オフセット（Pips）
 input int      Magic_Number = 123456;              // マジックナンバー
 input string   EA_Comment = "Granville EA";        // EAコメント
 input int      Slippage_Points = 30;               // スリッページ許容値
@@ -99,6 +102,11 @@ void OnTick()
    // 既存のポジションチェック
    if(PositionSelect(Symbol_to_Trade))
    {
+      // ブレイクイーブン機能
+      if(BreakEven_Enable)
+      {
+         CheckAndSetBreakEven();
+      }
       return; // 既にポジションがある場合は新規エントリーしない
    }
 
@@ -472,5 +480,80 @@ double CalculateLotSize(double entryPrice, double stopLoss)
          ", SL距離=", slDistance, ", ロット=", lotSize);
 
    return lotSize;
+}
+
+//+------------------------------------------------------------------+
+//| ブレイクイーブン管理                                               |
+//+------------------------------------------------------------------+
+void CheckAndSetBreakEven()
+{
+   // ポジション情報の取得
+   double positionOpenPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+   double positionSL = PositionGetDouble(POSITION_SL);
+   double positionTP = PositionGetDouble(POSITION_TP);
+   long positionType = PositionGetInteger(POSITION_TYPE);
+   ulong ticket = PositionGetInteger(POSITION_TICKET);
+
+   double point = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_POINT);
+   int digits = (int)SymbolInfoInteger(Symbol_to_Trade, SYMBOL_DIGITS);
+
+   // SL距離の計算
+   double slDistance = MathAbs(positionOpenPrice - positionSL);
+   if(slDistance == 0) return; // SLが設定されていない場合は終了
+
+   // トリガー距離の計算
+   double triggerDistance = slDistance * BreakEven_Trigger_Percent / 100.0;
+   double offsetPoints = BreakEven_Offset_Pips * point * 10;
+
+   // 買いポジションの場合
+   if(positionType == POSITION_TYPE_BUY)
+   {
+      double currentPrice = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_BID);
+      double currentProfit = currentPrice - positionOpenPrice;
+      double newSL = positionOpenPrice + offsetPoints;
+
+      // トリガー条件: 利益が一定距離以上 AND SLがまだエントリー価格より下
+      if(currentProfit >= triggerDistance && positionSL < positionOpenPrice)
+      {
+         newSL = NormalizeDouble(newSL, digits);
+
+         // SLを変更（TPは変更しない）
+         if(trade.PositionModify(ticket, newSL, positionTP))
+         {
+            Print("✅ ブレイクイーブン発動 [BUY]: Ticket=", ticket,
+                  ", 元SL=", positionSL, ", 新SL=", newSL,
+                  " (利益: ", DoubleToString(currentProfit/point/10, 1), " Pips)");
+         }
+         else
+         {
+            Print("❌ ブレイクイーブン失敗 [BUY]: ", trade.ResultRetcodeDescription());
+         }
+      }
+   }
+   // 売りポジションの場合
+   else if(positionType == POSITION_TYPE_SELL)
+   {
+      double currentPrice = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_ASK);
+      double currentProfit = positionOpenPrice - currentPrice;
+      double newSL = positionOpenPrice - offsetPoints;
+
+      // トリガー条件: 利益が一定距離以上 AND SLがまだエントリー価格より上
+      if(currentProfit >= triggerDistance && positionSL > positionOpenPrice)
+      {
+         newSL = NormalizeDouble(newSL, digits);
+
+         // SLを変更（TPは変更しない）
+         if(trade.PositionModify(ticket, newSL, positionTP))
+         {
+            Print("✅ ブレイクイーブン発動 [SELL]: Ticket=", ticket,
+                  ", 元SL=", positionSL, ", 新SL=", newSL,
+                  " (利益: ", DoubleToString(currentProfit/point/10, 1), " Pips)");
+         }
+         else
+         {
+            Print("❌ ブレイクイーブン失敗 [SELL]: ", trade.ResultRetcodeDescription());
+         }
+      }
+   }
 }
 //+------------------------------------------------------------------+
