@@ -27,6 +27,11 @@ input int      BreakEven_Offset_Pips = 10;         // オフセット（Pips）
 input bool     PartialTP_Enable = true;            // 部分利確有効/無効
 input double   PartialTP_Close_Percent = 50.0;     // 決済する割合（％）
 input double   PartialTP_Trigger_Percent = 50.0;   // トリガー（TP距離の％）
+input bool     TimeFilter_Enable = false;          // 時間帯フィルター有効/無効
+input int      Trade_Start_Hour = 8;               // 取引開始時刻（時）
+input int      Trade_Start_Minute = 0;             // 取引開始時刻（分）
+input int      Trade_End_Hour = 17;                // 取引終了時刻（時）
+input int      Trade_End_Minute = 0;               // 取引終了時刻（分）
 input int      Magic_Number = 123456;              // マジックナンバー
 input string   EA_Comment = "Granville EA";        // EAコメント
 input int      Slippage_Points = 30;               // スリッページ許容値
@@ -122,6 +127,12 @@ void OnTick()
 
    // ポジションがない場合はフラグをリセット
    partialTPExecuted = false;
+
+   // 時間帯フィルターのチェック
+   if(TimeFilter_Enable && !IsWithinTradingHours())
+   {
+      return; // 取引時間外の場合は新規エントリーしない
+   }
 
    // トレンド分析
    int trendDirection = AnalyzeTrend();
@@ -662,6 +673,35 @@ void CheckAndSetPartialTP()
             Print("❌ 部分利確失敗 [SELL]: ", trade.ResultRetcodeDescription());
          }
       }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| 時間帯フィルター: 取引可能時間内かチェック                              |
+//+------------------------------------------------------------------+
+bool IsWithinTradingHours()
+{
+   MqlDateTime currentTime;
+   TimeToStruct(TimeCurrent(), currentTime);
+
+   int currentHour = currentTime.hour;
+   int currentMinute = currentTime.min;
+
+   // 現在時刻を分単位に変換
+   int currentTotalMinutes = currentHour * 60 + currentMinute;
+   int startTotalMinutes = Trade_Start_Hour * 60 + Trade_Start_Minute;
+   int endTotalMinutes = Trade_End_Hour * 60 + Trade_End_Minute;
+
+   // 取引時間が日をまたぐ場合（例: 22:00 - 08:00）
+   if(endTotalMinutes < startTotalMinutes)
+   {
+      // 現在時刻が開始時刻以降、または終了時刻以前ならOK
+      return (currentTotalMinutes >= startTotalMinutes || currentTotalMinutes < endTotalMinutes);
+   }
+   else
+   {
+      // 通常の場合（例: 08:00 - 17:00）
+      return (currentTotalMinutes >= startTotalMinutes && currentTotalMinutes < endTotalMinutes);
    }
 }
 //+------------------------------------------------------------------+
