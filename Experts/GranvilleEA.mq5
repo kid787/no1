@@ -27,9 +27,11 @@ input int      BreakEven_Offset_Pips = 10;         // オフセット（Pips）
 input bool     PartialTP_Enable = true;            // 部分利確有効/無効
 input double   PartialTP_Close_Percent = 50.0;     // 決済する割合（％）
 input double   PartialTP_Trigger_Percent = 50.0;   // トリガー（TP距離の％）
-input bool     TrailingStop_Enable = false;        // トレーリングストップ有効/無効 (注: バックテストで+35.34%→+19.05%に低下したためデフォルト無効)
-input int      TrailingStop_Start_Pips = 300;      // トレーリング開始（Pips）
-input int      TrailingStop_Distance_Pips = 200;   // トレーリング距離（Pips）
+input bool     DailyLossLimit_Enable = true;       // デイリー損失リミット有効/無効
+input double   DailyLossLimit_Percent = 4.0;       // デイリー損失リミット（％）
+input int      ATR_Period = 14;                    // ATRボラティリティ期間
+input double   ATR_Min_Multiplier = 0.5;           // ATR最小倍率（低ボラティリティフィルター）
+input double   ATR_Max_Multiplier = 2.0;           // ATR最大倍率（高ボラティリティフィルター）
 input bool     TimeFilter_Enable = true;           // 時間帯フィルター有効/無効
 input int      Trade_Start_Hour = 12;              // 取引開始時刻（時）
 input int      Trade_Start_Minute = 0;             // 取引開始時刻（分）
@@ -41,9 +43,14 @@ input int      Slippage_Points = 30;               // スリッページ許容�
 
 // グローバル変数
 CTrade trade;
-int ma75Handle, ma200Handle, mtfMA75Handle, emaShortHandle, adxHandle;
+int ma75Handle, ma200Handle, mtfMA75Handle, emaShortHandle, adxHandle, atrHandle;
 datetime lastBarTime = 0;
 bool partialTPExecuted = false;  // 部分利確が実行されたかのフラグ
+
+// デイリー損失リミット用変数
+double dailyStartBalance = 0;
+datetime lastResetDate = 0;
+bool dailyTradingAllowed = true;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -68,18 +75,28 @@ int OnInit()
    mtfMA75Handle = iMA(Symbol_to_Trade, MTF_Timeframe, MA_Period_Mid, 0, MODE_EMA, PRICE_CLOSE);
    emaShortHandle = iMA(Symbol_to_Trade, PERIOD_M30, EMA_Short_Period, 0, MODE_EMA, PRICE_CLOSE);
    adxHandle = iADX(Symbol_to_Trade, PERIOD_M30, ADX_Period);
+   atrHandle = iATR(Symbol_to_Trade, PERIOD_M30, ATR_Period);
 
    if(ma75Handle == INVALID_HANDLE || ma200Handle == INVALID_HANDLE ||
       mtfMA75Handle == INVALID_HANDLE || emaShortHandle == INVALID_HANDLE ||
-      adxHandle == INVALID_HANDLE)
+      adxHandle == INVALID_HANDLE || atrHandle == INVALID_HANDLE)
    {
       Print("インジケーターハンドルの作成に失敗しました");
       return(INIT_FAILED);
    }
 
+   // デイリー損失リミットの初期化
+   dailyStartBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   MqlDateTime currentTime;
+   TimeToStruct(TimeCurrent(), currentTime);
+   lastResetDate = StringToTime(StringFormat("%04d.%02d.%02d",
+                                currentTime.year, currentTime.mon, currentTime.day));
+   dailyTradingAllowed = true;
+
    Print("Granville EA が正常に初期化されました");
    Print("取引銘柄: ", Symbol_to_Trade);
    Print("リスク設定: ", Risk_Percent, "%");
+   Print("デイリー損失リミット: ", DailyLossLimit_Percent, "% (開始残高: $", dailyStartBalance, ")");
 
    return(INIT_SUCCEEDED);
 }
@@ -95,6 +112,7 @@ void OnDeinit(const int reason)
    if(mtfMA75Handle != INVALID_HANDLE) IndicatorRelease(mtfMA75Handle);
    if(emaShortHandle != INVALID_HANDLE) IndicatorRelease(emaShortHandle);
    if(adxHandle != INVALID_HANDLE) IndicatorRelease(adxHandle);
+   if(atrHandle != INVALID_HANDLE) IndicatorRelease(atrHandle);
 
    Print("Granville EA が終了しました");
 }
@@ -111,6 +129,12 @@ void OnTick()
 
    lastBarTime = currentBarTime;
 
+   // デイリー損失リミットのチェック
+   if(DailyLossLimit_Enable)
+   {
+      CheckDailyLossLimit();
+   }
+
    // 既存のポジションチェック
    if(PositionSelect(Symbol_to_Trade))
    {
@@ -126,21 +150,28 @@ void OnTick()
          CheckAndSetBreakEven();
       }
 
-      // トレーリングストップ機能
-      if(TrailingStop_Enable)
-      {
-         CheckAndSetTrailingStop();
-      }
       return; // 既にポジションがある場合は新規エントリーしない
    }
 
    // ポジションがない場合はフラグをリセット
    partialTPExecuted = false;
 
+   // デイリー損失リミット到達時は新規エントリー禁止
+   if(DailyLossLimit_Enable && !dailyTradingAllowed)
+   {
+      return;
+   }
+
    // 時間帯フィルターのチェック
    if(TimeFilter_Enable && !IsWithinTradingHours())
    {
       return; // 取引時間外の場合は新規エントリーしない
+   }
+
+   // ATRボラティリティフィルターのチェック
+   if(!CheckVolatilityFilter())
+   {
+      return; // ボラティリティが適切でない場合は取引しない
    }
 
    // トレンド分析
@@ -715,78 +746,84 @@ bool IsWithinTradingHours()
 }
 
 //+------------------------------------------------------------------+
-//| トレーリングストップ: 利益が伸びた時にSLを自動追従                      |
+//| デイリー損失リミット: 当日の損失が一定%を超えたら取引停止               |
 //+------------------------------------------------------------------+
-void CheckAndSetTrailingStop()
+void CheckDailyLossLimit()
 {
-   if(!PositionSelect(Symbol_to_Trade))
-      return;
+   MqlDateTime currentTime;
+   TimeToStruct(TimeCurrent(), currentTime);
 
-   ulong ticket = PositionGetInteger(POSITION_TICKET);
-   double positionOpenPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-   double positionSL = PositionGetDouble(POSITION_SL);
-   double positionTP = PositionGetDouble(POSITION_TP);
-   ENUM_POSITION_TYPE positionType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+   // 日付が変わったかチェック
+   datetime currentDate = StringToTime(StringFormat("%04d.%02d.%02d",
+                                       currentTime.year, currentTime.mon, currentTime.day));
 
-   double point = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_POINT);
-   double startDistance = TrailingStop_Start_Pips * point * 10;
-   double trailDistance = TrailingStop_Distance_Pips * point * 10;
-
-   // 買いポジションの場合
-   if(positionType == POSITION_TYPE_BUY)
+   // 日付が変わったらリセット
+   if(currentDate != lastResetDate)
    {
-      double currentPrice = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_BID);
-      double currentProfit = currentPrice - positionOpenPrice;
-
-      // トレーリング開始条件: 利益が開始ポイント以上
-      if(currentProfit >= startDistance)
-      {
-         double newSL = currentPrice - trailDistance;
-
-         // SLは後退させない（ラチェット効果）
-         // 初期SLより高い位置にある場合のみ更新
-         if(newSL > positionSL)
-         {
-            if(trade.PositionModify(ticket, newSL, positionTP))
-            {
-               Print("🔄 トレーリングストップ更新 [BUY]: Ticket=", ticket,
-                     ", 新SL=", DoubleToString(newSL, 2),
-                     ", 距離=", DoubleToString((currentPrice - newSL)/point/10, 1), " Pips");
-            }
-            else
-            {
-               Print("❌ トレーリングストップ失敗 [BUY]: ", trade.ResultRetcodeDescription());
-            }
-         }
-      }
+      dailyStartBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+      lastResetDate = currentDate;
+      dailyTradingAllowed = true;
+      Print("📅 新しい取引日開始: ", TimeToString(currentDate, TIME_DATE),
+            " - 開始残高: $", DoubleToString(dailyStartBalance, 2));
    }
-   // 売りポジションの場合
-   else if(positionType == POSITION_TYPE_SELL)
+
+   // 現在の残高と損益を計算
+   double currentBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+   double dailyPnL = currentBalance - dailyStartBalance;
+   double dailyPnLPercent = (dailyPnL / dailyStartBalance) * 100.0;
+
+   // 損失リミットに到達したかチェック
+   if(dailyPnLPercent <= -DailyLossLimit_Percent && dailyTradingAllowed)
    {
-      double currentPrice = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_ASK);
-      double currentProfit = positionOpenPrice - currentPrice;
-
-      // トレーリング開始条件: 利益が開始ポイント以上
-      if(currentProfit >= startDistance)
-      {
-         double newSL = currentPrice + trailDistance;
-
-         // SLは後退させない（ラチェット効果）
-         // 初期SLより低い位置にある場合のみ更新
-         if(newSL < positionSL || positionSL == 0)
-         {
-            if(trade.PositionModify(ticket, newSL, positionTP))
-            {
-               Print("🔄 トレーリングストップ更新 [SELL]: Ticket=", ticket,
-                     ", 新SL=", DoubleToString(newSL, 2),
-                     ", 距離=", DoubleToString((newSL - currentPrice)/point/10, 1), " Pips");
-            }
-            else
-            {
-               Print("❌ トレーリングストップ失敗 [SELL]: ", trade.ResultRetcodeDescription());
-            }
-         }
-      }
+      dailyTradingAllowed = false;
+      Print("🚫 デイリー損失リミット到達: ", DoubleToString(dailyPnLPercent, 2),
+            "% (開始: $", DoubleToString(dailyStartBalance, 2),
+            " → 現在: $", DoubleToString(currentBalance, 2), ")",
+            " - 本日の新規取引を停止");
    }
+}
+
+//+------------------------------------------------------------------+
+//| ATRボラティリティフィルター: 適切なボラティリティの時のみ取引          |
+//+------------------------------------------------------------------+
+bool CheckVolatilityFilter()
+{
+   double atr[];
+   ArraySetAsSeries(atr, true);
+
+   // ATRデータを20期間分取得
+   if(CopyBuffer(atrHandle, 0, 0, 20, atr) < 20)
+   {
+      Print("⚠️ ATRデータの取得に失敗");
+      return false;
+   }
+
+   // 現在のATRと20期間平均を計算
+   double currentATR = atr[0];
+   double avgATR = 0;
+   for(int i = 0; i < 20; i++)
+      avgATR += atr[i];
+   avgATR /= 20.0;
+
+   // ATR倍率の計算
+   double atrMultiplier = currentATR / avgATR;
+
+   // ATRが適切な範囲内かチェック
+   if(atrMultiplier < ATR_Min_Multiplier)
+   {
+      Print("⚠️ ボラティリティフィルター: 低すぎる (ATR倍率=",
+            DoubleToString(atrMultiplier, 2), " < ", ATR_Min_Multiplier, ")");
+      return false;
+   }
+
+   if(atrMultiplier > ATR_Max_Multiplier)
+   {
+      Print("⚠️ ボラティリティフィルター: 高すぎる (ATR倍率=",
+            DoubleToString(atrMultiplier, 2), " > ", ATR_Max_Multiplier, ")");
+      return false;
+   }
+
+   // 適切なボラティリティ
+   return true;
 }
 //+------------------------------------------------------------------+
