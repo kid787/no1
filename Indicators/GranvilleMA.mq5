@@ -44,7 +44,12 @@ input int      MA_PERIOD_LONG = 200;            // 長期MA期間
 input ENUM_MA_METHOD MA_METHOD = MODE_EMA;      // MA計算方法
 input ENUM_TIMEFRAMES MTF_TREND_PERIOD = PERIOD_H4; // MTFトレンド期間
 input bool     HEIKIN_ASHI_ENABLED = true;      // 平均足表示
-input int      MA_PROXIMITY_PIPS = 50;          // MA近接判定（Pips）
+input int      MA_PROXIMITY_PIPS = 100;         // MA近接判定（Pips）- 最適化: 50→100
+input int      ADX_PERIOD = 14;                 // ADX期間
+input double   ADX_MIN_LEVEL = 20.0;            // ADX最小値（トレンド強度フィルター）
+input int      ATR_PERIOD = 14;                 // ATRボラティリティ期間
+input double   ATR_MIN_MULTIPLIER = 0.5;        // ATR最小倍率（低ボラティリティフィルター）
+input double   ATR_MAX_MULTIPLIER = 2.0;        // ATR最大倍率（高ボラティリティフィルター）
 input color    TextColor = clrWhite;            // テキストカラー
 input int      TextSize = 10;                   // テキストサイズ
 
@@ -60,8 +65,9 @@ double HACloseBuffer[];
 double HAColorBuffer[];
 
 // グローバル変数
-int ma75Handle, ma200Handle, mtfMA75Handle;
+int ma75Handle, ma200Handle, mtfMA75Handle, adxHandle, atrHandle;
 string labelName = "MTF_Trend_Label";
+string statusLabelName = "Filter_Status_Label";
 
 //+------------------------------------------------------------------+
 //| カスタムインジケーター初期化関数                                      |
@@ -102,10 +108,13 @@ int OnInit()
    ma75Handle = iMA(_Symbol, PERIOD_CURRENT, MA_PERIOD_MID, 0, MA_METHOD, PRICE_CLOSE);
    ma200Handle = iMA(_Symbol, PERIOD_CURRENT, MA_PERIOD_LONG, 0, MA_METHOD, PRICE_CLOSE);
    mtfMA75Handle = iMA(_Symbol, MTF_TREND_PERIOD, MA_PERIOD_MID, 0, MA_METHOD, PRICE_CLOSE);
+   adxHandle = iADX(_Symbol, PERIOD_CURRENT, ADX_PERIOD);
+   atrHandle = iATR(_Symbol, PERIOD_CURRENT, ATR_PERIOD);
 
-   if(ma75Handle == INVALID_HANDLE || ma200Handle == INVALID_HANDLE || mtfMA75Handle == INVALID_HANDLE)
+   if(ma75Handle == INVALID_HANDLE || ma200Handle == INVALID_HANDLE || mtfMA75Handle == INVALID_HANDLE ||
+      adxHandle == INVALID_HANDLE || atrHandle == INVALID_HANDLE)
    {
-      Print("MAハンドルの作成に失敗しました");
+      Print("インジケーターハンドルの作成に失敗しました");
       return(INIT_FAILED);
    }
 
@@ -115,6 +124,7 @@ int OnInit()
 
    // ラベルの作成
    CreateLabel();
+   CreateStatusLabel();
 
    return(INIT_SUCCEEDED);
 }
@@ -128,9 +138,12 @@ void OnDeinit(const int reason)
    if(ma75Handle != INVALID_HANDLE) IndicatorRelease(ma75Handle);
    if(ma200Handle != INVALID_HANDLE) IndicatorRelease(ma200Handle);
    if(mtfMA75Handle != INVALID_HANDLE) IndicatorRelease(mtfMA75Handle);
+   if(adxHandle != INVALID_HANDLE) IndicatorRelease(adxHandle);
+   if(atrHandle != INVALID_HANDLE) IndicatorRelease(atrHandle);
 
    // ラベルの削除
    ObjectDelete(0, labelName);
+   ObjectDelete(0, statusLabelName);
    ChartRedraw();
 }
 
@@ -161,6 +174,9 @@ int OnCalculate(const int rates_total,
 
    // MTFトレンドの更新
    UpdateMTFTrendLabel();
+
+   // フィルターステータスの更新
+   UpdateFilterStatusLabel();
 
    // 配列を時系列に設定
    ArraySetAsSeries(open, true);
@@ -257,6 +273,10 @@ void UpdateMTFTrendLabel()
 //+------------------------------------------------------------------+
 void DetectGranvilleSignal(int i, int idx, const double &close[], const double &ma[])
 {
+   // フィルターチェック（ADXとATR）
+   if(!CheckADXFilter() || !CheckATRFilter())
+      return; // フィルター条件を満たさない場合はシグナルなし
+
    double proximityPoints = MA_PROXIMITY_PIPS * _Point * 10;
 
    // 現在と過去2本のデータ
@@ -332,5 +352,106 @@ void CalculateHeikinAshi(int i, int idx, int rates_total, const double &open[], 
 
    // カラーの設定（陽線:0、陰線:1）
    HAColorBuffer[idx] = (haClose >= haOpen) ? 0 : 1;
+}
+
+//+------------------------------------------------------------------+
+//| フィルターステータスラベルの作成                                       |
+//+------------------------------------------------------------------+
+void CreateStatusLabel()
+{
+   if(ObjectFind(0, statusLabelName) < 0)
+   {
+      ObjectCreate(0, statusLabelName, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, statusLabelName, OBJPROP_CORNER, CORNER_RIGHT_UPPER);
+      ObjectSetInteger(0, statusLabelName, OBJPROP_XDISTANCE, 10);
+      ObjectSetInteger(0, statusLabelName, OBJPROP_YDISTANCE, 50);
+      ObjectSetInteger(0, statusLabelName, OBJPROP_COLOR, TextColor);
+      ObjectSetInteger(0, statusLabelName, OBJPROP_FONTSIZE, TextSize - 1);
+      ObjectSetString(0, statusLabelName, OBJPROP_FONT, "Arial");
+   }
+}
+
+//+------------------------------------------------------------------+
+//| フィルターステータスの更新                                            |
+//+------------------------------------------------------------------+
+void UpdateFilterStatusLabel()
+{
+   // ADXチェック
+   double adxValue[];
+   ArraySetAsSeries(adxValue, true);
+   bool adxOK = false;
+   string adxStatus = "";
+
+   if(CopyBuffer(adxHandle, 0, 0, 2, adxValue) >= 2)
+   {
+      adxOK = (adxValue[0] >= ADX_MIN_LEVEL);
+      adxStatus = StringFormat("ADX: %.1f %s", adxValue[0], adxOK ? "✅" : "❌");
+   }
+
+   // ATRチェック
+   double atr[];
+   ArraySetAsSeries(atr, true);
+   bool atrOK = false;
+   string atrStatus = "";
+
+   if(CopyBuffer(atrHandle, 0, 0, 20, atr) >= 20)
+   {
+      double currentATR = atr[0];
+      double avgATR = 0;
+      for(int i = 0; i < 20; i++)
+         avgATR += atr[i];
+      avgATR /= 20.0;
+
+      double atrMultiplier = currentATR / avgATR;
+      atrOK = (atrMultiplier >= ATR_MIN_MULTIPLIER && atrMultiplier <= ATR_MAX_MULTIPLIER);
+      atrStatus = StringFormat("ATR倍率: %.2f %s", atrMultiplier, atrOK ? "✅" : "❌");
+   }
+
+   // 総合判定
+   bool allFiltersOK = adxOK && atrOK;
+   color statusColor = allFiltersOK ? clrLimeGreen : clrOrange;
+   string overallStatus = allFiltersOK ? "🟢 取引可能" : "🟡 条件不適合";
+
+   // ラベル更新
+   string statusText = StringFormat("%s\n%s\n%s", overallStatus, adxStatus, atrStatus);
+   ObjectSetString(0, statusLabelName, OBJPROP_TEXT, statusText);
+   ObjectSetInteger(0, statusLabelName, OBJPROP_COLOR, statusColor);
+   ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+//| ADXフィルターチェック                                               |
+//+------------------------------------------------------------------+
+bool CheckADXFilter()
+{
+   double adxValue[];
+   ArraySetAsSeries(adxValue, true);
+
+   if(CopyBuffer(adxHandle, 0, 0, 2, adxValue) < 2)
+      return false;
+
+   return (adxValue[0] >= ADX_MIN_LEVEL);
+}
+
+//+------------------------------------------------------------------+
+//| ATRボラティリティフィルターチェック                                    |
+//+------------------------------------------------------------------+
+bool CheckATRFilter()
+{
+   double atr[];
+   ArraySetAsSeries(atr, true);
+
+   if(CopyBuffer(atrHandle, 0, 0, 20, atr) < 20)
+      return false;
+
+   double currentATR = atr[0];
+   double avgATR = 0;
+   for(int i = 0; i < 20; i++)
+      avgATR += atr[i];
+   avgATR /= 20.0;
+
+   double atrMultiplier = currentATR / avgATR;
+
+   return (atrMultiplier >= ATR_MIN_MULTIPLIER && atrMultiplier <= ATR_MAX_MULTIPLIER);
 }
 //+------------------------------------------------------------------+
