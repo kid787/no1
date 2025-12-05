@@ -5,10 +5,10 @@
 //+------------------------------------------------------------------+
 #property copyright "Granville Gold Trading System"
 #property link      ""
-#property version   "2.00"
+#property version   "2.01"
 #property description "XAU/USD M1 Scalping EA based on Granville's Laws"
 #property description "High-frequency trading with 2% risk management"
-#property description "Target: 100x more trades than M30 version"
+#property description "v2.01: Fixed pip size calculation for XAUUSD (2-digit)"
 
 //+------------------------------------------------------------------+
 //| Input Parameters                                                  |
@@ -488,9 +488,11 @@ double GetPipSize()
    double point = SymbolInfoDouble(Symbol_to_Trade, SYMBOL_POINT);
    int digits = (int)SymbolInfoInteger(Symbol_to_Trade, SYMBOL_DIGITS);
 
-   // For 5-digit brokers (like XAUUSD): 1 pip = 10 points
-   // For 3-digit brokers: 1 pip = 1 point
-   if(digits == 5 || digits == 3)
+   // XAUUSD (gold) typically has 2 digits: 1 pip = 10 points (0.10)
+   // 5-digit forex pairs: 1 pip = 10 points (0.00010)
+   // 3-digit forex pairs: 1 pip = 10 points (0.010)
+   // 4-digit forex pairs: 1 pip = 1 point (0.0001)
+   if(digits == 2 || digits == 3 || digits == 5)
       return point * 10;
    else
       return point;
