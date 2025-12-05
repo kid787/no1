@@ -189,7 +189,9 @@ void OnTick()
       static datetime lastTimeFilterLog = 0;
       if(TimeCurrent() - lastTimeFilterLog > 3600) // Log once per hour
       {
-         Print("DEBUG: Time filter blocked. Current hour: ", TimeHour(TimeCurrent()));
+         MqlDateTime timeStruct;
+         TimeToStruct(TimeCurrent(), timeStruct);
+         Print("DEBUG: Time filter blocked. Current hour: ", timeStruct.hour);
          lastTimeFilterLog = TimeCurrent();
       }
       return;
@@ -735,15 +737,14 @@ ENUM_ORDER_TYPE_FILLING GetFillingMode(string symbol)
    // Get symbol filling modes
    int fillingMode = (int)SymbolInfoInteger(symbol, SYMBOL_FILLING_MODE);
 
+   // SYMBOL_FILLING_FOK = 1, IOC = 2, RETURN = 4
    // Check in order of preference: FOK -> IOC -> RETURN
-   if((fillingMode & SYMBOL_FILLING_FOK) == SYMBOL_FILLING_FOK)
+   if((fillingMode & 1) == 1) // FOK
       return ORDER_FILLING_FOK;
-   else if((fillingMode & SYMBOL_FILLING_IOC) == SYMBOL_FILLING_IOC)
+   else if((fillingMode & 2) == 2) // IOC
       return ORDER_FILLING_IOC;
-   else if((fillingMode & SYMBOL_FILLING_RETURN) == SYMBOL_FILLING_RETURN)
-      return ORDER_FILLING_RETURN;
 
-   // Default fallback
+   // Default to RETURN (most compatible)
    return ORDER_FILLING_RETURN;
 }
 //+------------------------------------------------------------------+
