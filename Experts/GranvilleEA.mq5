@@ -5,9 +5,10 @@
 //+------------------------------------------------------------------+
 #property copyright "Granville Gold Trading System"
 #property link      ""
-#property version   "1.00"
+#property version   "1.10"
 #property description "XAU/USD Expert Advisor based on Granville's 8 Laws"
 #property description "Multi-timeframe trend following with strict risk management"
+#property description "v1.10: Fixed filling mode + Added debug logging"
 
 //+------------------------------------------------------------------+
 //| Input Parameters (Optimized)                                     |
@@ -124,6 +125,14 @@ int OnInit()
    dailyStartBalance = AccountInfoDouble(ACCOUNT_BALANCE);
    lastResetDate = TimeCurrent();
 
+   // Check and log filling mode
+   ENUM_ORDER_TYPE_FILLING fillingMode = GetFillingMode(Symbol_to_Trade);
+   string fillingModeStr = "";
+   if(fillingMode == ORDER_FILLING_FOK) fillingModeStr = "FOK (Fill or Kill)";
+   else if(fillingMode == ORDER_FILLING_IOC) fillingModeStr = "IOC (Immediate or Cancel)";
+   else if(fillingMode == ORDER_FILLING_RETURN) fillingModeStr = "RETURN";
+   Print("Filling Mode: ", fillingModeStr);
+
    Print("Initialization successful!");
    return(INIT_SUCCEEDED);
 }
@@ -177,24 +186,58 @@ void OnTick()
    // 5. Check time filter
    if(TimeFilter_Enable && !CheckTimeFilter())
    {
+      static datetime lastTimeFilterLog = 0;
+      if(TimeCurrent() - lastTimeFilterLog > 3600) // Log once per hour
+      {
+         Print("DEBUG: Time filter blocked. Current hour: ", TimeHour(TimeCurrent()));
+         lastTimeFilterLog = TimeCurrent();
+      }
       return;
    }
 
    // 6. Copy indicator data
    if(!CopyIndicatorData())
    {
+      Print("DEBUG: Failed to copy indicator data");
       return;
    }
 
    // 7. Check ATR volatility filter
    if(!CheckATRFilter())
    {
+      static datetime lastATRFilterLog = 0;
+      if(TimeCurrent() - lastATRFilterLog > 3600) // Log once per hour
+      {
+         double currentATR = bufferATR[0];
+         double sumATR = 0;
+         for(int i = 0; i < 20; i++) sumATR += bufferATR[i];
+         double avgATR = sumATR / 20.0;
+         double atrRatio = (avgATR > 0) ? currentATR / avgATR : 0;
+         Print("DEBUG: ATR filter blocked. Ratio: ", atrRatio, " (Min: ", ATR_Min_Multiplier, ", Max: ", ATR_Max_Multiplier, ")");
+         lastATRFilterLog = TimeCurrent();
+      }
       return;
    }
 
    // 8. MTF Trend Analysis
    int mtfTrend = GetMTFTrend();
-   if(mtfTrend == 0) return; // Range or no clear trend
+   if(mtfTrend == 0)
+   {
+      static datetime lastMTFLog = 0;
+      if(TimeCurrent() - lastMTFLog > 3600) // Log once per hour
+      {
+         Print("DEBUG: MTF trend is RANGE. No clear H4 trend.");
+         lastMTFLog = TimeCurrent();
+      }
+      return; // Range or no clear trend
+   }
+
+   static datetime lastMTFTrendLog = 0;
+   if(TimeCurrent() - lastMTFTrendLog > 3600)
+   {
+      Print("DEBUG: MTF Trend: ", (mtfTrend == 1 ? "UPTREND" : "DOWNTREND"));
+      lastMTFTrendLog = TimeCurrent();
+   }
 
    // 9. Check for entry signals
    int signal = CheckGranvilleSignal(mtfTrend);
@@ -370,7 +413,15 @@ int CheckGranvilleSignal(int mtfTrend)
 
    // Filter 3: ADX trend strength
    if(adx < ADX_Min_Level)
+   {
+      static datetime lastADXLog = 0;
+      if(TimeCurrent() - lastADXLog > 3600)
+      {
+         Print("DEBUG: ADX too low: ", adx, " < ", ADX_Min_Level);
+         lastADXLog = TimeCurrent();
+      }
       return 0;
+   }
 
    // Filter 4: ATR already checked in OnTick
 
@@ -488,6 +539,7 @@ void ExecuteTrade(int signal)
    request.deviation = 10;
    request.magic = 123456;
    request.comment = "Granville EA";
+   request.type_filling = GetFillingMode(Symbol_to_Trade);
 
    // Send order
    if(OrderSend(request, result))
@@ -631,6 +683,7 @@ void ManagePosition()
          request.deviation = 10;
          request.magic = 123456;
          request.comment = "Partial TP";
+         request.type_filling = GetFillingMode(Symbol_to_Trade);
 
          if(OrderSend(request, result))
          {
@@ -672,5 +725,25 @@ void ManagePosition()
          }
       }
    }
+}
+
+//+------------------------------------------------------------------+
+//| Get supported filling mode for the symbol                        |
+//+------------------------------------------------------------------+
+ENUM_ORDER_TYPE_FILLING GetFillingMode(string symbol)
+{
+   // Get symbol filling modes
+   int fillingMode = (int)SymbolInfoInteger(symbol, SYMBOL_FILLING_MODE);
+
+   // Check in order of preference: FOK -> IOC -> RETURN
+   if((fillingMode & SYMBOL_FILLING_FOK) == SYMBOL_FILLING_FOK)
+      return ORDER_FILLING_FOK;
+   else if((fillingMode & SYMBOL_FILLING_IOC) == SYMBOL_FILLING_IOC)
+      return ORDER_FILLING_IOC;
+   else if((fillingMode & SYMBOL_FILLING_RETURN) == SYMBOL_FILLING_RETURN)
+      return ORDER_FILLING_RETURN;
+
+   // Default fallback
+   return ORDER_FILLING_RETURN;
 }
 //+------------------------------------------------------------------+
