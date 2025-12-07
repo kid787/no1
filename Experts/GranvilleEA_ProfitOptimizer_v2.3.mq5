@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//| GranvilleEA_ProfitOptimizer_v2.3.mq5 |
+//| GranvilleEA_ProfitOptimizer_v2.3_FIXED.mq5 |
 //| v2.0 + Max SL control only (Minimal improvement) |
 //| Copyright 2025, Granville EA System |
 //+------------------------------------------------------------------+
