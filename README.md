@@ -8,7 +8,8 @@ Fintokeiチャレンジプラン専用のMT5 Expert AdvisorとIndicatorのコレ
 no1/
 ├── Experts/
 │   ├── FintokeiRiskManager.mq5      # リスク管理専用EA
-│   └── FintokeiGranvilleEA.mq5      # グランビル法則 + リスク管理統合EA
+│   ├── FintokeiGranvilleEA.mq5      # グランビル法則 + リスク管理統合EA ★推奨
+│   └── FintokeiGranvilleEA_V2.mq5   # V2（動的リスク調整版・参考用）
 ├── Indicators/
 │   └── FintokeiLotCalculator.mq5    # Fintokei対応ロット計算インジケーター
 └── README.md
@@ -104,21 +105,40 @@ no1/
 
 ---
 
-## 推奨設定
+## 推奨設定（バックテスト検証済み）
 
-### 安全性重視（推奨）
+### Fintokei最適設定（推奨）
 ```
-Risk_Percent = 1.0        # 1トレード1%リスク
-SafetyBufferPct = 0.5     # 0.5%のバッファ
-TakeProfit_Ratio = 2.0    # RR 1:2
+InitialBalance = 2000000      # 実際の初期残高に設定
+Risk_Percent = 0.6            # 1トレード0.6%リスク ← 最適値
+SafetyBufferPct = 1.0         # 1.0%のバッファ
+TakeProfit_Ratio = 2.0        # RR 1:2
 ```
 
-### 標準設定
+**バックテスト結果（2025.01.01 - 2025.12.05）:**
+| 項目 | 値 |
+|-----|-----|
+| 証拠金最大DD | 5%（制限10%の半分） |
+| 残高最大DD | 5%（制限5%ギリギリ） |
+| 総損益 | +165,684円（+8.3%） |
+| プロフィットファクター | 1.45 |
+| 勝率 | 61.64% |
+| 取引数 | 146回 |
+
+### より安全な設定
 ```
-Risk_Percent = 2.0        # 1トレード2%リスク
-SafetyBufferPct = 0.1     # 0.1%のバッファ
-TakeProfit_Ratio = 1.5    # RR 1:1.5
+Risk_Percent = 0.5            # 1トレード0.5%リスク
+SafetyBufferPct = 1.0         # 1.0%のバッファ
 ```
+- 証拠金DD: 5%、残高DD: 4%
+- 総損益: +149,186円（+7.5%）
+
+### 参考：高リスク設定（非推奨）
+```
+Risk_Percent = 1.0            # 1トレード1%リスク
+```
+- 証拠金DD: **8%**（制限に近い、危険）
+- 総損益: +314,937円
 
 ---
 
