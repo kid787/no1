@@ -25,7 +25,7 @@ input double   SafetyBufferPct      = 1.0;         // 安全バッファ（%）�
 //+------------------------------------------------------------------+
 input group "=== 取引設定 ==="
 input string   Symbol_to_Trade      = "XAUUSD";    // 取引対象銘柄
-input double   Risk_Percent         = 0.6;         // 1トレードのリスク（残高の%）※0.6推奨
+input double   Risk_Percent         = 0.5;         // 1トレードのリスク（残高の%）※0.5推奨
 input double   Max_Lot_Size         = 5.0;         // 最大ロット数
 input int      Magic_Number         = 202512;      // マジックナンバー
 input string   EA_Comment           = "FintokeiGranville"; // EAコメント
