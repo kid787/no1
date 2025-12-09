@@ -280,88 +280,79 @@ void OnTick()
 }
 
 //+------------------------------------------------------------------+
-//| トレードシグナルのチェック                                         |
+//| トレードシグナルのチェック - シンプル版                             |
 //+------------------------------------------------------------------+
 void CheckTradeSignal()
 {
    // 1. 上位足のトレンド確認
    int trendDirection = GetTrendDirection();
 
-   // 2. S/Rラインの検出
-   DetectSRLines();
-
-   // 3. ブロック（小競り合い）の検出
+   // 2. ブロック（小競り合い）の検出
    DetectBlock();
 
-   // デバッグ出力
+   // デバッグ出力（1時間ごと）
    static datetime lastDebugTime = 0;
    datetime currentTime = TimeCurrent();
-   if(currentTime - lastDebugTime > 3600)  // 1時間ごとにログ出力
+   if(currentTime - lastDebugTime > 3600)
    {
       Print("=== シグナルチェック ===");
-      Print("Resistance: ", DoubleToString(currentResistance, 2));
-      Print("Support: ", DoubleToString(currentSupport, 2));
-      Print("Block Detected: ", blockDetected, ", Type: ", blockType);
-      Print("Trend: ", trendDirection);
+      Print("Block Detected: ", blockDetected);
+      if(blockDetected)
+         Print("Block High=", DoubleToString(blockHigh, 2), ", Low=", DoubleToString(blockLow, 2));
+      Print("Trend: ", trendDirection, " (1=UP, -1=DOWN, 0=RANGE)");
       lastDebugTime = currentTime;
    }
 
    if(!blockDetected)
       return;
 
-   // 4. ブレイクアウトの確認とエントリー
-   double currentClose = iClose(Symbol_to_Trade, EntryTimeFrame, 1);  // 確定足
-   double currentHigh = iHigh(Symbol_to_Trade, EntryTimeFrame, 1);
-   double currentLow = iLow(Symbol_to_Trade, EntryTimeFrame, 1);
+   // 3. 直前の確定足でブレイクアウトを確認
+   double lastClose = iClose(Symbol_to_Trade, EntryTimeFrame, 1);
+   double lastHigh = iHigh(Symbol_to_Trade, EntryTimeFrame, 1);
+   double lastLow = iLow(Symbol_to_Trade, EntryTimeFrame, 1);
 
    // トレンドフィルターの適用
    bool longTrendOK = Strict_Trend_Filter ? (trendDirection == 1) : (trendDirection >= 0);
    bool shortTrendOK = Strict_Trend_Filter ? (trendDirection == -1) : (trendDirection <= 0);
 
-   // ロングエントリー条件
-   if(blockType == 1 && longTrendOK)
+   // ブレイクアウトレベル
+   double longBreakoutLevel = blockHigh + Breakout_Confirm_Pips * pipValue;
+   double shortBreakoutLevel = blockLow - Breakout_Confirm_Pips * pipValue;
+
+   // ロングエントリー条件：ブロック上限を上抜け
+   if(lastClose > longBreakoutLevel && longTrendOK)
    {
-      // レジスタンスラインのブレイク確認
-      double breakoutLevel = currentResistance + Breakout_Confirm_Pips * pipValue;
+      Print("ロングブレイクアウト検出: Close=", DoubleToString(lastClose, 2),
+            " > Level=", DoubleToString(longBreakoutLevel, 2));
 
-      Print("ロング判定: Close=", DoubleToString(currentClose, 2),
-            ", Breakout Level=", DoubleToString(breakoutLevel, 2));
-
-      if(currentClose > breakoutLevel)
+      // ダマシフィルター
+      if(FakeBreakout_Filter && IsFakeBreakout(true))
       {
-         // ダマシフィルター
-         if(FakeBreakout_Filter && IsFakeBreakout(true))
-         {
-            Print("ダマシブレイク検出 - ロングエントリー見送り");
-            return;
-         }
-
-         // エントリー実行
-         ExecuteLongEntry();
+         Print("ダマシブレイク検出 - ロングエントリー見送り");
+         return;
       }
+
+      // エントリー実行
+      ExecuteLongEntry();
+      return;
    }
 
-   // ショートエントリー条件
-   if(blockType == -1 && shortTrendOK)
+   // ショートエントリー条件：ブロック下限を下抜け
+   if(lastClose < shortBreakoutLevel && shortTrendOK)
    {
-      // サポートラインのブレイク確認
-      double breakoutLevel = currentSupport - Breakout_Confirm_Pips * pipValue;
+      Print("ショートブレイクアウト検出: Close=", DoubleToString(lastClose, 2),
+            " < Level=", DoubleToString(shortBreakoutLevel, 2));
 
-      Print("ショート判定: Close=", DoubleToString(currentClose, 2),
-            ", Breakout Level=", DoubleToString(breakoutLevel, 2));
-
-      if(currentClose < breakoutLevel)
+      // ダマシフィルター
+      if(FakeBreakout_Filter && IsFakeBreakout(false))
       {
-         // ダマシフィルター
-         if(FakeBreakout_Filter && IsFakeBreakout(false))
-         {
-            Print("ダマシブレイク検出 - ショートエントリー見送り");
-            return;
-         }
-
-         // エントリー実行
-         ExecuteShortEntry();
+         Print("ダマシブレイク検出 - ショートエントリー見送り");
+         return;
       }
+
+      // エントリー実行
+      ExecuteShortEntry();
+      return;
    }
 }
 
@@ -478,7 +469,7 @@ double FindStrongerSupport(double &lows[], double initialSupport)
 }
 
 //+------------------------------------------------------------------+
-//| ブロック（小競り合い）の検出                                        |
+//| ブロック（小競り合い）の検出 - シンプル版                           |
 //+------------------------------------------------------------------+
 void DetectBlock()
 {
@@ -490,12 +481,12 @@ void DetectBlock()
    ArraySetAsSeries(lows, true);
    ArraySetAsSeries(closes, true);
 
-   // 直近のローソク足データを取得
-   if(CopyHigh(Symbol_to_Trade, EntryTimeFrame, 1, BlockCandleCount, highs) < BlockCandleCount)
+   // 直近のローソク足データを取得（確定足から開始、現在足は除外）
+   if(CopyHigh(Symbol_to_Trade, EntryTimeFrame, 2, BlockCandleCount, highs) < BlockCandleCount)
       return;
-   if(CopyLow(Symbol_to_Trade, EntryTimeFrame, 1, BlockCandleCount, lows) < BlockCandleCount)
+   if(CopyLow(Symbol_to_Trade, EntryTimeFrame, 2, BlockCandleCount, lows) < BlockCandleCount)
       return;
-   if(CopyClose(Symbol_to_Trade, EntryTimeFrame, 1, BlockCandleCount, closes) < BlockCandleCount)
+   if(CopyClose(Symbol_to_Trade, EntryTimeFrame, 2, BlockCandleCount, closes) < BlockCandleCount)
       return;
 
    // 様々なブロックサイズで検出を試みる
@@ -510,35 +501,17 @@ void DetectBlock()
       if(blockRange < MinBlockPips || blockRange > MaxBlockPips)
          continue;
 
-      // レジスタンス付近のブロック（ロング用）
-      double distanceToResistance = (currentResistance - bHigh) / pipValue;
-      if(distanceToResistance >= 0 && distanceToResistance <= SR_Touch_Pips)
-      {
-         blockHigh = bHigh;
-         blockLow = bLow;
-         blockDetected = true;
-         blockType = 1;  // ロング用
-         Print("ブロック検出（ロング用）: High=", DoubleToString(blockHigh, 2),
-               ", Low=", DoubleToString(blockLow, 2),
-               ", Range=", DoubleToString(blockRange, 1), " pips",
-               ", Resistance=", DoubleToString(currentResistance, 2));
-         return;
-      }
+      // ブロックが検出された - 上下どちらのブレイクも監視
+      blockHigh = bHigh;
+      blockLow = bLow;
+      blockDetected = true;
+      blockType = 0;  // 方向は後で判定
 
-      // サポート付近のブロック（ショート用）
-      double distanceToSupport = (bLow - currentSupport) / pipValue;
-      if(distanceToSupport >= 0 && distanceToSupport <= SR_Touch_Pips)
-      {
-         blockHigh = bHigh;
-         blockLow = bLow;
-         blockDetected = true;
-         blockType = -1;  // ショート用
-         Print("ブロック検出（ショート用）: High=", DoubleToString(blockHigh, 2),
-               ", Low=", DoubleToString(blockLow, 2),
-               ", Range=", DoubleToString(blockRange, 1), " pips",
-               ", Support=", DoubleToString(currentSupport, 2));
-         return;
-      }
+      Print("ブロック検出: High=", DoubleToString(blockHigh, 2),
+            ", Low=", DoubleToString(blockLow, 2),
+            ", Range=", DoubleToString(blockRange, 1), " pips",
+            ", Size=", blockSize, " bars");
+      return;
    }
 }
 
