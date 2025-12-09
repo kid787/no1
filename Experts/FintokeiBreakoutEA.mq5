@@ -37,18 +37,18 @@ input int      Slippage_Points      = 30;          // スリッページ許容�
 input group "=== ブレイクアウト設定 ==="
 input ENUM_TIMEFRAMES EntryTimeFrame    = PERIOD_M5;   // エントリー時間足
 input ENUM_TIMEFRAMES ConfirmTimeFrame  = PERIOD_H1;   // トレンド確認時間足
-input int      SR_Lookback_Bars     = 50;          // S/Rライン検出期間（本数）
-input double   SR_Touch_Pips        = 5.0;         // S/Rライン近接判定（Pips）
-input double   Breakout_Confirm_Pips = 2.0;        // ブレイク確定判定（Pips）
+input int      SR_Lookback_Bars     = 100;         // S/Rライン検出期間（本数）
+input double   SR_Touch_Pips        = 30.0;        // S/Rライン近接判定（Pips）※XAUUSD=$3.0
+input double   Breakout_Confirm_Pips = 5.0;        // ブレイク確定判定（Pips）※XAUUSD=$0.5
 
 //+------------------------------------------------------------------+
 //| 外部パラメータ - ブロック（小競り合い）設定                          |
 //+------------------------------------------------------------------+
 input group "=== ブロック（小競り合い）設定 ==="
-input int      BlockCandleCount     = 8;           // ブロック最大ローソク足本数
-input int      BlockCandleMin       = 4;           // ブロック最小ローソク足本数
-input double   MaxBlockPips         = 10.0;        // ブロック最大幅（Pips）
-input double   MinBlockPips         = 3.0;         // ブロック最小幅（Pips）
+input int      BlockCandleCount     = 12;          // ブロック最大ローソク足本数
+input int      BlockCandleMin       = 3;           // ブロック最小ローソク足本数
+input double   MaxBlockPips         = 80.0;        // ブロック最大幅（Pips）※XAUUSD=$8.0
+input double   MinBlockPips         = 15.0;        // ブロック最小幅（Pips）※XAUUSD=$1.5
 
 //+------------------------------------------------------------------+
 //| 外部パラメータ - トレンド確認設定                                    |
@@ -57,14 +57,15 @@ input group "=== トレンド確認設定（上位足）==="
 input int      FastMA_Period        = 20;          // 短期MA期間
 input int      SlowMA_Period        = 50;          // 長期MA期間
 input int      MA_Slope_Bars        = 3;           // MA傾き判定期間
+input bool     Strict_Trend_Filter  = false;       // 厳格なトレンドフィルター（falseで緩和）
 
 //+------------------------------------------------------------------+
 //| 外部パラメータ - リスクリワード設定                                  |
 //+------------------------------------------------------------------+
 input group "=== リスクリワード設定 ==="
-input double   TakeProfitPips       = 20.0;        // 目標利確幅（Pips）
+input double   TakeProfitPips       = 150.0;       // 目標利確幅（Pips）※XAUUSD=$15.0
 input double   MinRiskReward        = 1.5;         // 最小リスクリワード比率
-input double   SL_Buffer_Pips       = 2.0;         // SLバッファ（Pips）
+input double   SL_Buffer_Pips       = 10.0;        // SLバッファ（Pips）※XAUUSD=$1.0
 
 //+------------------------------------------------------------------+
 //| 外部パラメータ - ダマシ排除設定                                      |
@@ -72,7 +73,7 @@ input double   SL_Buffer_Pips       = 2.0;         // SLバッファ（Pips）
 input group "=== ダマシ排除設定 ==="
 input bool     FakeBreakout_Filter  = true;        // ダマシフィルター有効
 input int      Momentum_Check_Bars  = 3;           // 勢い確認本数
-input double   Max_Momentum_Pips    = 15.0;        // 最大許容勢い（Pips）
+input double   Max_Momentum_Pips    = 80.0;        // 最大許容勢い（Pips）※XAUUSD=$8.0
 
 //+------------------------------------------------------------------+
 //| 外部パラメータ - ポジション管理                                     |
@@ -80,7 +81,7 @@ input double   Max_Momentum_Pips    = 15.0;        // 最大許容勢い（Pips�
 input group "=== ポジション管理 ==="
 input bool     BreakEven_Enable          = true;   // ブレイクイーブン有効
 input double   BreakEven_Trigger_Percent = 50.0;   // トリガー（TP距離の%）
-input int      BreakEven_Offset_Pips     = 5;      // オフセット（Pips）
+input int      BreakEven_Offset_Pips     = 20;     // オフセット（Pips）※XAUUSD=$2.0
 input int      Max_Positions             = 1;      // 最大同時ポジション数
 
 //+------------------------------------------------------------------+
@@ -292,6 +293,19 @@ void CheckTradeSignal()
    // 3. ブロック（小競り合い）の検出
    DetectBlock();
 
+   // デバッグ出力
+   static datetime lastDebugTime = 0;
+   datetime currentTime = TimeCurrent();
+   if(currentTime - lastDebugTime > 3600)  // 1時間ごとにログ出力
+   {
+      Print("=== シグナルチェック ===");
+      Print("Resistance: ", DoubleToString(currentResistance, 2));
+      Print("Support: ", DoubleToString(currentSupport, 2));
+      Print("Block Detected: ", blockDetected, ", Type: ", blockType);
+      Print("Trend: ", trendDirection);
+      lastDebugTime = currentTime;
+   }
+
    if(!blockDetected)
       return;
 
@@ -300,11 +314,18 @@ void CheckTradeSignal()
    double currentHigh = iHigh(Symbol_to_Trade, EntryTimeFrame, 1);
    double currentLow = iLow(Symbol_to_Trade, EntryTimeFrame, 1);
 
+   // トレンドフィルターの適用
+   bool longTrendOK = Strict_Trend_Filter ? (trendDirection == 1) : (trendDirection >= 0);
+   bool shortTrendOK = Strict_Trend_Filter ? (trendDirection == -1) : (trendDirection <= 0);
+
    // ロングエントリー条件
-   if(blockType == 1 && trendDirection >= 0)  // 上昇トレンドまたはレンジ
+   if(blockType == 1 && longTrendOK)
    {
       // レジスタンスラインのブレイク確認
       double breakoutLevel = currentResistance + Breakout_Confirm_Pips * pipValue;
+
+      Print("ロング判定: Close=", DoubleToString(currentClose, 2),
+            ", Breakout Level=", DoubleToString(breakoutLevel, 2));
 
       if(currentClose > breakoutLevel)
       {
@@ -321,10 +342,13 @@ void CheckTradeSignal()
    }
 
    // ショートエントリー条件
-   if(blockType == -1 && trendDirection <= 0)  // 下降トレンドまたはレンジ
+   if(blockType == -1 && shortTrendOK)
    {
       // サポートラインのブレイク確認
       double breakoutLevel = currentSupport - Breakout_Confirm_Pips * pipValue;
+
+      Print("ショート判定: Close=", DoubleToString(currentClose, 2),
+            ", Breakout Level=", DoubleToString(breakoutLevel, 2));
 
       if(currentClose < breakoutLevel)
       {
