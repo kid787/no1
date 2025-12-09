@@ -25,7 +25,7 @@ input double   SafetyBufferPct      = 1.0;         // 安全バッファ（%）�
 //+------------------------------------------------------------------+
 input group "=== 取引設定 ==="
 input string   Symbol_to_Trade      = "XAUUSD";    // 取引対象銘柄
-input double   Risk_Percent         = 0.5;         // 1トレードのリスク（残高の%）※0.5推奨
+input double   Risk_Percent         = 0.3;         // 1トレードのリスク（残高の%）※0.3推奨
 input double   Max_Lot_Size         = 5.0;         // 最大ロット数
 input int      Magic_Number         = 202513;      // マジックナンバー
 input string   EA_Comment           = "FintokeiBreakout"; // EAコメント
@@ -48,7 +48,7 @@ input group "=== ブロック（小競り合い）設定 ==="
 input int      BlockCandleCount     = 12;          // ブロック最大ローソク足本数
 input int      BlockCandleMin       = 3;           // ブロック最小ローソク足本数
 input double   MaxBlockPips         = 80.0;        // ブロック最大幅（Pips）※XAUUSD=$8.0
-input double   MinBlockPips         = 15.0;        // ブロック最小幅（Pips）※XAUUSD=$1.5
+input double   MinBlockPips         = 20.0;        // ブロック最小幅（Pips）※XAUUSD=$2.0
 
 //+------------------------------------------------------------------+
 //| 外部パラメータ - トレンド確認設定                                    |
@@ -57,14 +57,14 @@ input group "=== トレンド確認設定（上位足）==="
 input int      FastMA_Period        = 20;          // 短期MA期間
 input int      SlowMA_Period        = 50;          // 長期MA期間
 input int      MA_Slope_Bars        = 3;           // MA傾き判定期間
-input bool     Strict_Trend_Filter  = false;       // 厳格なトレンドフィルター（falseで緩和）
+input bool     Strict_Trend_Filter  = true;        // 厳格なトレンドフィルター（trueで厳格）
 
 //+------------------------------------------------------------------+
 //| 外部パラメータ - リスクリワード設定                                  |
 //+------------------------------------------------------------------+
 input group "=== リスクリワード設定 ==="
 input double   TakeProfitPips       = 150.0;       // 目標利確幅（Pips）※XAUUSD=$15.0
-input double   MinRiskReward        = 1.5;         // 最小リスクリワード比率
+input double   MinRiskReward        = 2.0;         // 最小リスクリワード比率
 input double   SL_Buffer_Pips       = 10.0;        // SLバッファ（Pips）※XAUUSD=$1.0
 
 //+------------------------------------------------------------------+
