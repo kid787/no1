@@ -37,10 +37,10 @@ input int      Slippage_Points      = 30;          // スリッページ許容�
 input group "=== レンジ検出設定 ==="
 input ENUM_TIMEFRAMES Range_Timeframe   = PERIOD_H1;   // レンジ検出時間足
 input ENUM_TIMEFRAMES Higher_Timeframe  = PERIOD_H4;   // 上位足（トレンド確認）
-input int      Lookback_Bars            = 48;          // レンジ検出期間（バー数）
-input double   Min_Range_Pips           = 80.0;        // 最小レンジ幅（Pips）※XAUUSD=$8.0
-input double   Max_Range_Pips           = 300.0;       // 最大レンジ幅（Pips）※XAUUSD=$30.0
-input double   Range_Squeeze_Pct        = 30.0;        // 子レンジ判定（親の%以下で回避）
+input int      Lookback_Bars            = 24;          // レンジ検出期間（バー数）
+input double   Min_Range_Pips           = 50.0;        // 最小レンジ幅（Pips）※XAUUSD=$5.0
+input double   Max_Range_Pips           = 500.0;       // 最大レンジ幅（Pips）※XAUUSD=$50.0
+input double   Range_Squeeze_Pct        = 20.0;        // 子レンジ判定（親の%以下で回避）
 
 //+------------------------------------------------------------------+
 //| 外部パラメータ - ブレイクアウト設定                                  |
@@ -48,7 +48,7 @@ input double   Range_Squeeze_Pct        = 30.0;        // 子レンジ判定（�
 input group "=== ブレイクアウト設定 ==="
 input bool     Enable_Breakout          = true;        // ブレイクアウトロジック有効
 input double   Breakout_Confirm_Pips    = 15.0;        // ブレイク確定距離（Pips）※XAUUSD=$1.5
-input bool     Require_HTF_Alignment    = true;        // 上位足トレンド一致必須
+input bool     Require_HTF_Alignment    = false;       // 上位足トレンド一致必須
 input double   Breakout_SL_Buffer_Pips  = 20.0;        // ブレイクSLバッファ（Pips）
 input double   Breakout_RR_Ratio        = 2.0;         // ブレイクアウト リスクリワード
 
@@ -57,8 +57,8 @@ input double   Breakout_RR_Ratio        = 2.0;         // ブレイクアウト 
 //+------------------------------------------------------------------+
 input group "=== カウンター（逆張り）設定 ==="
 input bool     Enable_Counter           = true;        // カウンターロジック有効
-input double   Boundary_Buffer_Pips     = 30.0;        // 境界近接ゾーン（Pips）※XAUUSD=$3.0
-input bool     Require_Rejection        = true;        // 反発パターン必須
+input double   Boundary_Buffer_Pips     = 50.0;        // 境界近接ゾーン（Pips）※XAUUSD=$5.0
+input bool     Require_Rejection        = false;       // 反発パターン必須
 input double   Counter_SL_Buffer_Pips   = 15.0;        // カウンターSLバッファ（Pips）
 input bool     Counter_TP_to_Opposite   = true;        // TPを反対側境界に設定
 input double   Counter_RR_Ratio         = 1.5;         // カウンター リスクリワード（TPが中央の場合）
@@ -67,7 +67,7 @@ input double   Counter_RR_Ratio         = 1.5;         // カウンター リス
 //| 外部パラメータ - RSIフィルター                                      |
 //+------------------------------------------------------------------+
 input group "=== RSIフィルター ==="
-input bool     Use_RSI_Filter           = true;        // RSIフィルター有効
+input bool     Use_RSI_Filter           = false;       // RSIフィルター有効
 input int      RSI_Period               = 14;          // RSI期間
 input double   RSI_Overbought           = 70.0;        // RSI買われ過ぎ
 input double   RSI_Oversold             = 30.0;        // RSI売られ過ぎ
