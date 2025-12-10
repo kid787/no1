@@ -53,7 +53,7 @@ input int      Max_Bars_After_Break = 30;          // ブレイク後の最大�
 //| 外部パラメータ - エントリー設定                                     |
 //+------------------------------------------------------------------+
 input group "=== エントリー設定 ==="
-input bool     Require_Rejection_Pattern = true;   // 反発パターン必須
+input bool     Require_Rejection_Pattern = false;  // 反発パターン必須
 input double   MinRiskReward        = 2.0;         // 最小リスクリワード比率
 input double   SL_Buffer_Pips       = 20.0;        // SLバッファ（Pips）※XAUUSD=$2.0
 
