@@ -85,7 +85,7 @@ input double   Min_RR_Ratio           = 1.5;          // 最小リスクリワ�
 //| 外部パラメータ - ポジション管理                                     |
 //+------------------------------------------------------------------+
 input group "=== ポジション管理 ==="
-input bool     BreakEven_Enable       = true;         // ブレイクイーブン有効
+input bool     BreakEven_Enable       = false;        // ブレイクイーブン有効
 input double   BreakEven_Trigger_Pct  = 50.0;         // トリガー（TP距離の%）
 input int      BreakEven_Offset_Pips  = 5;            // オフセット（Pips）
 input int      Max_Positions          = 1;            // 最大同時ポジション数
