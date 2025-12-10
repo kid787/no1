@@ -47,6 +47,8 @@ input bool     Strategy_TrendlineBB   = true;         // 案4: トレンドラ�
 input bool     Strategy_BB_SR         = false;        // 案1: BB+H1サポレジ平均回帰
 input bool     Strategy_BB_Squeeze    = false;        // 案2: BBスクイーズブレイク
 input bool     Strategy_NecklineBB    = false;        // 案3: ネックライン+BB確認
+input bool     Strategy_EMA_Cross     = false;        // 案5: EMAクロス+RSI（高勝率）
+input bool     Strategy_MACD_RSI      = false;        // 案6: MACD+RSIモメンタム
 
 //+------------------------------------------------------------------+
 //| 外部パラメータ - ボリンジャーバンド設定                              |
@@ -64,6 +66,22 @@ input bool     Use_RSI_Filter         = true;         // RSIフィルター有�
 input int      RSI_Period             = 14;           // RSI期間
 input double   RSI_Overbought         = 70.0;         // RSI買われ過ぎ
 input double   RSI_Oversold           = 30.0;         // RSI売られ過ぎ
+
+//+------------------------------------------------------------------+
+//| 外部パラメータ - EMA設定（案5用）                                   |
+//+------------------------------------------------------------------+
+input group "=== EMA設定（案5用）==="
+input int      EMA_Fast_Period        = 9;            // 短期EMA期間
+input int      EMA_Slow_Period        = 21;           // 長期EMA期間
+
+//+------------------------------------------------------------------+
+//| 外部パラメータ - MACD設定（案6用）                                  |
+//+------------------------------------------------------------------+
+input group "=== MACD設定（案6用）==="
+input int      MACD_Fast              = 12;           // MACD短期EMA
+input int      MACD_Slow              = 26;           // MACD長期EMA
+input int      MACD_Signal            = 9;            // MACDシグナル期間
+input int      RSI_Fast_Period        = 7;            // RSI高速期間（案6用）
 
 //+------------------------------------------------------------------+
 //| 外部パラメータ - トレンドライン設定                                  |
@@ -126,6 +144,10 @@ CTrade         trade;
 int            handleBB;
 int            handleRSI;
 int            handleATR;
+int            handleEMAFast;
+int            handleEMASlow;
+int            handleMACD;
+int            handleRSIFast;
 
 // H1環境情報
 double         g_h1RangeHigh;
@@ -182,8 +204,14 @@ int OnInit()
    handleBB = iBands(Symbol_to_Trade, TF_Entry, BB_Period, 0, BB_Deviation, PRICE_CLOSE);
    handleRSI = iRSI(Symbol_to_Trade, TF_Entry, RSI_Period, PRICE_CLOSE);
    handleATR = iATR(Symbol_to_Trade, TF_Entry, 14);
+   handleEMAFast = iMA(Symbol_to_Trade, TF_Entry, EMA_Fast_Period, 0, MODE_EMA, PRICE_CLOSE);
+   handleEMASlow = iMA(Symbol_to_Trade, TF_Entry, EMA_Slow_Period, 0, MODE_EMA, PRICE_CLOSE);
+   handleMACD = iMACD(Symbol_to_Trade, TF_Entry, MACD_Fast, MACD_Slow, MACD_Signal, PRICE_CLOSE);
+   handleRSIFast = iRSI(Symbol_to_Trade, TF_Entry, RSI_Fast_Period, PRICE_CLOSE);
 
-   if(handleBB == INVALID_HANDLE || handleRSI == INVALID_HANDLE || handleATR == INVALID_HANDLE)
+   if(handleBB == INVALID_HANDLE || handleRSI == INVALID_HANDLE || handleATR == INVALID_HANDLE ||
+      handleEMAFast == INVALID_HANDLE || handleEMASlow == INVALID_HANDLE ||
+      handleMACD == INVALID_HANDLE || handleRSIFast == INVALID_HANDLE)
    {
       Print("インジケーターハンドルの作成に失敗しました");
       return INIT_FAILED;
@@ -209,6 +237,10 @@ void OnDeinit(const int reason)
    if(handleBB != INVALID_HANDLE) IndicatorRelease(handleBB);
    if(handleRSI != INVALID_HANDLE) IndicatorRelease(handleRSI);
    if(handleATR != INVALID_HANDLE) IndicatorRelease(handleATR);
+   if(handleEMAFast != INVALID_HANDLE) IndicatorRelease(handleEMAFast);
+   if(handleEMASlow != INVALID_HANDLE) IndicatorRelease(handleEMASlow);
+   if(handleMACD != INVALID_HANDLE) IndicatorRelease(handleMACD);
+   if(handleRSIFast != INVALID_HANDLE) IndicatorRelease(handleRSIFast);
 
    ObjectsDeleteAll(0, "Scalp_");
    Print("FintokeiScalpEA 終了");
@@ -283,6 +315,14 @@ void OnTick()
    // 案3: ネックライン+BB確認
    if(Strategy_NecklineBB && signal == SIGNAL_NONE)
       signal = CheckNecklineBBSignal();
+
+   // 案5: EMAクロス+RSI（高勝率）
+   if(Strategy_EMA_Cross && signal == SIGNAL_NONE)
+      signal = CheckEMACrossSignal();
+
+   // 案6: MACD+RSIモメンタム
+   if(Strategy_MACD_RSI && signal == SIGNAL_NONE)
+      signal = CheckMACDRSISignal();
 
    // トレード実行
    if(signal != SIGNAL_NONE)
@@ -668,6 +708,105 @@ ENUM_SIGNAL_TYPE CheckNecklineBBSignal()
 }
 
 //+------------------------------------------------------------------+
+//| 案5: EMAクロス+RSIシグナル（高勝率戦略）                            |
+//+------------------------------------------------------------------+
+ENUM_SIGNAL_TYPE CheckEMACrossSignal()
+{
+   double emaFast[], emaSlow[], rsi[];
+   ArraySetAsSeries(emaFast, true);
+   ArraySetAsSeries(emaSlow, true);
+   ArraySetAsSeries(rsi, true);
+
+   if(CopyBuffer(handleEMAFast, 0, 0, 5, emaFast) < 5) return SIGNAL_NONE;
+   if(CopyBuffer(handleEMASlow, 0, 0, 5, emaSlow) < 5) return SIGNAL_NONE;
+   if(CopyBuffer(handleRSI, 0, 0, 5, rsi) < 5) return SIGNAL_NONE;
+
+   // EMAクロスオーバー検出
+   bool goldenCross = (emaFast[2] <= emaSlow[2]) && (emaFast[1] > emaSlow[1]);  // 買いクロス
+   bool deadCross = (emaFast[2] >= emaSlow[2]) && (emaFast[1] < emaSlow[1]);    // 売りクロス
+
+   // 価格がEMAより上/下にあることを確認
+   double close1 = iClose(Symbol_to_Trade, TF_Entry, 1);
+
+   // ロングシグナル: ゴールデンクロス + RSI中立～売られ過ぎからの回復
+   if(goldenCross)
+   {
+      // RSIが50以下から上昇中、または売られ過ぎからの回復
+      if(rsi[1] < 60 && rsi[1] > rsi[2])
+      {
+         // 価格がEMAの上にある
+         if(close1 > emaFast[1])
+         {
+            return SIGNAL_BUY;
+         }
+      }
+   }
+
+   // ショートシグナル: デッドクロス + RSI中立～買われ過ぎからの下落
+   if(deadCross)
+   {
+      // RSIが50以上から下落中、または買われ過ぎからの下落
+      if(rsi[1] > 40 && rsi[1] < rsi[2])
+      {
+         // 価格がEMAの下にある
+         if(close1 < emaFast[1])
+         {
+            return SIGNAL_SELL;
+         }
+      }
+   }
+
+   return SIGNAL_NONE;
+}
+
+//+------------------------------------------------------------------+
+//| 案6: MACD+RSIモメンタムシグナル                                     |
+//+------------------------------------------------------------------+
+ENUM_SIGNAL_TYPE CheckMACDRSISignal()
+{
+   double macdMain[], macdSignal[], rsiFast[];
+   ArraySetAsSeries(macdMain, true);
+   ArraySetAsSeries(macdSignal, true);
+   ArraySetAsSeries(rsiFast, true);
+
+   if(CopyBuffer(handleMACD, 0, 0, 5, macdMain) < 5) return SIGNAL_NONE;
+   if(CopyBuffer(handleMACD, 1, 0, 5, macdSignal) < 5) return SIGNAL_NONE;
+   if(CopyBuffer(handleRSIFast, 0, 0, 5, rsiFast) < 5) return SIGNAL_NONE;
+
+   // MACDクロスオーバー検出
+   bool macdBullCross = (macdMain[2] <= macdSignal[2]) && (macdMain[1] > macdSignal[1]);
+   bool macdBearCross = (macdMain[2] >= macdSignal[2]) && (macdMain[1] < macdSignal[1]);
+
+   // MACDヒストグラムの方向
+   double histogram1 = macdMain[1] - macdSignal[1];
+   double histogram2 = macdMain[2] - macdSignal[2];
+   bool histogramIncreasing = histogram1 > histogram2;
+   bool histogramDecreasing = histogram1 < histogram2;
+
+   // ロングシグナル: MACDブルクロス or ヒストグラム増加 + RSI売られ過ぎからの回復
+   if(macdBullCross || (histogram1 > 0 && histogramIncreasing))
+   {
+      // RSIが売られ過ぎから回復中（30-50の範囲で上昇）
+      if(rsiFast[1] > 30 && rsiFast[1] < 55 && rsiFast[1] > rsiFast[2])
+      {
+         return SIGNAL_BUY;
+      }
+   }
+
+   // ショートシグナル: MACDベアクロス or ヒストグラム減少 + RSI買われ過ぎから下落
+   if(macdBearCross || (histogram1 < 0 && histogramDecreasing))
+   {
+      // RSIが買われ過ぎから下落中（50-70の範囲で下降）
+      if(rsiFast[1] < 70 && rsiFast[1] > 45 && rsiFast[1] < rsiFast[2])
+      {
+         return SIGNAL_SELL;
+      }
+   }
+
+   return SIGNAL_NONE;
+}
+
+//+------------------------------------------------------------------+
 //| トレード実行                                                       |
 //+------------------------------------------------------------------+
 void ExecuteTrade(ENUM_SIGNAL_TYPE signal)
@@ -950,6 +1089,8 @@ void UpdatePanel()
    if(Strategy_BB_SR) activeStrat += "BB+SR ";
    if(Strategy_BB_Squeeze) activeStrat += "Squeeze ";
    if(Strategy_NecklineBB) activeStrat += "NL+BB ";
+   if(Strategy_EMA_Cross) activeStrat += "EMA ";
+   if(Strategy_MACD_RSI) activeStrat += "MACD ";
    CreateLabel("Panel_Strategy", "戦略: " + activeStrat, PanelX, y, clrYellow);
    y += lineHeight;
 
