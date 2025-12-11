@@ -286,8 +286,8 @@ void CChartDisplay::UpdateRiskDisplay(CRiskManager &risk)
    UpdateLabel("OverallLine", StringFormat("Overall Line: %.2f", overallLine), m_textColor);
 
    // Risk State
-   string stateStr;
-   color stateColor;
+   string stateStr = "UNKNOWN";
+   color stateColor = m_textColor;
    switch(state)
    {
       case RISK_NORMAL:
@@ -305,6 +305,10 @@ void CChartDisplay::UpdateRiskDisplay(CRiskManager &risk)
       case RISK_EMERGENCY:
          stateStr = "EMERGENCY STOP";
          stateColor = clrRed;
+         break;
+      default:
+         stateStr = "UNKNOWN";
+         stateColor = m_textColor;
          break;
    }
    UpdateLabel("RiskState", StringFormat("Risk State: %s", stateStr), stateColor);
