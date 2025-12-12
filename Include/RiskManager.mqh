@@ -230,11 +230,6 @@ void CRiskManager::UpdateDailyReset()
 //+------------------------------------------------------------------+
 bool CRiskManager::CheckRisk()
 {
-   if(m_emergencyStop)
-   {
-      return false; // Already in emergency stop
-   }
-
    // Update daily reset
    UpdateDailyReset();
 
@@ -243,6 +238,23 @@ bool CRiskManager::CheckRisk()
    // Calculate current drawdown percentages
    double overallDD = GetCurrentOverallDrawdownPct();
    double dailyDD = GetCurrentDailyDrawdownPct();
+
+   // Recovery check: If was in emergency but equity recovered, allow trading again
+   if(m_emergencyStop)
+   {
+      // Check if equity has recovered above BOTH safety lines
+      if(currentEquity > m_safetyOverallLine && currentEquity > m_safetyDailyLine)
+      {
+         m_emergencyStop = false;
+         m_riskState = RISK_WARNING;  // Start with warning state after recovery
+         m_lastError = "";
+         Print("RECOVERY: Equity recovered above safety lines. Trading resumed. Equity=", currentEquity);
+      }
+      else
+      {
+         return false; // Still in emergency stop
+      }
+   }
 
    // Check against safety lines (with buffer)
    // 全体損失チェック
