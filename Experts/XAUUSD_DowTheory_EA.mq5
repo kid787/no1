@@ -34,7 +34,7 @@ input double   InpRiskPerTradePct    = 1.0;         // 1トレードあたりリ
 input group "=== Trading Parameters ==="
 input int      InpMagicNumber        = 202412;      // マジックナンバー
 input double   InpSlippage           = 30;          // スリッページ (points)
-input int      InpMaxTradesPerDay    = 3;           // 1日の最大取引数
+input int      InpMaxTradesPerDay    = 5;           // 1日の最大取引数
 input double   InpATRMultiplierSL    = 2.0;         // ATR倍率 (SL用)
 input double   InpATRMultiplierTP    = 3.0;         // ATR倍率 (TP用)
 
@@ -59,6 +59,12 @@ input int      InpLondonEndHour      = 17;          // ロンドンセッショ�
 input int      InpNYStartHour        = 13;          // NYセッション開始 (GMT)
 input int      InpNYEndHour          = 22;          // NYセッション終了 (GMT)
 input bool     InpTradeOverlapOnly   = true;        // オーバーラップ時間のみ取引
+
+//--- Trading Hours Filter (NEW)
+input group "=== Trading Hours Filter ==="
+input bool     InpUseTimeFilter      = true;        // 取引時間フィルターを使用
+input int      InpTradeStartHour     = 12;          // 取引開始時間 (GMT, 0-23)
+input int      InpTradeEndHour       = 16;          // 取引終了時間 (GMT, 0-23)
 
 //--- Indicator Parameters
 input group "=== Technical Indicators ==="
@@ -327,7 +333,36 @@ bool IsValidSession()
       g_sessionActive = false;
    }
 
-   return InpTradeOverlapOnly ? inOverlap : (inLondon || inNY);
+   // Session filter check
+   bool sessionOK = InpTradeOverlapOnly ? inOverlap : (inLondon || inNY);
+
+   // Trading hours filter (NEW)
+   if(InpUseTimeFilter)
+   {
+      bool inTradingHours;
+      if(InpTradeStartHour < InpTradeEndHour)
+      {
+         // 通常の時間帯 (例: 12:00 - 16:00)
+         inTradingHours = (hour >= InpTradeStartHour && hour < InpTradeEndHour);
+      }
+      else
+      {
+         // 日をまたぐ時間帯 (例: 22:00 - 04:00)
+         inTradingHours = (hour >= InpTradeStartHour || hour < InpTradeEndHour);
+      }
+
+      // Update session display with time filter info
+      if(!inTradingHours)
+      {
+         g_currentSession = StringFormat("%s (時間外: %02d:00-%02d:00)",
+                                          g_currentSession, InpTradeStartHour, InpTradeEndHour);
+         g_sessionActive = false;
+      }
+
+      return sessionOK && inTradingHours;
+   }
+
+   return sessionOK;
 }
 
 //+------------------------------------------------------------------+
