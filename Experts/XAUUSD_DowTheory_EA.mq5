@@ -778,21 +778,119 @@ void UpdateDisplayInfo()
 }
 
 //+------------------------------------------------------------------+
-//| Tester function                                                   |
+//| TesterInit function - MT5 Optimizer Parameter Ranges              |
+//| ストラテジーテスターで「最適化」を選択時に使用されます              |
+//+------------------------------------------------------------------+
+void OnTesterInit()
+{
+   // パラメータ最適化範囲の設定
+   // 形式: ParameterSetRange("パラメータ名", 有効, 開始値, ステップ, 終了値)
+
+   //--- リスク管理パラメータ
+   // 1トレードあたりリスク: 0.2% - 0.5% (ステップ 0.1%)
+   ParameterSetRange("InpRiskPerTradePct", true, 0.2, 0.1, 0.5);
+
+   //--- ATRパラメータ（重要）
+   // ATR倍率(SL用): 1.0 - 2.0 (ステップ 0.2)
+   ParameterSetRange("InpATRMultiplierSL", true, 1.0, 0.2, 2.0);
+
+   // ATR倍率(TP用): 4.0 - 8.0 (ステップ 1.0)
+   ParameterSetRange("InpATRMultiplierTP", true, 4.0, 1.0, 8.0);
+
+   //--- 取引制限パラメータ
+   // 1日の最大取引数: 3 - 7 (ステップ 1)
+   ParameterSetRange("InpMaxTradesPerDay", true, 3, 1, 7);
+
+   //--- 取引時間パラメータ
+   // 取引開始時間: 10 - 14 (ステップ 1)
+   ParameterSetRange("InpTradeStartHour", true, 10, 1, 14);
+
+   // 取引終了時間: 15 - 18 (ステップ 1)
+   ParameterSetRange("InpTradeEndHour", true, 15, 1, 18);
+
+   //--- インジケーターパラメータ
+   // EMA高速期間: 5 - 15 (ステップ 2)
+   ParameterSetRange("InpEMAPeriodFast", true, 5, 2, 15);
+
+   // EMA低速期間: 15 - 30 (ステップ 5)
+   ParameterSetRange("InpEMAPeriodSlow", true, 15, 5, 30);
+
+   // RSI期間: 10 - 20 (ステップ 2)
+   ParameterSetRange("InpRSIPeriod", true, 10, 2, 20);
+
+   //--- トレーリングストップパラメータ
+   // トレーリングATR倍率: 1.0 - 2.5 (ステップ 0.5)
+   ParameterSetRange("InpTrailingATRMult", true, 1.0, 0.5, 2.5);
+
+   // ブレイクイーブンATR倍率: 0.5 - 1.5 (ステップ 0.5)
+   ParameterSetRange("InpBreakEvenATRMult", true, 0.5, 0.5, 1.5);
+
+   //--- 固定パラメータ（最適化しない）
+   ParameterSetRange("InpInitialBalance", false, 0, 0, 0);
+   ParameterSetRange("InpDailyLossLimitPct", false, 0, 0, 0);
+   ParameterSetRange("InpOverallLossLimitPct", false, 0, 0, 0);
+   ParameterSetRange("InpSafetyBufferPct", false, 0, 0, 0);
+   ParameterSetRange("InpMagicNumber", false, 0, 0, 0);
+   ParameterSetRange("InpUseSessionFilter", false, 0, 0, 0);
+   ParameterSetRange("InpTradeOverlapOnly", false, 0, 0, 0);
+   ParameterSetRange("InpUseSMC", false, 0, 0, 0);
+   ParameterSetRange("InpUseOrderBlocks", false, 0, 0, 0);
+   ParameterSetRange("InpUseFVG", false, 0, 0, 0);
+
+   Print("=== Optimizer Parameters Initialized ===");
+}
+
+//+------------------------------------------------------------------+
+//| TesterDeinit function                                             |
+//+------------------------------------------------------------------+
+void OnTesterDeinit()
+{
+   Print("=== Optimization Complete ===");
+}
+
+//+------------------------------------------------------------------+
+//| TesterPass function - Called after each optimization pass         |
+//+------------------------------------------------------------------+
+void OnTesterPass()
+{
+   // 各最適化パスの結果処理（必要に応じて）
+}
+
+//+------------------------------------------------------------------+
+//| Tester function - Custom optimization criterion                   |
+//| Fintokei対応カスタム最適化基準                                    |
 //+------------------------------------------------------------------+
 double OnTester()
 {
-   // Custom optimization criterion
+   // カスタム最適化基準
    double winRate = g_tradeMgr.GetWinRate();
    double profitFactor = g_tradeMgr.GetTotalLoss() > 0 ?
                          g_tradeMgr.GetTotalProfit() / g_tradeMgr.GetTotalLoss() : 0;
    int totalTrades = g_tradeMgr.GetTotalTrades();
+   double totalPL = g_tradeMgr.GetTotalProfit() - g_tradeMgr.GetTotalLoss();
 
-   // Combined score: prefer high win rate with decent profit factor and enough trades
+   // Fintokei対応スコア計算:
+   // 1. プロフィットファクター (PF > 1.0 を優先)
+   // 2. 勝率 (高いほど良い)
+   // 3. 取引数 (十分な取引数が必要)
+   // 4. 総損益 (黒字を優先)
+
    double score = 0;
-   if(totalTrades >= 10) // Minimum trades for validity
+   if(totalTrades >= 50) // 最低50取引で信頼性確保
    {
-      score = winRate * profitFactor * MathSqrt(totalTrades);
+      // PFボーナス (1.0以上で大きなボーナス)
+      double pfBonus = profitFactor >= 1.0 ? profitFactor * 100 : profitFactor * 10;
+
+      // 勝率ボーナス (70%以上で追加ボーナス)
+      double wrBonus = winRate >= 70 ? winRate * 1.5 : winRate;
+
+      // 利益ボーナス (黒字なら追加)
+      double plBonus = totalPL > 0 ? MathSqrt(totalPL) : 0;
+
+      // 取引数補正 (多すぎず少なすぎず)
+      double tradeBonus = MathSqrt(totalTrades);
+
+      score = pfBonus * wrBonus * tradeBonus + plBonus;
    }
 
    return score;
