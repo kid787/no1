@@ -784,58 +784,58 @@ void UpdateDisplayInfo()
 void OnTesterInit()
 {
    // パラメータ最適化範囲の設定
-   // 形式: ParameterSetRange("パラメータ名", 有効, 開始値, ステップ, 終了値)
+   // 形式: ParameterSetRange("パラメータ名", 有効, 現在値, 開始値, ステップ, 終了値)
 
    //--- リスク管理パラメータ
    // 1トレードあたりリスク: 0.2% - 0.5% (ステップ 0.1%)
-   ParameterSetRange("InpRiskPerTradePct", true, 0.2, 0.1, 0.5);
+   ParameterSetRange("InpRiskPerTradePct", true, 0.3, 0.2, 0.1, 0.5);
 
    //--- ATRパラメータ（重要）
    // ATR倍率(SL用): 1.0 - 2.0 (ステップ 0.2)
-   ParameterSetRange("InpATRMultiplierSL", true, 1.0, 0.2, 2.0);
+   ParameterSetRange("InpATRMultiplierSL", true, 1.2, 1.0, 0.2, 2.0);
 
    // ATR倍率(TP用): 4.0 - 8.0 (ステップ 1.0)
-   ParameterSetRange("InpATRMultiplierTP", true, 4.0, 1.0, 8.0);
+   ParameterSetRange("InpATRMultiplierTP", true, 6.0, 4.0, 1.0, 8.0);
 
    //--- 取引制限パラメータ
    // 1日の最大取引数: 3 - 7 (ステップ 1)
-   ParameterSetRange("InpMaxTradesPerDay", true, 3, 1, 7);
+   ParameterSetRange("InpMaxTradesPerDay", true, 5, 3, 1, 7);
 
    //--- 取引時間パラメータ
    // 取引開始時間: 10 - 14 (ステップ 1)
-   ParameterSetRange("InpTradeStartHour", true, 10, 1, 14);
+   ParameterSetRange("InpTradeStartHour", true, 12, 10, 1, 14);
 
    // 取引終了時間: 15 - 18 (ステップ 1)
-   ParameterSetRange("InpTradeEndHour", true, 15, 1, 18);
+   ParameterSetRange("InpTradeEndHour", true, 16, 15, 1, 18);
 
    //--- インジケーターパラメータ
    // EMA高速期間: 5 - 15 (ステップ 2)
-   ParameterSetRange("InpEMAPeriodFast", true, 5, 2, 15);
+   ParameterSetRange("InpEMAPeriodFast", true, 9, 5, 2, 15);
 
    // EMA低速期間: 15 - 30 (ステップ 5)
-   ParameterSetRange("InpEMAPeriodSlow", true, 15, 5, 30);
+   ParameterSetRange("InpEMAPeriodSlow", true, 21, 15, 5, 30);
 
    // RSI期間: 10 - 20 (ステップ 2)
-   ParameterSetRange("InpRSIPeriod", true, 10, 2, 20);
+   ParameterSetRange("InpRSIPeriod", true, 14, 10, 2, 20);
 
    //--- トレーリングストップパラメータ
    // トレーリングATR倍率: 1.0 - 2.5 (ステップ 0.5)
-   ParameterSetRange("InpTrailingATRMult", true, 1.0, 0.5, 2.5);
+   ParameterSetRange("InpTrailingATRMult", true, 1.5, 1.0, 0.5, 2.5);
 
    // ブレイクイーブンATR倍率: 0.5 - 1.5 (ステップ 0.5)
-   ParameterSetRange("InpBreakEvenATRMult", true, 0.5, 0.5, 1.5);
+   ParameterSetRange("InpBreakEvenATRMult", true, 1.0, 0.5, 0.5, 1.5);
 
    //--- 固定パラメータ（最適化しない）
-   ParameterSetRange("InpInitialBalance", false, 0, 0, 0);
-   ParameterSetRange("InpDailyLossLimitPct", false, 0, 0, 0);
-   ParameterSetRange("InpOverallLossLimitPct", false, 0, 0, 0);
-   ParameterSetRange("InpSafetyBufferPct", false, 0, 0, 0);
-   ParameterSetRange("InpMagicNumber", false, 0, 0, 0);
-   ParameterSetRange("InpUseSessionFilter", false, 0, 0, 0);
-   ParameterSetRange("InpTradeOverlapOnly", false, 0, 0, 0);
-   ParameterSetRange("InpUseSMC", false, 0, 0, 0);
-   ParameterSetRange("InpUseOrderBlocks", false, 0, 0, 0);
-   ParameterSetRange("InpUseFVG", false, 0, 0, 0);
+   ParameterSetRange("InpInitialBalance", false, 2000000.0, 0, 0, 0);
+   ParameterSetRange("InpDailyLossLimitPct", false, 5.0, 0, 0, 0);
+   ParameterSetRange("InpOverallLossLimitPct", false, 10.0, 0, 0, 0);
+   ParameterSetRange("InpSafetyBufferPct", false, 0.1, 0, 0, 0);
+   ParameterSetRange("InpMagicNumber", false, 202412, 0, 0, 0);
+   ParameterSetRange("InpUseSessionFilter", false, 1, 0, 0, 0);
+   ParameterSetRange("InpTradeOverlapOnly", false, 1, 0, 0, 0);
+   ParameterSetRange("InpUseSMC", false, 1, 0, 0, 0);
+   ParameterSetRange("InpUseOrderBlocks", false, 1, 0, 0, 0);
+   ParameterSetRange("InpUseFVG", false, 1, 0, 0, 0);
 
    Print("=== Optimizer Parameters Initialized ===");
 }
