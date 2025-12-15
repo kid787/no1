@@ -17,6 +17,7 @@
 #include "../Include/SmartMoneyConcepts.mqh"
 #include "../Include/TradeManager.mqh"
 #include "../Include/ChartDisplay.mqh"
+#include "../Include/ZigZagBreakout.mqh"
 
 //+------------------------------------------------------------------+
 //| Input Parameters                                                  |
@@ -83,6 +84,13 @@ input double   InpTrailingATRMult    = 1.5;         // トレーリングATR倍�
 input bool     InpUseBreakEven       = true;        // ブレイクイーブンを使用
 input double   InpBreakEvenATRMult   = 1.0;         // ブレイクイーブンATR倍率
 
+//--- ZigZag Breakout Filter Parameters
+input group "=== ZigZag Breakout Filter ==="
+input bool     InpUseZigZag          = true;        // ZigZagフィルターを使用
+input int      InpZigZagDepth        = 12;          // ZigZag Depth
+input int      InpZigZagDeviation    = 5;           // ZigZag Deviation
+input int      InpZigZagBackstep     = 3;           // ZigZag Backstep
+
 //+------------------------------------------------------------------+
 //| Global Variables                                                  |
 //+------------------------------------------------------------------+
@@ -95,6 +103,7 @@ CSmartMoneyConcepts g_smcBase;        // SMC for base timeframe
 CSmartMoneyConcepts g_smcEntry;       // SMC for entry timeframe
 CTradeManager     g_tradeMgr;         // Trade Manager
 CChartDisplay     g_display;          // Chart Display
+CZigZagBreakout   g_zigzag;           // ZigZag Breakout Filter
 
 // Indicator handles
 int g_emaFastHandle;
@@ -165,6 +174,16 @@ int OnInit()
       }
    }
 
+   // Initialize ZigZag Breakout Filter
+   if(InpUseZigZag)
+   {
+      if(!g_zigzag.Init(Symbol(), InpBasePeriod, InpZigZagDepth, InpZigZagDeviation, InpZigZagBackstep))
+      {
+         Print("Warning: Failed to initialize ZigZag filter - continuing without it");
+         // Continue without ZigZag - not critical
+      }
+   }
+
    // Initialize Trade Manager
    if(!g_tradeMgr.Init(Symbol(), InpMagicNumber, InpSlippage, InpMaxTradesPerDay))
    {
@@ -210,6 +229,7 @@ void OnDeinit(const int reason)
    g_riskMgr.Deinit();
    g_smcBase.Deinit();
    g_smcEntry.Deinit();
+   g_zigzag.Deinit();
    g_tradeMgr.Deinit();
    g_display.Deinit();
 
@@ -381,6 +401,12 @@ void UpdateAnalysis()
       g_smcBase.Update();
       g_smcEntry.Update();
    }
+
+   // Update ZigZag analysis
+   if(InpUseZigZag)
+   {
+      g_zigzag.Update();
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -528,17 +554,51 @@ ENUM_TRADE_DIRECTION GenerateEntrySignal()
       else if(sellScore > buyScore) sellScore++;
    }
 
+   //=== Factor 10: ZigZag Breakout Filter ===
+   if(InpUseZigZag)
+   {
+      // ZigZag confirms buy signal
+      if(g_zigzag.ConfirmBuySignal())
+         buyScore++;
+
+      // ZigZag confirms sell signal
+      if(g_zigzag.ConfirmSellSignal())
+         sellScore++;
+
+      // Bonus: Strong breakout confirmation
+      if(g_zigzag.IsBullishBreakout() && htfTrend == DOW_TREND_UP)
+         buyScore++;
+      if(g_zigzag.IsBearishBreakout() && htfTrend == DOW_TREND_DOWN)
+         sellScore++;
+   }
+
    //=== Determine Signal ===
    int maxScore = MathMax(buyScore, sellScore);
    g_signalStrength = maxScore;
 
-   if(buyScore >= 3 && buyScore > sellScore)
+   // Base score threshold
+   int scoreThreshold = 3;
+
+   // If ZigZag is enabled, require ZigZag confirmation as final filter
+   if(buyScore >= scoreThreshold && buyScore > sellScore)
    {
+      // ZigZag confirmation check (if enabled)
+      if(InpUseZigZag && !g_zigzag.ConfirmBuySignal())
+      {
+         g_currentSignal = "BUY (ZZ待ち)";
+         return TRADE_NONE; // Wait for ZigZag confirmation
+      }
       g_currentSignal = "BUY";
       return TRADE_BUY;
    }
-   else if(sellScore >= 3 && sellScore > buyScore)
+   else if(sellScore >= scoreThreshold && sellScore > buyScore)
    {
+      // ZigZag confirmation check (if enabled)
+      if(InpUseZigZag && !g_zigzag.ConfirmSellSignal())
+      {
+         g_currentSignal = "SELL (ZZ待ち)";
+         return TRADE_NONE; // Wait for ZigZag confirmation
+      }
       g_currentSignal = "SELL";
       return TRADE_SELL;
    }
@@ -825,6 +885,16 @@ void OnTesterInit()
    // ブレイクイーブンATR倍率: 0.5 - 1.5 (ステップ 0.5)
    ParameterSetRange("InpBreakEvenATRMult", true, 1.0, 0.5, 0.5, 1.5);
 
+   //--- ZigZagパラメータ（オプション）
+   // ZigZag Depth: 8 - 20 (ステップ 4)
+   ParameterSetRange("InpZigZagDepth", false, 12, 8, 4, 20);
+
+   // ZigZag Deviation: 3 - 7 (ステップ 2)
+   ParameterSetRange("InpZigZagDeviation", false, 5, 3, 2, 7);
+
+   // ZigZag Backstep: 2 - 4 (ステップ 1)
+   ParameterSetRange("InpZigZagBackstep", false, 3, 2, 1, 4);
+
    //--- 固定パラメータ（最適化しない）
    ParameterSetRange("InpInitialBalance", false, 2000000.0, 0, 0, 0);
    ParameterSetRange("InpDailyLossLimitPct", false, 5.0, 0, 0, 0);
@@ -836,6 +906,7 @@ void OnTesterInit()
    ParameterSetRange("InpUseSMC", false, 1, 0, 0, 0);
    ParameterSetRange("InpUseOrderBlocks", false, 1, 0, 0, 0);
    ParameterSetRange("InpUseFVG", false, 1, 0, 0, 0);
+   ParameterSetRange("InpUseZigZag", false, 1, 0, 0, 0);
 
    Print("=== Optimizer Parameters Initialized ===");
 }
