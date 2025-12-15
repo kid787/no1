@@ -579,26 +579,14 @@ ENUM_TRADE_DIRECTION GenerateEntrySignal()
    // Base score threshold
    int scoreThreshold = 3;
 
-   // If ZigZag is enabled, require ZigZag confirmation as final filter
+   // ZigZagはスコアに貢献するだけで、厳格なフィルターとしては使用しない
    if(buyScore >= scoreThreshold && buyScore > sellScore)
    {
-      // ZigZag confirmation check (if enabled)
-      if(InpUseZigZag && !g_zigzag.ConfirmBuySignal())
-      {
-         g_currentSignal = "BUY (ZZ待ち)";
-         return TRADE_NONE; // Wait for ZigZag confirmation
-      }
       g_currentSignal = "BUY";
       return TRADE_BUY;
    }
    else if(sellScore >= scoreThreshold && sellScore > buyScore)
    {
-      // ZigZag confirmation check (if enabled)
-      if(InpUseZigZag && !g_zigzag.ConfirmSellSignal())
-      {
-         g_currentSignal = "SELL (ZZ待ち)";
-         return TRADE_NONE; // Wait for ZigZag confirmation
-      }
       g_currentSignal = "SELL";
       return TRADE_SELL;
    }

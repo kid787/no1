@@ -264,8 +264,9 @@ bool CZigZagBreakout::IsBearishBreakout()
 //+------------------------------------------------------------------+
 bool CZigZagBreakout::ConfirmBuySignal()
 {
+   // ZigZagデータ不足時はフィルターをパス（トレード許可）
    if(m_lastHigh == 0 || m_lastLow == 0)
-      return true;  // ZigZagデータ不足時はフィルターをパス
+      return true;
 
    double currentPrice = SymbolInfoDouble(m_symbol, SYMBOL_BID);
 
@@ -275,20 +276,15 @@ bool CZigZagBreakout::ConfirmBuySignal()
 
    // 条件2: 高値切り上げパターン（上昇トレンド確認）
    if(m_prevHigh > 0 && m_lastHigh > m_prevHigh)
-   {
-      // さらに安値も切り上げていれば強い買いシグナル
-      if(m_prevLow > 0 && m_lastLow > m_prevLow)
-         return true;
-   }
+      return true;
 
-   // 条件3: 価格がZigZag直近安値より上にある（下降トレンドではない）
+   // 条件3: 安値切り上げパターン（上昇トレンド確認）
+   if(m_prevLow > 0 && m_lastLow > m_prevLow)
+      return true;
+
+   // 条件4: 価格がZigZag直近安値より上にある
    if(currentPrice > m_lastLow)
-   {
-      // 直近高値に近づいている（ブレイクアウト寸前）
-      double range = m_lastHigh - m_lastLow;
-      if(range > 0 && currentPrice > m_lastLow + range * 0.7)
-         return true;
-   }
+      return true;
 
    return false;
 }
@@ -299,8 +295,9 @@ bool CZigZagBreakout::ConfirmBuySignal()
 //+------------------------------------------------------------------+
 bool CZigZagBreakout::ConfirmSellSignal()
 {
+   // ZigZagデータ不足時はフィルターをパス（トレード許可）
    if(m_lastHigh == 0 || m_lastLow == 0)
-      return true;  // ZigZagデータ不足時はフィルターをパス
+      return true;
 
    double currentPrice = SymbolInfoDouble(m_symbol, SYMBOL_BID);
 
@@ -310,20 +307,15 @@ bool CZigZagBreakout::ConfirmSellSignal()
 
    // 条件2: 安値切り下げパターン（下降トレンド確認）
    if(m_prevLow > 0 && m_lastLow < m_prevLow)
-   {
-      // さらに高値も切り下げていれば強い売りシグナル
-      if(m_prevHigh > 0 && m_lastHigh < m_prevHigh)
-         return true;
-   }
+      return true;
 
-   // 条件3: 価格がZigZag直近高値より下にある（上昇トレンドではない）
+   // 条件3: 高値切り下げパターン（下降トレンド確認）
+   if(m_prevHigh > 0 && m_lastHigh < m_prevHigh)
+      return true;
+
+   // 条件4: 価格がZigZag直近高値より下にある
    if(currentPrice < m_lastHigh)
-   {
-      // 直近安値に近づいている（ブレイクアウト寸前）
-      double range = m_lastHigh - m_lastLow;
-      if(range > 0 && currentPrice < m_lastHigh - range * 0.7)
-         return true;
-   }
+      return true;
 
    return false;
 }
