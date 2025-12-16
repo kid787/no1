@@ -18,6 +18,7 @@
 #include "../Include/TradeManager.mqh"
 #include "../Include/ChartDisplay.mqh"
 #include "../Include/ZigZagBreakout.mqh"
+#include "../Include/DailyPivot.mqh"
 
 //+------------------------------------------------------------------+
 //| Input Parameters                                                  |
@@ -93,6 +94,12 @@ input int      InpZigZagDepth        = 12;          // ZigZag Depth
 input int      InpZigZagDeviation    = 5;           // ZigZag Deviation
 input int      InpZigZagBackstep     = 3;           // ZigZag Backstep
 
+//--- Daily Pivot Take Profit Parameters (D案)
+input group "=== Daily Pivot Take Profit (D案) ==="
+input bool     InpUsePivotTP         = true;        // D案: PIVOTベース利確を使用
+input double   InpPivotMaxRatio      = 1.5;         // PIVOT最大距離倍率 (ATR TP比)
+input double   InpPivotMinRatio      = 0.3;         // PIVOT最小距離倍率 (近すぎる場合ATR TP)
+
 //+------------------------------------------------------------------+
 //| Global Variables                                                  |
 //+------------------------------------------------------------------+
@@ -106,6 +113,7 @@ CSmartMoneyConcepts g_smcEntry;       // SMC for entry timeframe
 CTradeManager     g_tradeMgr;         // Trade Manager
 CChartDisplay     g_display;          // Chart Display
 CZigZagBreakout   g_zigzag;           // ZigZag Breakout Filter
+CDailyPivot       g_pivot;            // Daily Pivot for TP (D案)
 
 // Indicator handles
 int g_emaFastHandle;
@@ -183,6 +191,16 @@ int OnInit()
       {
          Print("Warning: Failed to initialize ZigZag filter - continuing without it");
          // Continue without ZigZag - not critical
+      }
+   }
+
+   // Initialize Daily Pivot (D案)
+   if(InpUsePivotTP)
+   {
+      if(!g_pivot.Init(Symbol()))
+      {
+         Print("Warning: Failed to initialize Daily Pivot - using ATR-based TP only");
+         // Continue without Pivot - not critical
       }
    }
 
@@ -408,6 +426,12 @@ void UpdateAnalysis()
    if(InpUseZigZag)
    {
       g_zigzag.Update();
+   }
+
+   // Update Daily Pivot (D案)
+   if(InpUsePivotTP)
+   {
+      g_pivot.Update();
    }
 }
 
@@ -696,9 +720,34 @@ void ExecuteTrade(ENUM_TRADE_DIRECTION direction)
          sl = currentPrice - (currentATR * InpATRMultiplierSL);
       }
 
-      tp = currentPrice + (currentATR * InpATRMultiplierTP);
+      // Base TP from ATR
+      double atrTP = currentPrice + (currentATR * InpATRMultiplierTP);
+      tp = atrTP;
 
-      // Check for nearby resistance for TP
+      // D案: Daily Pivot TP
+      if(InpUsePivotTP)
+      {
+         double pivotTP = g_pivot.GetNearestResistance(currentPrice);
+         if(pivotTP > 0)
+         {
+            double atrDistance = atrTP - currentPrice;
+            double pivotDistance = pivotTP - currentPrice;
+
+            // PIVOTが適切な距離にある場合のみ使用
+            if(pivotDistance > atrDistance * InpPivotMinRatio &&
+               pivotDistance < atrDistance * InpPivotMaxRatio)
+            {
+               tp = pivotTP;
+               Print("D案: BUY TP set to Pivot R=", pivotTP, " (ATR TP=", atrTP, ")");
+            }
+            else
+            {
+               Print("D案: Pivot R=", pivotTP, " out of range, using ATR TP=", atrTP);
+            }
+         }
+      }
+
+      // Check for nearby resistance for TP (SMC)
       OrderBlock ob;
       if(InpUseSMC && g_smcBase.GetNearestBearishOB(currentPrice, ob))
       {
@@ -735,9 +784,34 @@ void ExecuteTrade(ENUM_TRADE_DIRECTION direction)
          sl = currentPrice + (currentATR * InpATRMultiplierSL);
       }
 
-      tp = currentPrice - (currentATR * InpATRMultiplierTP);
+      // Base TP from ATR
+      double atrTP = currentPrice - (currentATR * InpATRMultiplierTP);
+      tp = atrTP;
 
-      // Check for nearby support for TP
+      // D案: Daily Pivot TP
+      if(InpUsePivotTP)
+      {
+         double pivotTP = g_pivot.GetNearestSupport(currentPrice);
+         if(pivotTP > 0)
+         {
+            double atrDistance = currentPrice - atrTP;
+            double pivotDistance = currentPrice - pivotTP;
+
+            // PIVOTが適切な距離にある場合のみ使用
+            if(pivotDistance > atrDistance * InpPivotMinRatio &&
+               pivotDistance < atrDistance * InpPivotMaxRatio)
+            {
+               tp = pivotTP;
+               Print("D案: SELL TP set to Pivot S=", pivotTP, " (ATR TP=", atrTP, ")");
+            }
+            else
+            {
+               Print("D案: Pivot S=", pivotTP, " out of range, using ATR TP=", atrTP);
+            }
+         }
+      }
+
+      // Check for nearby support for TP (SMC)
       OrderBlock ob;
       if(InpUseSMC && g_smcBase.GetNearestBullishOB(currentPrice, ob))
       {
@@ -951,6 +1025,13 @@ void OnTesterInit()
    // ZigZag Backstep: 2 - 4 (ステップ 1)
    ParameterSetRange("InpZigZagBackstep", false, 3, 2, 1, 4);
 
+   //--- D案: Daily Pivotパラメータ
+   // PIVOT最大距離倍率: 1.0 - 2.0 (ステップ 0.5)
+   ParameterSetRange("InpPivotMaxRatio", true, 1.5, 1.0, 0.5, 2.0);
+
+   // PIVOT最小距離倍率: 0.2 - 0.5 (ステップ 0.1)
+   ParameterSetRange("InpPivotMinRatio", true, 0.3, 0.2, 0.1, 0.5);
+
    //--- 固定パラメータ（最適化しない）
    ParameterSetRange("InpInitialBalance", false, 2000000.0, 0, 0, 0);
    ParameterSetRange("InpDailyLossLimitPct", false, 5.0, 0, 0, 0);
@@ -965,6 +1046,7 @@ void OnTesterInit()
    ParameterSetRange("InpUseZigZag", false, 1, 0, 0, 0);
    ParameterSetRange("InpZigZagStandalone", false, 1, 0, 0, 0);
    ParameterSetRange("InpZigZagDowReplace", false, 1, 0, 0, 0);
+   ParameterSetRange("InpUsePivotTP", false, 1, 0, 0, 0);
 
    Print("=== Optimizer Parameters Initialized ===");
 }
