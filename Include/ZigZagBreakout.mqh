@@ -59,6 +59,11 @@ public:
    double            GetPrevLow()      { return m_prevLow; }
    int               GetLastHighBar()  { return m_lastHighBar; }
    int               GetLastLowBar()   { return m_lastLowBar; }
+
+   // C案: ZigZagベースのダウ理論トレンド検出
+   bool              IsZigZagUptrend();      // HH + HL パターン
+   bool              IsZigZagDowntrend();    // LH + LL パターン
+   int               GetZigZagDowTrend();    // 1=上昇, -1=下降, 0=レンジ
 };
 
 //+------------------------------------------------------------------+
@@ -318,5 +323,52 @@ bool CZigZagBreakout::ConfirmSellSignal()
       return true;
 
    return false;
+}
+
+//+------------------------------------------------------------------+
+//| C案: ZigZagベースの上昇トレンド検出 (HH + HL)                      |
+//+------------------------------------------------------------------+
+bool CZigZagBreakout::IsZigZagUptrend()
+{
+   // データ不足チェック
+   if(m_lastHigh == 0 || m_lastLow == 0 || m_prevHigh == 0 || m_prevLow == 0)
+      return false;
+
+   // 上昇トレンド条件: Higher High (HH) + Higher Low (HL)
+   bool higherHigh = (m_lastHigh > m_prevHigh);
+   bool higherLow = (m_lastLow > m_prevLow);
+
+   return (higherHigh && higherLow);
+}
+
+//+------------------------------------------------------------------+
+//| C案: ZigZagベースの下降トレンド検出 (LH + LL)                      |
+//+------------------------------------------------------------------+
+bool CZigZagBreakout::IsZigZagDowntrend()
+{
+   // データ不足チェック
+   if(m_lastHigh == 0 || m_lastLow == 0 || m_prevHigh == 0 || m_prevLow == 0)
+      return false;
+
+   // 下降トレンド条件: Lower High (LH) + Lower Low (LL)
+   bool lowerHigh = (m_lastHigh < m_prevHigh);
+   bool lowerLow = (m_lastLow < m_prevLow);
+
+   return (lowerHigh && lowerLow);
+}
+
+//+------------------------------------------------------------------+
+//| C案: ZigZagベースのダウ理論トレンド                                |
+//| 戻り値: 1=上昇トレンド, -1=下降トレンド, 0=レンジ/不明              |
+//+------------------------------------------------------------------+
+int CZigZagBreakout::GetZigZagDowTrend()
+{
+   if(IsZigZagUptrend())
+      return 1;   // 上昇トレンド
+
+   if(IsZigZagDowntrend())
+      return -1;  // 下降トレンド
+
+   return 0;      // レンジまたは不明
 }
 //+------------------------------------------------------------------+

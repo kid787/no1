@@ -87,7 +87,8 @@ input double   InpBreakEvenATRMult   = 1.0;         // ブレイクイーブンA
 //--- ZigZag Breakout Filter Parameters
 input group "=== ZigZag Breakout Filter ==="
 input bool     InpUseZigZag          = true;        // ZigZagフィルターを使用
-input bool     InpZigZagStandalone   = true;        // ZigZag単体エントリーを許可
+input bool     InpZigZagStandalone   = true;        // B案: ZigZag単体エントリーを許可
+input bool     InpZigZagDowReplace   = true;        // C案: ダウ理論をZigZagベースに置換
 input int      InpZigZagDepth        = 12;          // ZigZag Depth
 input int      InpZigZagDeviation    = 5;           // ZigZag Deviation
 input int      InpZigZagBackstep     = 3;           // ZigZag Backstep
@@ -422,19 +423,60 @@ ENUM_TRADE_DIRECTION GenerateEntrySignal()
    int buyScore = 0;
    int sellScore = 0;
 
+   //=== C案: ZigZagベースのトレンド検出 ===
+   ENUM_DOW_TREND htfTrend;
+   ENUM_DOW_TREND baseTrend;
+   ENUM_DOW_TREND entryTrend;
+
+   if(InpUseZigZag && InpZigZagDowReplace)
+   {
+      // ZigZagベースのトレンド検出
+      int zigzagTrend = g_zigzag.GetZigZagDowTrend();
+
+      // ZigZagトレンドをダウ理論トレンドに変換
+      if(zigzagTrend > 0)
+      {
+         htfTrend = DOW_TREND_UP;
+         baseTrend = DOW_TREND_UP;
+         entryTrend = DOW_TREND_UP;
+      }
+      else if(zigzagTrend < 0)
+      {
+         htfTrend = DOW_TREND_DOWN;
+         baseTrend = DOW_TREND_DOWN;
+         entryTrend = DOW_TREND_DOWN;
+      }
+      else
+      {
+         htfTrend = DOW_TREND_NONE;
+         baseTrend = DOW_TREND_NONE;
+         entryTrend = DOW_TREND_NONE;
+      }
+
+      // ZigZag HH/HL検出でスコア加算
+      if(g_zigzag.IsZigZagUptrend())
+         buyScore += 2;  // HH+HL確認で+2
+      if(g_zigzag.IsZigZagDowntrend())
+         sellScore += 2; // LH+LL確認で+2
+   }
+   else
+   {
+      // 従来のダウ理論トレンド検出
+      htfTrend = g_dowHTF.GetCurrentTrend();
+      baseTrend = g_dowBase.GetCurrentTrend();
+      entryTrend = g_dowEntry.GetCurrentTrend();
+   }
+
    //=== Factor 1: Dow Theory Trend (HTF) ===
-   ENUM_DOW_TREND htfTrend = g_dowHTF.GetCurrentTrend();
    if(htfTrend == DOW_TREND_UP) buyScore++;
    else if(htfTrend == DOW_TREND_DOWN) sellScore++;
 
    //=== Factor 2: Dow Theory Trend (Base) ===
-   ENUM_DOW_TREND baseTrend = g_dowBase.GetCurrentTrend();
    if(baseTrend == DOW_TREND_UP) buyScore++;
    else if(baseTrend == DOW_TREND_DOWN) sellScore++;
 
    //=== Factor 3: MTF Alignment (Method 5) ===
    // All timeframes should align for strong signal
-   ENUM_DOW_TREND entryTrend = g_dowEntry.GetCurrentTrend();
    if(htfTrend == DOW_TREND_UP && baseTrend == DOW_TREND_UP && entryTrend == DOW_TREND_UP)
       buyScore++;
    else if(htfTrend == DOW_TREND_DOWN && baseTrend == DOW_TREND_DOWN && entryTrend == DOW_TREND_DOWN)
@@ -922,6 +964,7 @@ void OnTesterInit()
    ParameterSetRange("InpUseFVG", false, 1, 0, 0, 0);
    ParameterSetRange("InpUseZigZag", false, 1, 0, 0, 0);
    ParameterSetRange("InpZigZagStandalone", false, 1, 0, 0, 0);
+   ParameterSetRange("InpZigZagDowReplace", false, 1, 0, 0, 0);
 
    Print("=== Optimizer Parameters Initialized ===");
 }
