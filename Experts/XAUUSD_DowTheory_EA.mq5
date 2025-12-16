@@ -87,6 +87,7 @@ input double   InpBreakEvenATRMult   = 1.0;         // ブレイクイーブンA
 //--- ZigZag Breakout Filter Parameters
 input group "=== ZigZag Breakout Filter ==="
 input bool     InpUseZigZag          = true;        // ZigZagフィルターを使用
+input bool     InpZigZagStandalone   = true;        // ZigZag単体エントリーを許可
 input int      InpZigZagDepth        = 12;          // ZigZag Depth
 input int      InpZigZagDeviation    = 5;           // ZigZag Deviation
 input int      InpZigZagBackstep     = 3;           // ZigZag Backstep
@@ -555,6 +556,9 @@ ENUM_TRADE_DIRECTION GenerateEntrySignal()
    }
 
    //=== Factor 10: ZigZag Breakout Filter ===
+   bool zigzagBullishBreakout = false;
+   bool zigzagBearishBreakout = false;
+
    if(InpUseZigZag)
    {
       // ZigZag confirms buy signal
@@ -565,11 +569,14 @@ ENUM_TRADE_DIRECTION GenerateEntrySignal()
       if(g_zigzag.ConfirmSellSignal())
          sellScore++;
 
-      // Bonus: Strong breakout confirmation
-      if(g_zigzag.IsBullishBreakout() && htfTrend == DOW_TREND_UP)
-         buyScore++;
-      if(g_zigzag.IsBearishBreakout() && htfTrend == DOW_TREND_DOWN)
-         sellScore++;
+      // Strong breakout confirmation
+      zigzagBullishBreakout = g_zigzag.IsBullishBreakout();
+      zigzagBearishBreakout = g_zigzag.IsBearishBreakout();
+
+      if(zigzagBullishBreakout && htfTrend == DOW_TREND_UP)
+         buyScore += 2;  // 強いブレイクアウトは+2
+      if(zigzagBearishBreakout && htfTrend == DOW_TREND_DOWN)
+         sellScore += 2;  // 強いブレイクアウトは+2
    }
 
    //=== Determine Signal ===
@@ -579,7 +586,26 @@ ENUM_TRADE_DIRECTION GenerateEntrySignal()
    // Base score threshold
    int scoreThreshold = 3;
 
-   // ZigZagはスコアに貢献するだけで、厳格なフィルターとしては使用しない
+   //=== B案: ZigZag単体エントリー ===
+   // ZigZagブレイクアウト単体でもエントリー可能
+   if(InpUseZigZag && InpZigZagStandalone)
+   {
+      // ZigZag上方ブレイクアウト + 上位足が上昇トレンド
+      if(zigzagBullishBreakout && htfTrend == DOW_TREND_UP)
+      {
+         g_currentSignal = "BUY (ZZ)";
+         return TRADE_BUY;
+      }
+
+      // ZigZag下方ブレイクアウト + 上位足が下降トレンド
+      if(zigzagBearishBreakout && htfTrend == DOW_TREND_DOWN)
+      {
+         g_currentSignal = "SELL (ZZ)";
+         return TRADE_SELL;
+      }
+   }
+
+   //=== 通常のスコアベースシグナル ===
    if(buyScore >= scoreThreshold && buyScore > sellScore)
    {
       g_currentSignal = "BUY";
@@ -895,6 +921,7 @@ void OnTesterInit()
    ParameterSetRange("InpUseOrderBlocks", false, 1, 0, 0, 0);
    ParameterSetRange("InpUseFVG", false, 1, 0, 0, 0);
    ParameterSetRange("InpUseZigZag", false, 1, 0, 0, 0);
+   ParameterSetRange("InpZigZagStandalone", false, 1, 0, 0, 0);
 
    Print("=== Optimizer Parameters Initialized ===");
 }
