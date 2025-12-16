@@ -448,9 +448,9 @@ ENUM_TRADE_DIRECTION GenerateEntrySignal()
       }
       else
       {
-         htfTrend = DOW_TREND_NONE;
-         baseTrend = DOW_TREND_NONE;
-         entryTrend = DOW_TREND_NONE;
+         htfTrend = DOW_TREND_RANGE;
+         baseTrend = DOW_TREND_RANGE;
+         entryTrend = DOW_TREND_RANGE;
       }
 
       // ZigZag HH/HL検出でスコア加算
