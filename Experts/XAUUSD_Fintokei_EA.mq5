@@ -31,7 +31,7 @@ input double   TakeProfitRatio = 2.0;                    // Take Profit Ratio (R
 
 input group "=== Fintokei Challenge Settings ==="
 input int      ChallengeStep = 1;                        // Challenge Step (1 or 2)
-input double   InitialBalance = 10000000;                // Initial Balance (JPY)
+input double   InitialBalance = 0;                       // Initial Balance (0=Auto from account)
 input double   DailyLossLimit = 5.0;                     // Daily Loss Limit (%)
 input double   TotalLossLimit = 10.0;                    // Total Loss Limit (%)
 input double   Step1ProfitTarget = 8.0;                  // Step 1 Profit Target (%)
@@ -71,6 +71,9 @@ datetime       lastActivityTime;
 
 bool           challengeCompleted;
 bool           tradingAllowed;
+bool           totalLossReached;
+bool           dailyLossReached;
+double         actualInitialBalance;
 
 string         SYMBOL = "XAUUSD";
 int            MAGIC_NUMBER = 20241201;
@@ -138,8 +141,14 @@ void InitializeChallengeParameters()
    else
       profitTarget = Step2ProfitTarget;
 
+   // Set actual initial balance (use account balance if InitialBalance is 0)
+   if(InitialBalance <= 0)
+      actualInitialBalance = accountInfo.Balance();
+   else
+      actualInitialBalance = InitialBalance;
+
    // Calculate loss lines
-   totalLossLine = InitialBalance * (1.0 - TotalLossLimit / 100.0);
+   totalLossLine = actualInitialBalance * (1.0 - TotalLossLimit / 100.0);
 
    // Initialize daily tracking
    dailyStartEquity = accountInfo.Equity();
@@ -154,6 +163,11 @@ void InitializeChallengeParameters()
    // Challenge status
    challengeCompleted = false;
    tradingAllowed = true;
+   totalLossReached = false;
+   dailyLossReached = false;
+
+   Print("Actual Initial Balance: ", DoubleToString(actualInitialBalance, 2));
+   Print("Total Loss Line: ", DoubleToString(totalLossLine, 2));
 }
 
 //+------------------------------------------------------------------+
@@ -235,6 +249,10 @@ void CheckDailyReset()
       dailyStartEquity = accountInfo.Equity();
       UpdateDailyLossLine();
 
+      // Reset daily loss flag
+      dailyLossReached = false;
+      tradingAllowed = true;
+
       Print("Daily reset at: ", TimeToString(dailyResetTime));
       Print("New daily start equity: ", DoubleToString(dailyStartEquity, 2));
       Print("New daily loss line: ", DoubleToString(dailyLossLine, 2));
@@ -251,7 +269,12 @@ bool MonitorRiskLimits()
    // Check total loss limit (10%)
    if(currentEquity <= totalLossLine)
    {
-      Print("CRITICAL: Total loss limit reached! Closing all positions.");
+      if(!totalLossReached)
+      {
+         Print("CRITICAL: Total loss limit reached! Closing all positions.");
+         Print("Current Equity: ", DoubleToString(currentEquity, 2), " <= Total Loss Line: ", DoubleToString(totalLossLine, 2));
+         totalLossReached = true;
+      }
       CloseAllPositions();
       tradingAllowed = false;
       return false;
@@ -260,7 +283,12 @@ bool MonitorRiskLimits()
    // Check daily loss limit (5%)
    if(currentEquity <= dailyLossLine)
    {
-      Print("WARNING: Daily loss limit approaching! Closing all positions.");
+      if(!dailyLossReached)
+      {
+         Print("WARNING: Daily loss limit reached! Closing all positions.");
+         Print("Current Equity: ", DoubleToString(currentEquity, 2), " <= Daily Loss Line: ", DoubleToString(dailyLossLine, 2));
+         dailyLossReached = true;
+      }
       CloseAllPositions();
       tradingAllowed = false;
       return false;
@@ -268,18 +296,26 @@ bool MonitorRiskLimits()
 
    // Check if approaching limits - emergency close
    double dailyLossPercent = (dailyStartEquity - currentEquity) / dailyStartEquity * 100.0;
-   double totalLossPercent = (InitialBalance - currentEquity) / InitialBalance * 100.0;
+   double totalLossPercent = (actualInitialBalance - currentEquity) / actualInitialBalance * 100.0;
 
    if(dailyLossPercent >= (DailyLossLimit - SafetyBuffer))
    {
-      Print("Approaching daily loss limit: ", DoubleToString(dailyLossPercent, 2), "%");
+      if(!dailyLossReached)
+      {
+         Print("Approaching daily loss limit: ", DoubleToString(dailyLossPercent, 2), "%");
+         dailyLossReached = true;
+      }
       CloseAllPositions();
       return false;
    }
 
    if(totalLossPercent >= (TotalLossLimit - SafetyBuffer))
    {
-      Print("Approaching total loss limit: ", DoubleToString(totalLossPercent, 2), "%");
+      if(!totalLossReached)
+      {
+         Print("Approaching total loss limit: ", DoubleToString(totalLossPercent, 2), "%");
+         totalLossReached = true;
+      }
       CloseAllPositions();
       return false;
    }
@@ -294,7 +330,7 @@ bool MonitorRiskLimits()
 bool CheckProfitTarget()
 {
    double currentEquity = accountInfo.Equity();
-   double profitPercent = (currentEquity - InitialBalance) / InitialBalance * 100.0;
+   double profitPercent = (currentEquity - actualInitialBalance) / actualInitialBalance * 100.0;
 
    if(profitPercent >= profitTarget)
    {
@@ -980,14 +1016,14 @@ void UpdateDisplay()
 {
    double currentEquity = accountInfo.Equity();
    double currentBalance = accountInfo.Balance();
-   double profitPercent = (currentEquity - InitialBalance) / InitialBalance * 100.0;
+   double profitPercent = (currentEquity - actualInitialBalance) / actualInitialBalance * 100.0;
    double dailyPL = currentEquity - dailyStartEquity;
    double dailyPLPercent = dailyPL / dailyStartEquity * 100.0;
 
    string display = "";
    display += "=== XAUUSD Fintokei Challenge EA ===\n";
    display += StringFormat("Challenge Step: %d\n", ChallengeStep);
-   display += StringFormat("Initial Balance: %.2f\n", InitialBalance);
+   display += StringFormat("Initial Balance: %.2f\n", actualInitialBalance);
    display += StringFormat("Current Equity: %.2f\n", currentEquity);
    display += StringFormat("Current Balance: %.2f\n", currentBalance);
    display += "-----------------------------------\n";
