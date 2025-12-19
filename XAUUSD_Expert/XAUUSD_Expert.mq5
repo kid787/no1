@@ -218,8 +218,8 @@ input int      InpSMA20Period       = 20;
 input double   InpMATouchPips       = 15.0;
 
 input group "=== 水平線設定 ==="
-input int      InpHLLookback        = 200;
-input int      InpSwingStrength     = 3;
+input int      InpHLLookback        = 60;        // スイング検出バー数（5分足で5時間）
+input int      InpSwingStrength     = 2;         // スイング判定強度（小さい=より敏感）
 input double   InpHLMergePips       = 8.0;
 input double   InpHLTouchPips       = 5.0;
 
@@ -228,9 +228,10 @@ input double   InpPinBarRatio       = 2.0;
 input double   InpMinCandlePips     = 8.0;
 
 input group "=== 損切り設定 ==="
-input double   InpSLMarginPercent   = 3.0;
-input double   InpMinSLPips         = 30.0;
-input double   InpMaxSLPips         = 100.0;
+input double   InpSLMarginPercent   = 1.0;       // SL余裕 (%) - XAUUSDは1%推奨
+input double   InpMinSLPips         = 30.0;      // 最小SL (pips)
+input double   InpMaxSLPips         = 150.0;     // 最大SL (pips) - 超過時は制限
+input bool     InpCapSLAtMax        = true;      // MaxSL超過時に制限する（falseで拒否）
 
 input group "=== 利確設定 ==="
 input double   InpMinRR             = 1.5;
@@ -978,9 +979,29 @@ public:
    double CalculateBuySL(double entryPrice)
    {
       if(ArraySize(m_swingLows) < 1) return entryPrice - PipsToPriceUtil(50.0, m_symbol);
-      double swingLow = m_swingLows[0].price;
-      double margin = swingLow * (m_slMarginPercent / 100.0);
-      double sl = swingLow - margin;
+
+      // エントリー価格に最も近いスイングローを探す
+      double bestSwingLow = 0;
+      double minDistance = DBL_MAX;
+
+      for(int i = 0; i < ArraySize(m_swingLows); i++)
+      {
+         if(m_swingLows[i].price < entryPrice)
+         {
+            double distance = entryPrice - m_swingLows[i].price;
+            if(distance < minDistance)
+            {
+               minDistance = distance;
+               bestSwingLow = m_swingLows[i].price;
+            }
+         }
+      }
+
+      if(bestSwingLow == 0)
+         return entryPrice - PipsToPriceUtil(50.0, m_symbol);
+
+      double margin = bestSwingLow * (m_slMarginPercent / 100.0);
+      double sl = bestSwingLow - margin;
       if(sl >= entryPrice) sl = entryPrice - PipsToPriceUtil(30.0, m_symbol);
       return sl;
    }
@@ -988,9 +1009,29 @@ public:
    double CalculateSellSL(double entryPrice)
    {
       if(ArraySize(m_swingHighs) < 1) return entryPrice + PipsToPriceUtil(50.0, m_symbol);
-      double swingHigh = m_swingHighs[0].price;
-      double margin = swingHigh * (m_slMarginPercent / 100.0);
-      double sl = swingHigh + margin;
+
+      // エントリー価格に最も近いスイングハイを探す
+      double bestSwingHigh = 0;
+      double minDistance = DBL_MAX;
+
+      for(int i = 0; i < ArraySize(m_swingHighs); i++)
+      {
+         if(m_swingHighs[i].price > entryPrice)
+         {
+            double distance = m_swingHighs[i].price - entryPrice;
+            if(distance < minDistance)
+            {
+               minDistance = distance;
+               bestSwingHigh = m_swingHighs[i].price;
+            }
+         }
+      }
+
+      if(bestSwingHigh == 0)
+         return entryPrice + PipsToPriceUtil(50.0, m_symbol);
+
+      double margin = bestSwingHigh * (m_slMarginPercent / 100.0);
+      double sl = bestSwingHigh + margin;
       if(sl <= entryPrice) sl = entryPrice + PipsToPriceUtil(30.0, m_symbol);
       return sl;
    }
@@ -1697,8 +1738,21 @@ bool CheckEntrySignal(EntrySignal &signal)
 
    if(slPips > InpMaxSLPips)
    {
-      if(InpEnableLog) LogDebugUtil(StringFormat("SL too large: %.1f pips", slPips));
-      return false;
+      if(InpCapSLAtMax)
+      {
+         // SLをMaxSLPipsで制限
+         if(signal.direction == SIGNAL_BUY)
+            signal.stopLoss = signal.entryPrice - PipsToPriceUtil(InpMaxSLPips, _Symbol);
+         else
+            signal.stopLoss = signal.entryPrice + PipsToPriceUtil(InpMaxSLPips, _Symbol);
+         slPips = InpMaxSLPips;
+         if(InpEnableLog) LogDebugUtil(StringFormat("SL capped at max: %.1f pips", slPips));
+      }
+      else
+      {
+         if(InpEnableLog) LogDebugUtil(StringFormat("SL too large: %.1f pips (max: %.1f)", slPips, InpMaxSLPips));
+         return false;
+      }
    }
 
    CalculateTakeProfits(signal);
