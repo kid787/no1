@@ -5,9 +5,9 @@
 //+------------------------------------------------------------------+
 #property copyright "XAUUSD Fintokei Scalper"
 #property link      ""
-#property version   "1.00"
+#property version   "2.10"
 #property description "XAUUSD専用 - Fintokeiチャレンジルール完全対応"
-#property description "グランビルの法則 + プライスアクション + 水平線反発"
+#property description "v2.1: RR比・ATR・トレーリングストップ追加"
 
 #include "..\\Include\\FintokeiRiskManager.mqh"
 #include "..\\Include\\TechnicalSignals.mqh"
@@ -33,31 +33,43 @@ input bool                 UseGranville = true;            // グランビルの
 input bool                 UsePriceAction = true;          // プライスアクションを使用
 input bool                 UseHorizontalLevels = true;     // 水平線レベルを使用
 input bool                 UsePivotLevels = true;          // ピボットレベルを使用
-input int                  MinSignalsRequired = 3;         // 必要な最小シグナル数（2→3に変更）
+input int                  MinSignalsRequired = 2;         // 必要な最小シグナル数（v2.1: 3→2に戻す）
 
 input group "=== 時間帯フィルター ==="
 input bool                 UseTimeFilter = true;           // 時間帯フィルターを使用
-input int                  TradingStartHour = 8;           // 取引開始時刻（サーバー時間）
-input int                  TradingEndHour = 22;            // 取引終了時刻（サーバー時間）
+input int                  TradingStartHour = 5;           // 取引開始時刻（v2.1: 8→5に変更）
+input int                  TradingEndHour = 18;            // 取引終了時刻（v2.1: 22→18に変更）
 input bool                 AvoidMondayTrading = false;     // 月曜日の取引を避ける
 input bool                 AvoidFridayTrading = true;      // 金曜日の取引を避ける（デフォルトON）
 
 input group "=== トレード制限 ==="
-input int                  MaxTradesPerDay = 5;            // 1日の最大トレード数
+input int                  MaxTradesPerDay = 10;           // 1日の最大トレード数（v2.1: 5→10に変更）
 input int                  MaxConsecutiveLosses = 3;       // 連続負けでストップ
 input int                  PauseAfterLoss_Minutes = 60;    // 負けトレード後の休止時間（分）
 
-input group "=== エグジット設定 ==="
-input double               BreakevenTriggerPips = 100.0;   // 建値移動トリガー (150→100に変更)
-input double               BreakevenOffsetPips = 10.0;     // 建値からのオフセット (pips)
-input double               SLBufferPercent = 5.0;          // 損切りライン余裕 (3→5%に変更)
+input group "=== v2.1: 新規リスク管理 ==="
+input double               MinRiskRewardRatio = 1.5;       // 最小RR比（1:1.5未満は拒否）
+input double               MaxSingleLossPercent = 2.0;     // 1トレード最大損失（%）
+input bool                 UseATRFilter = true;            // ATRボラティリティフィルター
+input double               MinATR = 3.0;                   // 最小ATR（これ未満は取引しない）
+input double               MaxATR = 15.0;                  // 最大ATR（これ超えは取引しない）
 
-input double               PartialClose1_Pips = 200.0;     // 第1利確レベル (pips)
-input double               PartialClose1_Percent = 30.0;   // 第1利確割合 (%)
-input double               PartialClose2_Pips = 400.0;     // 第2利確レベル (pips)
-input double               PartialClose2_Percent = 30.0;   // 第2利確割合 (%)
-input double               PartialClose3_Pips = 600.0;     // 第3利確レベル (pips)
-input double               PartialClose3_Percent = 40.0;   // 第3利確割合 (%)
+input group "=== エグジット設定 ==="
+input double               BreakevenTriggerPips = 80.0;    // 建値移動トリガー (v2.1: 100→80に変更)
+input double               BreakevenOffsetPips = 10.0;     // 建値からのオフセット (pips)
+input double               SLBufferPercent = 5.0;          // 損切りライン余裕 (5%)
+
+input double               PartialClose1_Pips = 150.0;     // 第1利確レベル (v2.1: 200→150に変更)
+input double               PartialClose1_Percent = 50.0;   // 第1利確割合 (v2.1: 30→50%に変更)
+input double               PartialClose2_Pips = 300.0;     // 第2利確レベル (v2.1: 400→300に変更)
+input double               PartialClose2_Percent = 30.0;   // 第2利確割合 (30%)
+input double               PartialClose3_Pips = 500.0;     // 第3利確レベル (v2.1: 600→500に変更)
+input double               PartialClose3_Percent = 20.0;   // 第3利確割合 (v2.1: 40→20%に変更)
+
+input group "=== v2.1: トレーリングストップ ==="
+input bool                 UseTrailingStop = true;         // トレーリングストップ使用
+input double               TrailingStartPips = 200.0;      // トレーリング開始（20ドル利益から）
+input double               TrailingStepPips = 50.0;        // トレーリングステップ（5ドル）
 
 input group "=== その他設定 ==="
 input bool                 ShowDebugInfo = true;           // デバッグ情報表示
@@ -107,6 +119,11 @@ int OnInit()
    g_TradeManager.SetPartialClose(1, PartialClose2_Pips, PartialClose2_Percent / 100.0);
    g_TradeManager.SetPartialClose(2, PartialClose3_Pips, PartialClose3_Percent / 100.0);
    g_TradeManager.SetSLBuffer(SLBufferPercent);
+
+   // v2.1: 新機能の設定
+   g_TradeManager.SetRiskRewardRatio(MinRiskRewardRatio);
+   g_TradeManager.SetMaxLossPercent(MaxSingleLossPercent);
+   g_TradeManager.SetTrailingStop(UseTrailingStop, TrailingStartPips, TrailingStepPips);
 
    g_Initialized = true;
 
@@ -243,6 +260,19 @@ void CheckForEntry()
    }
 
    // === ここまで新規追加 ===
+
+   // v2.1: ATRボラティリティフィルター
+   if(UseATRFilter)
+   {
+      if(!g_TechSignals.CheckVolatility(MaxATR, MinATR))
+      {
+         double currentATR = g_TechSignals.GetATR(0);
+         if(ShowDebugInfo)
+            Print("ATRフィルター: ボラティリティ範囲外 ATR=", DoubleToString(currentATR, 2),
+                  " (", MinATR, "-", MaxATR, ")");
+         return;
+      }
+   }
 
    // シグナルの収集
    int buySignals = 0;
@@ -388,6 +418,20 @@ void ExecuteBuyEntry()
                                     PartialClose1_Pips, PartialClose2_Pips, PartialClose3_Pips,
                                     tp1, tp2, tp3);
 
+   // v2.1: リスクリワード比チェック
+   if(!g_TradeManager.CheckRiskReward(currentPrice, slPrice, tp3))
+   {
+      Print("買いエントリー中止: RR比が不十分");
+      return;
+   }
+
+   // v2.1: 最大損失チェック
+   if(!g_TradeManager.CheckMaxLoss(maxLot, slPips))
+   {
+      Print("買いエントリー中止: 1トレード最大損失超過");
+      return;
+   }
+
    // エントリー
    string comment = StringFormat("Buy SL:%.1f TP1:%.1f TP2:%.1f TP3:%.1f",
                                  slPips, PartialClose1_Pips, PartialClose2_Pips, PartialClose3_Pips);
@@ -442,6 +486,20 @@ void ExecuteSellEntry()
    g_TradeManager.CalculateTPPrices(false, currentPrice,
                                     PartialClose1_Pips, PartialClose2_Pips, PartialClose3_Pips,
                                     tp1, tp2, tp3);
+
+   // v2.1: リスクリワード比チェック
+   if(!g_TradeManager.CheckRiskReward(currentPrice, slPrice, tp3))
+   {
+      Print("売りエントリー中止: RR比が不十分");
+      return;
+   }
+
+   // v2.1: 最大損失チェック
+   if(!g_TradeManager.CheckMaxLoss(maxLot, slPips))
+   {
+      Print("売りエントリー中止: 1トレード最大損失超過");
+      return;
+   }
 
    // エントリー
    string comment = StringFormat("Sell SL:%.1f TP1:%.1f TP2:%.1f TP3:%.1f",

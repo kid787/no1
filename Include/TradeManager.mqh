@@ -22,6 +22,13 @@ private:
    double   m_PartialClosePercent[];    // 分割決済のパーセント配列
    double   m_SLBufferPercent;          // 損切りラインの余裕（%）
 
+   // v2.1: 新規追加
+   double   m_MinRiskRewardRatio;       // 最小リスクリワード比
+   double   m_MaxLossPercent;           // 1トレードあたりの最大損失率（%）
+   bool     m_UseTrailingStop;          // トレーリングストップ使用
+   double   m_TrailingStartPips;        // トレーリング開始pips
+   double   m_TrailingStepPips;         // トレーリングステップpips
+
 public:
    //--- コンストラクタ
    CTradeManager(string symbol = NULL, int magicNumber = 123456)
@@ -48,6 +55,13 @@ public:
       m_PartialClosePercent[2] = 0.4;
 
       m_SLBufferPercent = 3.0;          // 損切りラインに3%の余裕
+
+      // v2.1: 新規パラメータの初期値
+      m_MinRiskRewardRatio = 1.5;       // 最小RR比 1:1.5
+      m_MaxLossPercent = 2.0;           // 1トレード最大2%損失
+      m_UseTrailingStop = true;         // トレーリングストップ有効
+      m_TrailingStartPips = 200.0;      // 20ドルから開始
+      m_TrailingStepPips = 50.0;        // 5ドルステップ
    }
 
    //--- 設定
@@ -69,6 +83,24 @@ public:
    void SetSLBuffer(double percent)
    {
       m_SLBufferPercent = percent;
+   }
+
+   //--- v2.1: 新規設定メソッド
+   void SetRiskRewardRatio(double minRR)
+   {
+      m_MinRiskRewardRatio = minRR;
+   }
+
+   void SetMaxLossPercent(double maxLoss)
+   {
+      m_MaxLossPercent = maxLoss;
+   }
+
+   void SetTrailingStop(bool use, double startPips, double stepPips)
+   {
+      m_UseTrailingStop = use;
+      m_TrailingStartPips = startPips;
+      m_TrailingStepPips = stepPips;
    }
 
    //--- ピップサイズの取得
@@ -280,8 +312,12 @@ public:
          if(PositionGetString(POSITION_SYMBOL) != m_Symbol) continue;
          if(PositionGetInteger(POSITION_MAGIC) != m_MagicNumber) continue;
 
-         // 建値移動チェック
+            // 建値移動チェック
          MoveToBreakeven(ticket);
+
+         // v2.1: トレーリングストップチェック
+         if(m_UseTrailingStop)
+            TrailingStop(ticket);
 
          // 分割決済チェック
          for(int level = 0; level < ArraySize(m_PartialClosePips); level++)
@@ -340,7 +376,128 @@ public:
          if(PositionGetString(POSITION_SYMBOL) != m_Symbol) continue;
          if(PositionGetInteger(POSITION_MAGIC) != m_MagicNumber) continue;
 
-         m_Trade.PositionClose(ticket);
+            m_Trade.PositionClose(ticket);
       }
+   }
+
+   //+------------------------------------------------------------------+
+   //| v2.1: リスクリワード比をチェック                                  |
+   //+------------------------------------------------------------------+
+   bool CheckRiskReward(double entryPrice, double slPrice, double tpPrice)
+   {
+      double slDistance = MathAbs(entryPrice - slPrice);
+      double tpDistance = MathAbs(tpPrice - entryPrice);
+
+      if(slDistance <= 0) return false;
+
+      double rrRatio = tpDistance / slDistance;
+
+      if(rrRatio < m_MinRiskRewardRatio)
+      {
+         Print("RR比が不十分: ", DoubleToString(rrRatio, 2),
+               " < ", DoubleToString(m_MinRiskRewardRatio, 2));
+         return false;
+      }
+
+      return true;
+   }
+
+   //+------------------------------------------------------------------+
+   //| v2.1: 最大損失額チェック                                          |
+   //+------------------------------------------------------------------+
+   bool CheckMaxLoss(double lots, double slPips)
+   {
+      double pipValue = SymbolInfoDouble(m_Symbol, SYMBOL_TRADE_TICK_VALUE) /
+                        SymbolInfoDouble(m_Symbol, SYMBOL_TRADE_TICK_SIZE) *
+                        GetPipSize();
+
+      double potentialLoss = lots * slPips * pipValue;
+      double accountBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+      double lossPercent = (potentialLoss / accountBalance) * 100.0;
+
+      if(lossPercent > m_MaxLossPercent)
+      {
+         Print("1トレードの損失が大きすぎ: ", DoubleToString(lossPercent, 2),
+               "% > ", DoubleToString(m_MaxLossPercent, 2), "%");
+         return false;
+      }
+
+      return true;
+   }
+
+   //+------------------------------------------------------------------+
+   //| v2.1: トレーリングストップ                                        |
+   //+------------------------------------------------------------------+
+   bool TrailingStop(ulong ticket)
+   {
+      if(!PositionSelectByTicket(ticket))
+         return false;
+
+      double positionOpenPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+      double positionSL = PositionGetDouble(POSITION_SL);
+      double positionTP = PositionGetDouble(POSITION_TP);
+      int positionType = (int)PositionGetInteger(POSITION_TYPE);
+
+      double currentPrice = (positionType == POSITION_TYPE_BUY) ?
+                            SymbolInfoDouble(m_Symbol, SYMBOL_BID) :
+                            SymbolInfoDouble(m_Symbol, SYMBOL_ASK);
+
+      double pipSize = GetPipSize();
+      double startDistance = m_TrailingStartPips * pipSize;
+      double stepDistance = m_TrailingStepPips * pipSize;
+
+      bool shouldUpdate = false;
+      double newSL = positionSL;
+
+      if(positionType == POSITION_TYPE_BUY)
+      {
+         // 買いポジション
+         double profit = currentPrice - positionOpenPrice;
+
+         // トレーリング開始条件
+         if(profit >= startDistance)
+         {
+            // 現在価格からステップ分戻した位置
+            double trailingSL = currentPrice - stepDistance;
+
+            // 現在のSLより有利な位置なら更新
+            if(trailingSL > positionSL || positionSL == 0)
+            {
+               newSL = trailingSL;
+               shouldUpdate = true;
+            }
+         }
+      }
+      else
+      {
+         // 売りポジション
+         double profit = positionOpenPrice - currentPrice;
+
+         // トレーリング開始条件
+         if(profit >= startDistance)
+         {
+            // 現在価格からステップ分上げた位置
+            double trailingSL = currentPrice + stepDistance;
+
+            // 現在のSLより有利な位置なら更新
+            if(trailingSL < positionSL || positionSL == 0)
+            {
+               newSL = trailingSL;
+               shouldUpdate = true;
+            }
+         }
+      }
+
+      if(shouldUpdate)
+      {
+         if(m_Trade.PositionModify(ticket, newSL, positionTP))
+         {
+            Print("トレーリングストップ更新: Ticket=", ticket,
+                  " 新SL=", newSL);
+            return true;
+         }
+      }
+
+      return false;
    }
 };

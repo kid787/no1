@@ -49,11 +49,13 @@ private:
    int      m_Handle_SMA200;
    int      m_Handle_EMA100;
    int      m_Handle_SMA20;
+   int      m_Handle_ATR;         // v2.1: ATR追加
 
    // Buffers
    double   m_SMA200[];
    double   m_EMA100[];
    double   m_SMA20[];
+   double   m_ATR[];              // v2.1: ATRバッファ
 
 public:
    //--- コンストラクタ
@@ -66,10 +68,12 @@ public:
       m_Handle_SMA200 = iMA(m_Symbol, m_Timeframe, 200, 0, MODE_SMA, PRICE_CLOSE);
       m_Handle_EMA100 = iMA(m_Symbol, m_Timeframe, 100, 0, MODE_EMA, PRICE_CLOSE);
       m_Handle_SMA20 = iMA(m_Symbol, m_Timeframe, 20, 0, MODE_SMA, PRICE_CLOSE);
+      m_Handle_ATR = iATR(m_Symbol, m_Timeframe, 14);  // v2.1: ATR(14)追加
 
       ArraySetAsSeries(m_SMA200, true);
       ArraySetAsSeries(m_EMA100, true);
       ArraySetAsSeries(m_SMA20, true);
+      ArraySetAsSeries(m_ATR, true);  // v2.1
    }
 
    //--- デストラクタ
@@ -78,6 +82,7 @@ public:
       if(m_Handle_SMA200 != INVALID_HANDLE) IndicatorRelease(m_Handle_SMA200);
       if(m_Handle_EMA100 != INVALID_HANDLE) IndicatorRelease(m_Handle_EMA100);
       if(m_Handle_SMA20 != INVALID_HANDLE) IndicatorRelease(m_Handle_SMA20);
+      if(m_Handle_ATR != INVALID_HANDLE) IndicatorRelease(m_Handle_ATR);  // v2.1
    }
 
    //--- MAデータの更新
@@ -86,6 +91,7 @@ public:
       if(CopyBuffer(m_Handle_SMA200, 0, 0, 10, m_SMA200) <= 0) return false;
       if(CopyBuffer(m_Handle_EMA100, 0, 0, 10, m_EMA100) <= 0) return false;
       if(CopyBuffer(m_Handle_SMA20, 0, 0, 10, m_SMA20) <= 0) return false;
+      if(CopyBuffer(m_Handle_ATR, 0, 0, 10, m_ATR) <= 0) return false;  // v2.1
 
       return true;
    }
@@ -436,5 +442,53 @@ public:
       }
 
       return false;
+   }
+
+   //+------------------------------------------------------------------+
+   //| v2.1: ATR値を取得                                                |
+   //+------------------------------------------------------------------+
+   double GetATR(int shift = 0)
+   {
+      if(!UpdateIndicators()) return 0.0;
+      return m_ATR[shift];
+   }
+
+   //+------------------------------------------------------------------+
+   //| v2.1: ボラティリティチェック                                      |
+   //+------------------------------------------------------------------+
+   bool CheckVolatility(double maxATR = 0, double minATR = 0)
+   {
+      double currentATR = GetATR(0);
+      if(currentATR <= 0) return false;
+
+      // 最大ATRチェック（高ボラティリティ回避）
+      if(maxATR > 0 && currentATR > maxATR)
+      {
+         return false;  // ATRが大きすぎる = ボラティリティ高すぎ
+      }
+
+      // 最小ATRチェック（低ボラティリティ回避）
+      if(minATR > 0 && currentATR < minATR)
+      {
+         return false;  // ATRが小さすぎる = ボラティリティ低すぎ
+      }
+
+      return true;
+   }
+
+   //+------------------------------------------------------------------+
+   //| v2.1: 適正なボラティリティ範囲かチェック                          |
+   //+------------------------------------------------------------------+
+   bool IsVolatilityNormal()
+   {
+      double currentATR = GetATR(0);
+      if(currentATR <= 0) return false;
+
+      // XAUUSDの通常範囲: ATR 3.0〜15.0ドル程度
+      // 3.0未満=動きが少なすぎ、15.0超=乱高下
+      double minNormalATR = 3.0;
+      double maxNormalATR = 15.0;
+
+      return CheckVolatility(maxNormalATR, minNormalATR);
    }
 };
