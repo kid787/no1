@@ -1,8 +1,46 @@
-# XAUUSD Fintokei Scalper EA v2.0
+# XAUUSD Fintokei Scalper EA v2.1
 
 XAUUSD（金/ドル）専用のMT5自動売買システム（Expert Advisor）です。Fintokeiプロップトレードチャレンジの厳格なリスク管理ルールを完全遵守しながら、高度なテクニカル分析に基づいたスキャルピング/デイトレードを行います。
 
-## 🆕 v2.0の新機能
+## 🆕 v2.1の新機能（最新）
+
+### 高度なフィルター機能
+- **ATRボラティリティフィルター**: 異常なボラティリティ時のエントリーを回避
+  - XAUUSD最適範囲: 3.0-15.0 ATR
+  - 高すぎる（15超）: リスクが大きすぎる
+  - 低すぎる（3未満）: 利益機会が少ない
+
+- **リスク/リワード比チェック**: 最小RR比 1:1.5を強制
+  - 不利なトレードを事前に拒否
+  - 質の高いトレードのみ実行
+
+- **1トレード最大損失制限**: 証拠金の最大2%までに制限
+  - 巨額損失の防止
+  - より安全なリスク管理
+
+- **トレーリングストップ機能**: 利益を自動追従
+  - 200pips利益後に自動でSLを追従
+  - 50pipsステップで調整
+  - 利益を守りながら伸ばす
+
+### パラメータ最適化（v2.0バックテスト分析基づく）
+- **MinSignalsRequired**: 3→2（厳しすぎたため戻す）
+- **TradingStartHour**: 8→5（5-9時の好成績を活用）
+- **TradingEndHour**: 22→18（14-18時以降の高ボラ回避）
+- **MaxTradesPerDay**: 5→10（98トレードは少なすぎた）
+- **BreakevenTriggerPips**: 100→80（早期建値移動）
+- **PartialClose設定**: より早期の利確を重視
+  - 第1利確: 200pips/30% → 150pips/50%（早期利確強化）
+  - 第2利確: 400pips → 300pips
+  - 第3利確: 600pips/40% → 500pips/20%（利を伸ばしすぎない）
+
+### v2.1で期待される改善
+- ✅ 平均損失の削減（-9,186円 → 目標-5,000円以下）
+- ✅ トレード数の適正化（98 → 目標500-800）
+- ✅ 勝率の維持（95%）とドローダウンの抑制（5%以内）
+- ✅ より質の高いトレードの実現
+
+## 📊 v2.0の新機能
 
 ### 時間帯・曜日フィルター
 - **時間帯制限**: 取引時間を指定可能（デフォルト8-22時サーバー時間）
@@ -183,7 +221,7 @@ MaxLotSize = 10.0            // 最大ロット
 
 ### エントリー条件
 ```
-MinSignalsRequired = 3       // 最低3つのシグナルが必要（v2.0で変更）
+MinSignalsRequired = 2       // 最低2つのシグナルが必要（v2.1で2に戻す）
 UseGranville = true          // グランビルの法則を使用
 UsePriceAction = true        // プライスアクションを使用
 UseHorizontalLevels = true   // 水平線を使用
@@ -193,33 +231,49 @@ UsePivotLevels = true        // ピボットを使用
 ### 時間帯・曜日フィルター（v2.0新規）
 ```
 UseTimeFilter = true              // 時間帯フィルターを使用
-TradingStartHour = 8              // 取引開始時刻（サーバー時間）
-TradingEndHour = 22               // 取引終了時刻（サーバー時間）
+TradingStartHour = 5              // 取引開始時刻（v2.1: 8→5に変更）
+TradingEndHour = 18               // 取引終了時刻（v2.1: 22→18に変更）
 AvoidMondayTrading = false        // 月曜日の取引を避ける
 AvoidFridayTrading = true         // 金曜日の取引を避ける
 ```
 
 ### トレード制限（v2.0新規）
 ```
-MaxTradesPerDay = 5               // 1日の最大トレード数
+MaxTradesPerDay = 10              // 1日の最大トレード数（v2.1: 5→10に変更）
 MaxConsecutiveLosses = 3          // 連続負けでストップ
 PauseAfterLoss_Minutes = 60       // 負けトレード後の休止時間（分）
 ```
 
+### v2.1リスク管理（新規）
+```
+MinRiskRewardRatio = 1.5          // 最小RR比（1:1.5未満は拒否）
+MaxSingleLossPercent = 2.0        // 1トレード最大損失（%）
+UseATRFilter = true               // ATRボラティリティフィルター
+MinATR = 3.0                      // 最小ATR（これ未満は取引しない）
+MaxATR = 15.0                     // 最大ATR（これ超えは取引しない）
+```
+
 ### エグジット設定
 ```
-BreakevenTriggerPips = 100.0   // 10ドルで建値移動（v2.0で変更）
+BreakevenTriggerPips = 80.0    // 8ドルで建値移動（v2.1: 100→80に変更）
 BreakevenOffsetPips = 10.0     // 建値+1ドル
 SLBufferPercent = 5.0          // 損切り余裕5%（v2.0で変更）
 
-PartialClose1_Pips = 200.0     // 第1利確: 20ドル
-PartialClose1_Percent = 30.0   // 30%決済
+PartialClose1_Pips = 150.0     // 第1利確: 15ドル（v2.1: 200→150に変更）
+PartialClose1_Percent = 50.0   // 50%決済（v2.1: 30→50%に変更）
 
-PartialClose2_Pips = 400.0     // 第2利確: 40ドル
+PartialClose2_Pips = 300.0     // 第2利確: 30ドル（v2.1: 400→300に変更）
 PartialClose2_Percent = 30.0   // 30%決済
 
-PartialClose3_Pips = 600.0     // 第3利確: 60ドル
-PartialClose3_Percent = 40.0   // 残り決済
+PartialClose3_Pips = 500.0     // 第3利確: 50ドル（v2.1: 600→500に変更）
+PartialClose3_Percent = 20.0   // 残り決済（v2.1: 40→20%に変更）
+```
+
+### v2.1トレーリングストップ（新規）
+```
+UseTrailingStop = true         // トレーリングストップ使用
+TrailingStartPips = 200.0      // トレーリング開始（20ドル利益から）
+TrailingStepPips = 50.0        // トレーリングステップ（5ドル）
 ```
 
 ## トレードロジック
@@ -321,19 +375,23 @@ PartialClose3_Percent = 40.0   // 残り決済
 ## トラブルシューティング
 
 ### エントリーされない
-- シグナル数が MinSignalsRequired 未満（v2.0は3つ必要）
+- シグナル数が MinSignalsRequired 未満（v2.1は2つ必要）
 - 既にMaxPositions数のポジションを保有
 - Fintokeiリスク制限に到達している
-- **v2.0新規**: 時間帯フィルターで制限されている（8-22時のみ）
+- **v2.0新規**: 時間帯フィルターで制限されている（v2.1: 5-18時のみ）
 - **v2.0新規**: 金曜日または月曜日の取引が制限されている
-- **v2.0新規**: 1日の最大トレード数に到達（デフォルト5回）
+- **v2.0新規**: 1日の最大トレード数に到達（v2.1: 10回）
 - **v2.0新規**: 連続負けトレード後の休止中
+- **v2.1新規**: ATRが範囲外（3.0-15.0の範囲外）
+- **v2.1新規**: RR比が1:1.5未満
+- **v2.1新規**: 1トレード最大損失（2%）超過
 - ログを確認: ShowDebugInfo = true に設定
 
 ### トレードが多すぎる / 少なすぎる
-- **v2.0**: `MaxTradesPerDay`で調整（デフォルト5回）
+- **v2.1**: `MaxTradesPerDay`で調整（デフォルト10回）
 - シグナル数を調整: `MinSignalsRequired`を増やすと厳格に
-- 時間帯を狭める: `TradingStartHour`, `TradingEndHour`
+- 時間帯を狭める: `TradingStartHour`, `TradingEndHour`（v2.1: 5-18時）
+- **v2.1新規**: ATRフィルターを調整: `MinATR`, `MaxATR`
 
 ### 連続負けで停止してしまう
 - **v2.0**: `MaxConsecutiveLosses`を増やす（デフォルト3回）
@@ -361,6 +419,31 @@ PartialClose3_Percent = 40.0   // 残り決済
 - 過去の成績は将来の結果を保証するものではありません
 
 ## バージョン履歴
+
+### v2.1 (2024-12-19)
+**トレード品質向上のための高度なフィルター実装**
+
+**新機能**:
+- ✅ ATRボラティリティフィルター（3.0-15.0の範囲でトレード）
+- ✅ リスク/リワード比チェック（最小1:1.5を強制）
+- ✅ 1トレード最大損失制限（証拠金の2%まで）
+- ✅ トレーリングストップ機能（200pips利益後に50pipsステップで追従）
+
+**パラメータ最適化**（v2.0バックテスト分析基づく）:
+- 🔧 MinSignalsRequired: 3→2（厳しすぎたため戻す）
+- 🔧 TradingStartHour: 8→5（5-9時の好成績を活用）
+- 🔧 TradingEndHour: 22→18（14-18時以降の高ボラ回避）
+- 🔧 MaxTradesPerDay: 5→10（98トレードは少なすぎた）
+- 🔧 BreakevenTriggerPips: 100→80（早期建値移動）
+- 🔧 PartialClose1: 200pips/30% → 150pips/50%（早期利確強化）
+- 🔧 PartialClose2: 400pips → 300pips
+- 🔧 PartialClose3: 600pips/40% → 500pips/20%（利を伸ばしすぎない）
+
+**期待される改善**:
+- 平均損失の削減（-9,186円 → 目標-5,000円以下）
+- トレード数の適正化（98 → 目標500-800）
+- 勝率の維持（95%）とドローダウンの抑制（5%以内）
+- より質の高いトレードの実現
 
 ### v2.0 (2024-12-19)
 **重要な改善とバックテスト最適化**
