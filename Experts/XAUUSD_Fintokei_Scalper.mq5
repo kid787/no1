@@ -9,9 +9,9 @@
 #property description "XAUUSD専用 - Fintokeiチャレンジルール完全対応"
 #property description "グランビルの法則 + プライスアクション + 水平線反発"
 
-#include <..\Include\FintokeiRiskManager.mqh>
-#include <..\Include\TechnicalSignals.mqh>
-#include <..\Include\TradeManager.mqh>
+#include "..\\Include\\FintokeiRiskManager.mqh"
+#include "..\\Include\\TechnicalSignals.mqh"
+#include "..\\Include\\TradeManager.mqh"
 
 //--- Input Parameters
 input group "=== 基本設定 ==="
