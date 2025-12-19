@@ -33,12 +33,24 @@ input bool                 UseGranville = true;            // グランビルの
 input bool                 UsePriceAction = true;          // プライスアクションを使用
 input bool                 UseHorizontalLevels = true;     // 水平線レベルを使用
 input bool                 UsePivotLevels = true;          // ピボットレベルを使用
-input int                  MinSignalsRequired = 2;         // 必要な最小シグナル数
+input int                  MinSignalsRequired = 3;         // 必要な最小シグナル数（2→3に変更）
+
+input group "=== 時間帯フィルター ==="
+input bool                 UseTimeFilter = true;           // 時間帯フィルターを使用
+input int                  TradingStartHour = 8;           // 取引開始時刻（サーバー時間）
+input int                  TradingEndHour = 22;            // 取引終了時刻（サーバー時間）
+input bool                 AvoidMondayTrading = false;     // 月曜日の取引を避ける
+input bool                 AvoidFridayTrading = true;      // 金曜日の取引を避ける（デフォルトON）
+
+input group "=== トレード制限 ==="
+input int                  MaxTradesPerDay = 5;            // 1日の最大トレード数
+input int                  MaxConsecutiveLosses = 3;       // 連続負けでストップ
+input int                  PauseAfterLoss_Minutes = 60;    // 負けトレード後の休止時間（分）
 
 input group "=== エグジット設定 ==="
-input double               BreakevenTriggerPips = 150.0;   // 建値移動トリガー (pips)
+input double               BreakevenTriggerPips = 100.0;   // 建値移動トリガー (150→100に変更)
 input double               BreakevenOffsetPips = 10.0;     // 建値からのオフセット (pips)
-input double               SLBufferPercent = 3.0;          // 損切りライン余裕 (%)
+input double               SLBufferPercent = 5.0;          // 損切りライン余裕 (3→5%に変更)
 
 input double               PartialClose1_Pips = 200.0;     // 第1利確レベル (pips)
 input double               PartialClose1_Percent = 30.0;   // 第1利確割合 (%)
@@ -59,6 +71,12 @@ CTradeManager        *g_TradeManager;
 //--- Global Variables
 datetime g_LastBarTime = 0;
 bool g_Initialized = false;
+
+// トレード制限用変数
+int g_TradesToday = 0;
+datetime g_LastTradeDate = 0;
+int g_ConsecutiveLosses = 0;
+datetime g_LastLossTime = 0;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -160,6 +178,71 @@ void CheckForEntry()
    // 最大ポジション数チェック
    if(g_TradeManager.GetPositionCount() >= MaxPositions)
       return;
+
+   // === 新規追加: 時間帯・曜日・トレード制限チェック ===
+
+   // 1日の切り替わりチェック
+   MqlDateTime currentDT;
+   TimeToStruct(TimeCurrent(), currentDT);
+   datetime currentDate = StringToTime(StringFormat("%04d.%02d.%02d", currentDT.year, currentDT.mon, currentDT.day));
+
+   if(currentDate != g_LastTradeDate)
+   {
+      g_TradesToday = 0;
+      g_LastTradeDate = currentDate;
+   }
+
+   // 1日の最大トレード数チェック
+   if(g_TradesToday >= MaxTradesPerDay)
+   {
+      if(ShowDebugInfo) Print("本日の最大トレード数に達しました: ", g_TradesToday, "/", MaxTradesPerDay);
+      return;
+   }
+
+   // 時間帯フィルター
+   if(UseTimeFilter)
+   {
+      int currentHour = currentDT.hour;
+      if(currentHour < TradingStartHour || currentHour >= TradingEndHour)
+      {
+         if(ShowDebugInfo) Print("取引時間外: ", currentHour, "時 (", TradingStartHour, "-", TradingEndHour, "時のみ)");
+         return;
+      }
+   }
+
+   // 曜日フィルター
+   if(AvoidMondayTrading && currentDT.day_of_week == 1)
+   {
+      if(ShowDebugInfo) Print("月曜日の取引はスキップ");
+      return;
+   }
+
+   if(AvoidFridayTrading && currentDT.day_of_week == 5)
+   {
+      if(ShowDebugInfo) Print("金曜日の取引はスキップ");
+      return;
+   }
+
+   // 連続負けトレード後の休止
+   if(g_ConsecutiveLosses >= MaxConsecutiveLosses)
+   {
+      Print("連続負けトレードにより取引停止中: ", g_ConsecutiveLosses, "回");
+      return;
+   }
+
+   // 負けトレード後の休止時間チェック
+   if(g_LastLossTime > 0 && PauseAfterLoss_Minutes > 0)
+   {
+      datetime pauseUntil = g_LastLossTime + PauseAfterLoss_Minutes * 60;
+      if(TimeCurrent() < pauseUntil)
+      {
+         if(ShowDebugInfo)
+            Print("負けトレード後の休止中。再開時刻: ", TimeToString(pauseUntil));
+         return;
+      }
+   }
+
+   // === ここまで新規追加 ===
 
    // シグナルの収集
    int buySignals = 0;
@@ -313,6 +396,7 @@ void ExecuteBuyEntry()
    {
       Print("買いエントリー成功: Lot=", maxLot, " SL=", slPrice, " (", slPips, " pips)");
       Print("TP1=", tp1, " TP2=", tp2, " TP3=", tp3);
+      g_TradesToday++;  // トレードカウント増加
    }
 }
 
@@ -367,6 +451,7 @@ void ExecuteSellEntry()
    {
       Print("売りエントリー成功: Lot=", maxLot, " SL=", slPrice, " (", slPips, " pips)");
       Print("TP1=", tp1, " TP2=", tp2, " TP3=", tp3);
+      g_TradesToday++;  // トレードカウント増加
    }
 }
 
@@ -379,6 +464,64 @@ void OnTimer()
    if(ShowDebugInfo)
    {
       g_RiskManager.PrintRiskInfo();
+   }
+}
+
+//+------------------------------------------------------------------+
+//| OnTradeTransaction function - 取引イベント監視                    |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction& trans,
+                        const MqlTradeRequest& request,
+                        const MqlTradeResult& result)
+{
+   // ポジションが決済された場合
+   if(trans.type == TRADE_TRANSACTION_DEAL_ADD)
+   {
+      // 履歴から取引を取得
+      if(HistoryDealSelect(trans.deal))
+      {
+         long dealType = HistoryDealGetInteger(trans.deal, DEAL_TYPE);
+         long dealMagic = HistoryDealGetInteger(trans.deal, DEAL_MAGIC);
+
+         // 自分のEAの取引かチェック
+         if(dealMagic != MagicNumber)
+            return;
+
+         // 決済（Exit）の場合のみ
+         long dealEntry = HistoryDealGetInteger(trans.deal, DEAL_ENTRY);
+         if(dealEntry == DEAL_ENTRY_OUT)
+         {
+            double dealProfit = HistoryDealGetDouble(trans.deal, DEAL_PROFIT);
+            double dealSwap = HistoryDealGetDouble(trans.deal, DEAL_SWAP);
+            double dealCommission = HistoryDealGetDouble(trans.deal, DEAL_COMMISSION);
+            double totalProfit = dealProfit + dealSwap + dealCommission;
+
+            // 負けトレードの場合
+            if(totalProfit < 0)
+            {
+               g_ConsecutiveLosses++;
+               g_LastLossTime = TimeCurrent();
+
+               Print("=== 負けトレード検出 ===");
+               Print("損益: ", totalProfit, " 円");
+               Print("連続負け: ", g_ConsecutiveLosses, " / ", MaxConsecutiveLosses);
+
+               if(g_ConsecutiveLosses >= MaxConsecutiveLosses)
+               {
+                  Print("警告: 連続負けが上限に達しました。取引を一時停止します。");
+                  Alert("連続負け", g_ConsecutiveLosses, "回により取引停止");
+               }
+            }
+            // 勝ちトレードの場合
+            else if(totalProfit > 0)
+            {
+               g_ConsecutiveLosses = 0;  // 連続負けをリセット
+               Print("=== 勝ちトレード ===");
+               Print("利益: ", totalProfit, " 円");
+               Print("連続負けカウントをリセット");
+            }
+         }
+      }
    }
 }
 
