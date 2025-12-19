@@ -385,6 +385,10 @@ public:
    //+------------------------------------------------------------------+
    bool CheckRiskReward(double entryPrice, double slPrice, double tpPrice)
    {
+      // v2.2: MinRiskRewardRatio = 0の場合はチェックをスキップ
+      if(m_MinRiskRewardRatio <= 0)
+         return true;
+
       double slDistance = MathAbs(entryPrice - slPrice);
       double tpDistance = MathAbs(tpPrice - entryPrice);
 

@@ -5,9 +5,9 @@
 //+------------------------------------------------------------------+
 #property copyright "XAUUSD Fintokei Scalper"
 #property link      ""
-#property version   "2.10"
+#property version   "2.20"
 #property description "XAUUSD専用 - Fintokeiチャレンジルール完全対応"
-#property description "v2.1: RR比・ATR・トレーリングストップ追加"
+#property description "v2.2: フィルター調整・基本性能重視"
 
 #include "..\\Include\\FintokeiRiskManager.mqh"
 #include "..\\Include\\TechnicalSignals.mqh"
@@ -36,7 +36,7 @@ input bool                 UsePivotLevels = true;          // ピボットレベ
 input int                  MinSignalsRequired = 2;         // 必要な最小シグナル数（v2.1: 3→2に戻す）
 
 input group "=== 時間帯フィルター ==="
-input bool                 UseTimeFilter = true;           // 時間帯フィルターを使用
+input bool                 UseTimeFilter = false;          // 時間帯フィルターを使用（v2.2: デフォルトOFF）
 input int                  TradingStartHour = 5;           // 取引開始時刻（v2.1: 8→5に変更）
 input int                  TradingEndHour = 18;            // 取引終了時刻（v2.1: 22→18に変更）
 input bool                 AvoidMondayTrading = false;     // 月曜日の取引を避ける
@@ -48,11 +48,11 @@ input int                  MaxConsecutiveLosses = 3;       // 連続負けでス
 input int                  PauseAfterLoss_Minutes = 60;    // 負けトレード後の休止時間（分）
 
 input group "=== v2.1: 新規リスク管理 ==="
-input double               MinRiskRewardRatio = 1.5;       // 最小RR比（1:1.5未満は拒否）
+input double               MinRiskRewardRatio = 0;         // 最小RR比（0=チェックOFF、v2.2調整）
 input double               MaxSingleLossPercent = 2.0;     // 1トレード最大損失（%）
-input bool                 UseATRFilter = true;            // ATRボラティリティフィルター
-input double               MinATR = 3.0;                   // 最小ATR（これ未満は取引しない）
-input double               MaxATR = 15.0;                  // 最大ATR（これ超えは取引しない）
+input bool                 UseATRFilter = false;           // ATRボラティリティフィルター（v2.2: デフォルトOFF）
+input double               MinATR = 0.5;                   // 最小ATR（v2.2: M5用に調整）
+input double               MaxATR = 5.0;                   // 最大ATR（v2.2: M5用に調整）
 
 input group "=== エグジット設定 ==="
 input double               BreakevenTriggerPips = 80.0;    // 建値移動トリガー (v2.1: 100→80に変更)
