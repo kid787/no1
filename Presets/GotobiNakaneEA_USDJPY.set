@@ -1,0 +1,59 @@
+; ゴトー日仲値トレードEA - USDJPY用プリセット
+; Fintokeiチャレンジプラン対応設定
+
+; ===== 基本設定 =====
+InitialBalance=0
+DailyLossLimit=4.9
+TotalLossLimit=9.9
+MaxRiskPerTrade=2.0
+MagicNumber=20251222
+
+; ===== ロジック1: 仲値ロング =====
+; ゴトー日の早朝買い → 9:55決済（王道パターン）
+UseLogic1=true
+Logic1_EntryHour=3
+Logic1_EntryMinute=55
+Logic1_ExitHour=9
+Logic1_ExitMinute=55
+Logic1_SL_Pips=30
+Logic1_TP_Pips=60
+
+; ===== ロジック2: 仲値ショート =====
+; 仲値決定後30分の下落を狙う
+UseLogic2=true
+Logic2_EntryHour=9
+Logic2_EntryMinute=55
+Logic2_ExitHour=10
+Logic2_ExitMinute=25
+Logic2_SL_Pips=20
+Logic2_TP_Pips=30
+
+; ===== ロジック3-A: 月末アノマリーSELL =====
+; 機関投資家のリバランス売りを狙う
+UseLogic3A=true
+Logic3A_EntryHour=9
+Logic3A_EntryMinute=55
+Logic3A_ExitHour=15
+Logic3A_ExitMinute=0
+Logic3A_SL_Pips=40
+Logic3A_TP_Pips=80
+
+; ===== ロジック3-B: 月末アノマリーBUY =====
+; 欧州・NY時間の月末ドル需要
+UseLogic3B=true
+Logic3B_EntryHour=16
+Logic3B_EntryMinute=0
+Logic3B_ExitHour=23
+Logic3B_ExitMinute=0
+Logic3B_SL_Pips=50
+Logic3B_TP_Pips=100
+
+; ===== タイムゾーン設定 =====
+; ※ブローカーのサーバー時間に応じて調整してください
+; 一般的なブローカーはGMT+2（冬時間）またはGMT+3（夏時間）
+ServerGMTOffset=2
+JapanGMTOffset=9
+
+; ===== フィルター設定 =====
+FridayGotobiOnly=false
+SkipHolidayGotobi=true

@@ -1,0 +1,62 @@
+; ゴトー日仲値トレードEA - XAUUSD（ゴールド）用プリセット
+; Fintokeiチャレンジプラン対応設定
+;
+; 注意: XAUUSDは仲値アノマリーの直接対象ではありませんが、
+; USD相関で東京セッションでの動きを狙います
+
+; ===== 基本設定 =====
+InitialBalance=0
+DailyLossLimit=4.9
+TotalLossLimit=9.9
+MaxRiskPerTrade=1.5
+MagicNumber=20251223
+
+; ===== ロジック1: 仲値ロング =====
+; ゴトー日のドル買いでゴールドは売られやすいが、
+; 逆張りでBUYも検討（USD安時はゴールド高）
+UseLogic1=true
+Logic1_EntryHour=3
+Logic1_EntryMinute=55
+Logic1_ExitHour=9
+Logic1_ExitMinute=55
+Logic1_SL_Pips=50
+Logic1_TP_Pips=100
+
+; ===== ロジック2: 仲値ショート =====
+; 仲値後のドル売りでゴールドは上昇しやすい→売りは控えめ
+UseLogic2=false
+Logic2_EntryHour=9
+Logic2_EntryMinute=55
+Logic2_ExitHour=10
+Logic2_ExitMinute=25
+Logic2_SL_Pips=30
+Logic2_TP_Pips=50
+
+; ===== ロジック3-A: 月末アノマリーSELL =====
+; 月末のリバランスでドル売り→ゴールドは上昇傾向
+; ここではゴールドのBUYを推奨するため、SELLはオフ
+UseLogic3A=false
+Logic3A_EntryHour=9
+Logic3A_EntryMinute=55
+Logic3A_ExitHour=15
+Logic3A_ExitMinute=0
+Logic3A_SL_Pips=60
+Logic3A_TP_Pips=120
+
+; ===== ロジック3-B: 月末アノマリーBUY =====
+; 欧州・NYセッションでのゴールド需要
+UseLogic3B=true
+Logic3B_EntryHour=16
+Logic3B_EntryMinute=0
+Logic3B_ExitHour=23
+Logic3B_ExitMinute=0
+Logic3B_SL_Pips=80
+Logic3B_TP_Pips=160
+
+; ===== タイムゾーン設定 =====
+ServerGMTOffset=2
+JapanGMTOffset=9
+
+; ===== フィルター設定 =====
+FridayGotobiOnly=false
+SkipHolidayGotobi=true
