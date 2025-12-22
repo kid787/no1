@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Gotobi Nakane Trading EA"
 #property link      ""
-#property version   "1.00"
+#property version   "1.01"
 #property strict
 
 //+------------------------------------------------------------------+
@@ -484,6 +484,26 @@ double CalculateLotSize(double slPips)
 }
 
 //+------------------------------------------------------------------+
+//| サポートされるフィリングモードを取得                             |
+//+------------------------------------------------------------------+
+ENUM_ORDER_TYPE_FILLING GetFillingMode()
+{
+   //--- シンボルがサポートするフィリングモードを取得
+   uint filling = (uint)SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
+
+   //--- ORDER_FILLING_FOK をサポートしているか
+   if((filling & SYMBOL_FILLING_FOK) == SYMBOL_FILLING_FOK)
+      return ORDER_FILLING_FOK;
+
+   //--- ORDER_FILLING_IOC をサポートしているか
+   if((filling & SYMBOL_FILLING_IOC) == SYMBOL_FILLING_IOC)
+      return ORDER_FILLING_IOC;
+
+   //--- どちらもサポートしていない場合は RETURN（部分約定許可）
+   return ORDER_FILLING_RETURN;
+}
+
+//+------------------------------------------------------------------+
 //| Pip サイズの取得                                                 |
 //+------------------------------------------------------------------+
 double GetPipSize()
@@ -552,7 +572,7 @@ bool ExecuteTrade(ENUM_ORDER_TYPE orderType, double slPips, double tpPips, strin
    request.deviation = 30;
    request.magic = MagicNumber;
    request.comment = comment;
-   request.type_filling = ORDER_FILLING_IOC;
+   request.type_filling = GetFillingMode();  // ブローカー対応フィリングモードを自動検出
 
    //--- 注文送信
    if(!OrderSend(request, result))
@@ -679,7 +699,7 @@ bool ClosePosition(ulong ticket)
       request.price = SymbolInfoDouble(request.symbol, SYMBOL_ASK);
    }
 
-   request.type_filling = ORDER_FILLING_IOC;
+   request.type_filling = GetFillingMode();  // ブローカー対応フィリングモードを自動検出
 
    if(!OrderSend(request, result))
    {
