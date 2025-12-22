@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Gotobi Nakane Trading EA"
 #property link      ""
-#property version   "1.03"
+#property version   "1.04"
 #property strict
 
 //+------------------------------------------------------------------+
@@ -20,21 +20,21 @@ input int      MagicNumber          = 20251222;  // マジックナンバー
 
 input group "===== ロジック1: 仲値ロング ====="
 input bool     UseLogic1            = true;      // ロジック1を使用
-input int      Logic1_EntryHour     = 7;         // エントリー時間（時）※日本時間 ※研究推奨7:00
+input int      Logic1_EntryHour     = 8;         // エントリー時間（時）※日本時間 ※8:00推奨
 input int      Logic1_EntryMinute   = 0;         // エントリー時間（分）
 input int      Logic1_ExitHour      = 9;         // 決済時間（時）
 input int      Logic1_ExitMinute    = 55;        // 決済時間（分）
-input double   Logic1_SL_Pips       = 15;        // 損切り幅（Pips）※狭いSLで高ロット
-input double   Logic1_TP_Pips       = 30;        // 利確幅（Pips）
+input double   Logic1_SL_Pips       = 20;        // 損切り幅（Pips）
+input double   Logic1_TP_Pips       = 40;        // 利確幅（Pips）
 
 input group "===== ロジック2: 仲値ショート ====="
 input bool     UseLogic2            = true;      // ロジック2を使用
 input int      Logic2_EntryHour     = 9;         // エントリー時間（時）
-input int      Logic2_EntryMinute   = 55;        // エントリー時間（分）
+input int      Logic2_EntryMinute   = 56;        // エントリー時間（分）※仲値直後
 input int      Logic2_ExitHour      = 10;        // 決済時間（時）
-input int      Logic2_ExitMinute    = 25;        // 決済時間（分）
-input double   Logic2_SL_Pips       = 10;        // 損切り幅（Pips）※狭いSLで高ロット
-input double   Logic2_TP_Pips       = 15;        // 利確幅（Pips）
+input int      Logic2_ExitMinute    = 30;        // 決済時間（分）
+input double   Logic2_SL_Pips       = 15;        // 損切り幅（Pips）
+input double   Logic2_TP_Pips       = 20;        // 利確幅（Pips）
 
 input group "===== ロジック3-A: 月末アノマリーSELL ====="
 input bool     UseLogic3A           = true;      // ロジック3-Aを使用
@@ -61,6 +61,8 @@ input int      JapanGMTOffset       = 9;         // 日本のGMTオフセット
 input group "===== フィルター設定 ====="
 input bool     FridayGotobiOnly     = false;     // 金曜日のゴトー日のみ取引
 input bool     SkipHolidayGotobi    = true;      // 土日がゴトー日の場合は前日金曜に取引
+input bool     SkipThursday         = true;      // 木曜日はエントリーしない
+input bool     SkipMonday           = false;     // 月曜日はエントリーしない
 
 //+------------------------------------------------------------------+
 //| グローバル変数                                                   |
@@ -167,6 +169,20 @@ void OnTick()
    //--- 金曜日ゴトー日のみフィルター
    if(FridayGotobiOnly && isGotobi && dt.day_of_week != 5)
       isGotobi = false;
+
+   //--- 木曜日フィルター（木曜日はエントリーしない）
+   if(SkipThursday && dt.day_of_week == 4)
+   {
+      isGotobi = false;
+      isMonthEnd = false;
+   }
+
+   //--- 月曜日フィルター
+   if(SkipMonday && dt.day_of_week == 1)
+   {
+      isGotobi = false;
+      isMonthEnd = false;
+   }
 
    //--- 時刻チェック用の変数
    int currentMinuteOfDay = dt.hour * 60 + dt.min;
