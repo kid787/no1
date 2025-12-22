@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Gotobi Nakane Trading EA"
 #property link      ""
-#property version   "1.01"
+#property version   "1.02"
 #property strict
 
 //+------------------------------------------------------------------+
@@ -20,12 +20,12 @@ input int      MagicNumber          = 20251222;  // マジックナンバー
 
 input group "===== ロジック1: 仲値ロング ====="
 input bool     UseLogic1            = true;      // ロジック1を使用
-input int      Logic1_EntryHour     = 3;         // エントリー時間（時）※日本時間
-input int      Logic1_EntryMinute   = 55;        // エントリー時間（分）
+input int      Logic1_EntryHour     = 7;         // エントリー時間（時）※日本時間 ※研究推奨7:00
+input int      Logic1_EntryMinute   = 0;         // エントリー時間（分）
 input int      Logic1_ExitHour      = 9;         // 決済時間（時）
 input int      Logic1_ExitMinute    = 55;        // 決済時間（分）
-input double   Logic1_SL_Pips       = 30;        // 損切り幅（Pips）
-input double   Logic1_TP_Pips       = 60;        // 利確幅（Pips）
+input double   Logic1_SL_Pips       = 15;        // 損切り幅（Pips）※狭いSLで高ロット
+input double   Logic1_TP_Pips       = 30;        // 利確幅（Pips）
 
 input group "===== ロジック2: 仲値ショート ====="
 input bool     UseLogic2            = true;      // ロジック2を使用
@@ -33,8 +33,8 @@ input int      Logic2_EntryHour     = 9;         // エントリー時間（時�
 input int      Logic2_EntryMinute   = 55;        // エントリー時間（分）
 input int      Logic2_ExitHour      = 10;        // 決済時間（時）
 input int      Logic2_ExitMinute    = 25;        // 決済時間（分）
-input double   Logic2_SL_Pips       = 20;        // 損切り幅（Pips）
-input double   Logic2_TP_Pips       = 30;        // 利確幅（Pips）
+input double   Logic2_SL_Pips       = 10;        // 損切り幅（Pips）※狭いSLで高ロット
+input double   Logic2_TP_Pips       = 15;        // 利確幅（Pips）
 
 input group "===== ロジック3-A: 月末アノマリーSELL ====="
 input bool     UseLogic3A           = true;      // ロジック3-Aを使用
@@ -42,8 +42,8 @@ input int      Logic3A_EntryHour    = 9;         // エントリー時間（時�
 input int      Logic3A_EntryMinute  = 55;        // エントリー時間（分）
 input int      Logic3A_ExitHour     = 15;        // 決済時間（時）
 input int      Logic3A_ExitMinute   = 0;         // 決済時間（分）
-input double   Logic3A_SL_Pips      = 40;        // 損切り幅（Pips）
-input double   Logic3A_TP_Pips      = 80;        // 利確幅（Pips）
+input double   Logic3A_SL_Pips      = 20;        // 損切り幅（Pips）※狭いSLで高ロット
+input double   Logic3A_TP_Pips      = 40;        // 利確幅（Pips）
 
 input group "===== ロジック3-B: 月末アノマリーBUY ====="
 input bool     UseLogic3B           = true;      // ロジック3-Bを使用
@@ -51,8 +51,8 @@ input int      Logic3B_EntryHour    = 16;        // エントリー時間（時�
 input int      Logic3B_EntryMinute  = 0;         // エントリー時間（分）
 input int      Logic3B_ExitHour     = 23;        // 決済時間（時）
 input int      Logic3B_ExitMinute   = 0;         // 決済時間（分）
-input double   Logic3B_SL_Pips      = 50;        // 損切り幅（Pips）
-input double   Logic3B_TP_Pips      = 100;       // 利確幅（Pips）
+input double   Logic3B_SL_Pips      = 25;        // 損切り幅（Pips）※狭いSLで高ロット
+input double   Logic3B_TP_Pips      = 50;        // 利確幅（Pips）
 
 input group "===== タイムゾーン設定 ====="
 input int      ServerGMTOffset      = 2;         // サーバーのGMTオフセット（冬時間）
@@ -108,6 +108,18 @@ int OnInit()
    Print("1日最大損失: ", DoubleToString(DailyLossLimit, 1), "%");
    Print("全体最大損失: ", DoubleToString(TotalLossLimit, 1), "%");
    Print("対象シンボル: ", _Symbol);
+
+   //--- シンボル情報のデバッグ出力
+   Print("=== シンボル情報 ===");
+   Print("Digits: ", (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS));
+   Print("Point: ", DoubleToString(SymbolInfoDouble(_Symbol, SYMBOL_POINT), 6));
+   Print("TickSize: ", DoubleToString(SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE), 6));
+   Print("TickValue: ", DoubleToString(SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE), 4));
+   Print("PipSize: ", DoubleToString(GetPipSize(), 6));
+   Print("PipValue(1Lot): ", DoubleToString(GetPipValue(), 2), " ", AccountInfoString(ACCOUNT_CURRENCY));
+   Print("MinLot: ", DoubleToString(SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN), 2));
+   Print("MaxLot: ", DoubleToString(SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX), 2));
+   Print("LotStep: ", DoubleToString(SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP), 2));
 
    return(INIT_SUCCEEDED);
 }
@@ -452,21 +464,32 @@ double CalculateLotSize(double slPips)
 
    //--- 負の値チェック
    if(maxAllowedLoss <= 0)
+   {
+      Print("ロット計算エラー: 許容損失が0以下 maxAllowedLoss=", maxAllowedLoss);
       return 0;
+   }
 
-   //--- pip値計算
-   double pipSize = GetPipSize();
-   double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   //--- 1pipあたりの価値（1ロットあたり）を取得
+   double pipValue = GetPipValue();
 
-   double slDistance = slPips * pipSize;
-   double numTicks = slDistance / tickSize;
-   double lossPerLot = numTicks * tickValue;
+   //--- SL pipsでの損失額（1ロットあたり）
+   double lossPerLot = slPips * pipValue;
+
+   //--- デバッグ出力
+   Print("=== ロット計算 ===");
+   Print("許容損失: ", DoubleToString(maxAllowedLoss, 0), " ", AccountInfoString(ACCOUNT_CURRENCY));
+   Print("SL Pips: ", DoubleToString(slPips, 1));
+   Print("PipValue(1Lot): ", DoubleToString(pipValue, 2), " ", AccountInfoString(ACCOUNT_CURRENCY));
+   Print("LossPerLot: ", DoubleToString(lossPerLot, 0), " ", AccountInfoString(ACCOUNT_CURRENCY));
 
    if(lossPerLot <= 0)
+   {
+      Print("ロット計算エラー: lossPerLot=", lossPerLot);
       return 0;
+   }
 
    double calculatedLots = maxAllowedLoss / lossPerLot;
+   Print("計算ロット(正規化前): ", DoubleToString(calculatedLots, 4));
 
    //--- ロットサイズの正規化
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
@@ -479,6 +502,8 @@ double CalculateLotSize(double slPips)
       calculatedLots = minLot;
    if(calculatedLots > maxLot)
       calculatedLots = maxLot;
+
+   Print("最終ロット: ", DoubleToString(calculatedLots, 2));
 
    return calculatedLots;
 }
@@ -514,17 +539,45 @@ double GetPipSize()
    //--- XAUUSD や JPY ペアなど、桁数に応じてpipサイズを調整
    if(StringFind(_Symbol, "XAU") >= 0 || StringFind(_Symbol, "GOLD") >= 0)
    {
-      // 金の場合は0.1ドル = 1 pip として扱う
+      // 金の場合は0.1ドル = 1 pip として扱う（100 pips = $10）
       return 0.1;
+   }
+   else if(StringFind(_Symbol, "JPY") >= 0)
+   {
+      // JPYペアの場合（5桁: 0.001、3桁: 0.01）
+      if(digits == 3)
+         return 0.01;    // 3桁ブローカー（旧式）
+      else
+         return 0.01;    // 5桁ブローカー: 1pip = 0.01円
    }
    else if(digits == 3 || digits == 5)
    {
+      // その他の5桁/3桁ペア
       return point * 10.0;
    }
    else
    {
       return point;
    }
+}
+
+//+------------------------------------------------------------------+
+//| 1pipあたりの価値を取得（1ロットあたり、口座通貨建て）            |
+//+------------------------------------------------------------------+
+double GetPipValue()
+{
+   string symbol = _Symbol;
+   double tickSize = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+   double tickValue = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
+   double pipSize = GetPipSize();
+
+   // 1pipに含まれるtick数
+   double ticksPerPip = pipSize / tickSize;
+
+   // 1ロットあたりの1pip価値
+   double pipValue = ticksPerPip * tickValue;
+
+   return pipValue;
 }
 
 //+------------------------------------------------------------------+
