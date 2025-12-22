@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Gotobi Nakane Trading EA"
 #property link      ""
-#property version   "1.02"
+#property version   "1.03"
 #property strict
 
 //+------------------------------------------------------------------+
@@ -567,17 +567,86 @@ double GetPipSize()
 double GetPipValue()
 {
    string symbol = _Symbol;
-   double tickSize = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
-   double tickValue = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
+   string accountCurrency = AccountInfoString(ACCOUNT_CURRENCY);
    double pipSize = GetPipSize();
 
-   // 1pipに含まれるtick数
-   double ticksPerPip = pipSize / tickSize;
+   //--- コントラクトサイズ（1ロットあたりの通貨量）
+   double contractSize = SymbolInfoDouble(symbol, SYMBOL_TRADE_CONTRACT_SIZE);
 
-   // 1ロットあたりの1pip価値
+   //--- USDJPYなどのJPYペアで、口座がJPYの場合
+   if(StringFind(symbol, "JPY") >= 0 && accountCurrency == "JPY")
+   {
+      // USDJPY: 1ロット = 100,000 USD
+      // 1pip = 0.01円 × 100,000 = 1,000円
+      double pipValue = pipSize * contractSize;
+      Print("GetPipValue (JPY直接計算): pipSize=", pipSize, " contractSize=", contractSize, " pipValue=", pipValue);
+      return pipValue;
+   }
+
+   //--- XAUUSDなどのゴールドで、口座がJPYの場合
+   if((StringFind(symbol, "XAU") >= 0 || StringFind(symbol, "GOLD") >= 0) && accountCurrency == "JPY")
+   {
+      // XAUUSD: 1ロット = 100 oz
+      // 1pip = $0.1 × 100 = $10
+      // 口座通貨に変換（USDJPYレートを使用）
+      double usdJpyRate = GetUSDJPYRate();
+      double pipValueUSD = pipSize * contractSize;  // $10
+      double pipValue = pipValueUSD * usdJpyRate;
+      Print("GetPipValue (XAU->JPY変換): pipValueUSD=", pipValueUSD, " USDJPY=", usdJpyRate, " pipValue=", pipValue);
+      return pipValue;
+   }
+
+   //--- その他の通貨ペア: tickValueを使用
+   double tickSize = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_SIZE);
+   double tickValue = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
+
+   // tickValueが決済通貨建ての場合、アカウント通貨に変換が必要
+   // MT5は通常アカウント通貨建てで返すが、念のためチェック
+   double ticksPerPip = pipSize / tickSize;
    double pipValue = ticksPerPip * tickValue;
 
+   //--- 口座通貨がJPYで、pipValueが異常に小さい場合は変換が必要
+   if(accountCurrency == "JPY" && pipValue < 100)
+   {
+      // tickValueがUSD建ての可能性 → USDJPYレートで変換
+      double usdJpyRate = GetUSDJPYRate();
+      pipValue = pipValue * usdJpyRate;
+      Print("GetPipValue (USD->JPY変換): tickValue=", tickValue, " USDJPY=", usdJpyRate, " pipValue=", pipValue);
+   }
+
+   Print("GetPipValue: tickSize=", tickSize, " tickValue=", tickValue, " pipValue=", pipValue);
    return pipValue;
+}
+
+//+------------------------------------------------------------------+
+//| USDJPYレートを取得                                               |
+//+------------------------------------------------------------------+
+double GetUSDJPYRate()
+{
+   //--- USDJPYのレートを取得
+   double rate = 0;
+
+   //--- まずUSDJPYを試す
+   if(SymbolInfoDouble("USDJPY", SYMBOL_BID) > 0)
+   {
+      rate = SymbolInfoDouble("USDJPY", SYMBOL_BID);
+   }
+   else if(SymbolInfoDouble("USDJPY.raw", SYMBOL_BID) > 0)
+   {
+      rate = SymbolInfoDouble("USDJPY.raw", SYMBOL_BID);
+   }
+   else if(SymbolInfoDouble("USDJPYm", SYMBOL_BID) > 0)
+   {
+      rate = SymbolInfoDouble("USDJPYm", SYMBOL_BID);
+   }
+   else
+   {
+      // デフォルト値（概算）
+      rate = 155.0;
+      Print("警告: USDJPYレートを取得できません。デフォルト値を使用: ", rate);
+   }
+
+   return rate;
 }
 
 //+------------------------------------------------------------------+
