@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Neckline Roll Reversal EA"
 #property link      ""
-#property version   "1.00"
+#property version   "1.01"
 #property strict
 
 //+------------------------------------------------------------------+
@@ -38,18 +38,24 @@ input double   EngulfingMinRatio    = 1.1;       // 包み足の最小サイズ�
 
 input group "===== リスク管理設定 ====="
 input double   RiskRewardRatio      = 2.0;       // リスク・リワード比率（1:X）
-input double   SLBufferPoints       = 30;        // SLバッファ（ポイント）
+input double   SLBufferPoints       = 15;        // SLバッファ（ポイント）
 input bool     UseFixedSL           = false;     // 固定SLを使用
 input double   FixedSLPoints        = 500;       // 固定SL幅（ポイント）
 
 input group "===== デイリーピボット設定 ====="
-input bool     UsePivotTP           = true;      // ピボットでの利確を使用
-input bool     UsePivotAsTarget     = true;      // ピボットを目標価格として使用
+input bool     UsePivotTP           = false;     // ピボットでの利確を使用
+input bool     UsePivotAsTarget     = false;     // ピボットを目標価格として使用
 
 input group "===== 建値決済設定 ====="
 input bool     UseBreakeven         = true;      // 建値決済を使用
-input double   BreakevenTrigger     = 100;       // 建値決済発動ポイント
+input double   BreakevenTrigger     = 50;        // 建値決済発動ポイント
 input double   BreakevenProfit      = 25;        // 建値決済時の確保ポイント
+
+input group "===== トレーリングストップ設定 ====="
+input bool     UseTrailingStop      = true;      // トレーリングストップを使用
+input double   TrailingStart        = 80;        // トレーリング開始ポイント（含み益）
+input double   TrailingStep         = 30;        // トレーリングステップ（ポイント）
+input double   TrailingDistance     = 50;        // トレーリング距離（ポイント）
 
 input group "===== タイムフレーム・フィルター設定 ====="
 input ENUM_TIMEFRAMES  TradingTimeframe = PERIOD_H1;  // 取引タイムフレーム
@@ -155,6 +161,10 @@ void OnTick()
    //--- 建値決済の確認
    if(UseBreakeven)
       ManageBreakeven();
+
+   //--- トレーリングストップの確認
+   if(UseTrailingStop)
+      ManageTrailingStop();
 
    //--- ピボットでの利確確認
    if(UsePivotTP)
@@ -1219,6 +1229,82 @@ void ManageBreakeven()
             {
                ModifyPosition(ticket, newSL, currentTP);
                Print("建値決済設定: Ticket=", ticket, " 新SL=", DoubleToString(newSL, _Digits));
+            }
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| トレーリングストップの管理                                       |
+//+------------------------------------------------------------------+
+void ManageTrailingStop()
+{
+   double startPoints = TrailingStart * _Point;
+   double stepPoints = TrailingStep * _Point;
+   double distancePoints = TrailingDistance * _Point;
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket <= 0)
+         continue;
+
+      if(PositionGetInteger(POSITION_MAGIC) != MagicNumber)
+         continue;
+
+      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+      double currentSL = PositionGetDouble(POSITION_SL);
+      double currentTP = PositionGetDouble(POSITION_TP);
+      ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+
+      double currentPrice;
+      double newSL;
+      double profit;
+
+      if(posType == POSITION_TYPE_BUY)
+      {
+         currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         profit = currentPrice - openPrice;
+
+         //--- トレーリング開始条件を満たしているか
+         if(profit >= startPoints)
+         {
+            //--- 新しいSL = 現在価格 - トレーリング距離
+            newSL = currentPrice - distancePoints;
+
+            //--- 現在のSLよりステップ以上高い場合のみ更新
+            if(currentSL == 0 || newSL >= currentSL + stepPoints)
+            {
+               //--- エントリー価格より上にSLを設定
+               if(newSL > openPrice)
+               {
+                  ModifyPosition(ticket, newSL, currentTP);
+                  Print("トレーリングストップ更新(BUY): Ticket=", ticket,
+                        " 新SL=", DoubleToString(newSL, _Digits),
+                        " 含み益=", DoubleToString(profit / _Point, 0), "pts");
+               }
+            }
+         }
+      }
+      else  // SELL
+      {
+         currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+         profit = openPrice - currentPrice;
+
+         if(profit >= startPoints)
+         {
+            newSL = currentPrice + distancePoints;
+
+            if(currentSL == 0 || newSL <= currentSL - stepPoints)
+            {
+               if(newSL < openPrice)
+               {
+                  ModifyPosition(ticket, newSL, currentTP);
+                  Print("トレーリングストップ更新(SELL): Ticket=", ticket,
+                        " 新SL=", DoubleToString(newSL, _Digits),
+                        " 含み益=", DoubleToString(profit / _Point, 0), "pts");
+               }
             }
          }
       }
