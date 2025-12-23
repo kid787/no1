@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Neckline Roll Reversal EA"
 #property link      ""
-#property version   "1.04"
+#property version   "1.05"
 #property strict
 
 //+------------------------------------------------------------------+
@@ -20,8 +20,8 @@ input double   MaxOpenRisk          = 3.0;       // 同時オープンポジシ�
 input int      MagicNumber          = 20251223;  // マジックナンバー
 
 input group "===== 戦略選択 ====="
-input bool     UseNecklineStrategy  = true;      // ネックライン戦略を使用
-input bool     UsePivotBounce       = true;      // ピボットバウンス戦略を使用
+input bool     UseNecklineStrategy  = false;     // ネックライン戦略を使用 ※v1.05デフォルトOFF
+input bool     UsePivotBounce       = true;      // ピボットバウンス戦略を使用 ※v1.05メイン戦略
 
 input group "===== ネックライン設定（緩和版）====="
 input int      LookbackBars         = 100;       // ネックライン検出のルックバック期間
@@ -46,6 +46,8 @@ input double   PivotTolerance       = 100;       // ピボットレベル許容�
 input bool     UsePivotS1R1         = true;      // S1/R1でエントリー
 input bool     UsePivotS2R2         = true;      // S2/R2でエントリー
 input bool     UseCentralPivot      = true;      // 中央ピボットでエントリー
+input bool     RequirePivotPriceAction = true;   // ピボットでプライスアクション必須 ※v1.05追加
+input int      PivotBounceConfirmBars = 1;       // ピボット反発確認バー数 ※v1.05追加
 
 input group "===== リスク管理設定 ====="
 input double   RiskRewardRatio      = 2.0;       // リスク・リワード比率（1:X）
@@ -133,10 +135,11 @@ int OnInit()
 
    CalculateDailyPivot();
 
-   Print("=== ネックライン＋ピボットバウンスEA v1.04 起動 ===");
+   Print("=== ピボットバウンスEA v1.05 起動 ===");
    Print("初期資金: ", DoubleToString(g_InitialBalance, 0), " ", AccountInfoString(ACCOUNT_CURRENCY));
    Print("ネックライン戦略: ", UseNecklineStrategy ? "ON" : "OFF");
    Print("ピボットバウンス戦略: ", UsePivotBounce ? "ON" : "OFF");
+   Print("ピボットPA確認: ", RequirePivotPriceAction ? "ON" : "OFF");
    Print("固定SL: ", UseFixedSL ? DoubleToString(FixedSLPoints, 0) + "pt" : "OFF");
    Print("固定TP: ", UseFixedTP ? DoubleToString(FixedTPPoints, 0) + "pt" : "OFF");
    Print("R:R比率: 1:", DoubleToString(FixedTPPoints / FixedSLPoints, 1));
@@ -322,7 +325,7 @@ void CalculateDailyPivot()
 }
 
 //+------------------------------------------------------------------+
-//| ピボットバウンスエントリーの確認                                 |
+//| ピボットバウンスエントリーの確認（v1.05改良版）                   |
 //+------------------------------------------------------------------+
 void CheckPivotBounceEntry()
 {
@@ -335,34 +338,45 @@ void CheckPivotBounceEntry()
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
 
-   if(CopyRates(_Symbol, TradingTimeframe, 0, 3, rates) < 3)
+   //--- 確認バー数に応じてデータ取得
+   int barsNeeded = PivotBounceConfirmBars + 3;
+   if(CopyRates(_Symbol, TradingTimeframe, 0, barsNeeded, rates) < barsNeeded)
       return;
 
    double tolerance = PivotTolerance * _Point;
    double close = rates[1].close;
    double low = rates[1].low;
    double high = rates[1].high;
-   double prevClose = rates[2].close;
+   double open = rates[1].open;
 
    //--- サポートレベルでの買いシグナル
    double supportLevels[];
+   string supportNames[];
    int supportCount = 0;
    ArrayResize(supportLevels, 0);
+   ArrayResize(supportNames, 0);
 
+   //--- 現在価格より下のサポートレベルを収集
+   if(UsePivotS2R2 && close > g_DailyS2)
+   {
+      ArrayResize(supportLevels, supportCount + 1);
+      ArrayResize(supportNames, supportCount + 1);
+      supportLevels[supportCount] = g_DailyS2;
+      supportNames[supportCount++] = "S2";
+   }
+   if(UsePivotS1R1 && close > g_DailyS1)
+   {
+      ArrayResize(supportLevels, supportCount + 1);
+      ArrayResize(supportNames, supportCount + 1);
+      supportLevels[supportCount] = g_DailyS1;
+      supportNames[supportCount++] = "S1";
+   }
    if(UseCentralPivot && close > g_DailyPivot)
    {
       ArrayResize(supportLevels, supportCount + 1);
-      supportLevels[supportCount++] = g_DailyPivot;
-   }
-   if(UsePivotS1R1)
-   {
-      ArrayResize(supportLevels, supportCount + 1);
-      supportLevels[supportCount++] = g_DailyS1;
-   }
-   if(UsePivotS2R2)
-   {
-      ArrayResize(supportLevels, supportCount + 1);
-      supportLevels[supportCount++] = g_DailyS2;
+      ArrayResize(supportNames, supportCount + 1);
+      supportLevels[supportCount] = g_DailyPivot;
+      supportNames[supportCount++] = "PP";
    }
 
    //--- サポートでの反発チェック（買い）
@@ -370,47 +384,78 @@ void CheckPivotBounceEntry()
    {
       double level = supportLevels[i];
 
-      //--- 価格がサポートにタッチして反発
+      //--- 価格がサポートにタッチして反発（より厳密な条件）
       bool touchedSupport = low <= level + tolerance && low >= level - tolerance;
-      bool bouncedUp = close > level && close > rates[1].open;  // 陽線で反発
+      bool bouncedUp = close > open && close > level;  // 陽線で反発してレベル上に閉じた
 
-      if(touchedSupport && bouncedUp)
+      //--- 連続確認：直近のバーが全て反発方向
+      bool confirmBounce = true;
+      for(int j = 1; j <= PivotBounceConfirmBars; j++)
       {
-         Print("ピボットサポート反発検出: Level=", DoubleToString(level, _Digits));
-
-         double sl = CalculatePivotSL(rates, true, level);
-         if(sl == 0) continue;
-
-         double tp = CalculateTP(close, sl, true);
-
-         if(ExecuteTrade(ORDER_TYPE_BUY, sl, tp, "Pivot_Bounce_Buy"))
+         if(rates[j].close <= rates[j].open)  // 陰線があればNG
          {
-            g_TodayTradeCount++;
-            Print("ピボットバウンス買いエントリー: Level=", DoubleToString(level, _Digits));
-            return;
+            confirmBounce = false;
+            break;
+         }
+      }
+
+      if(touchedSupport && bouncedUp && confirmBounce)
+      {
+         //--- プライスアクション確認（v1.05追加）
+         bool priceActionOK = true;
+         if(RequirePivotPriceAction)
+         {
+            int signal = CheckPriceActionSignal(rates, true);
+            priceActionOK = (signal > 0);
+         }
+
+         if(priceActionOK)
+         {
+            Print("ピボットサポート反発検出: ", supportNames[i], "=", DoubleToString(level, _Digits));
+
+            double sl = CalculatePivotSL(rates, true, level);
+            if(sl == 0) continue;
+
+            double tp = CalculateTP(close, sl, true);
+
+            if(ExecuteTrade(ORDER_TYPE_BUY, sl, tp, "Pivot_" + supportNames[i] + "_Buy"))
+            {
+               g_TodayTradeCount++;
+               Print("ピボットバウンス買いエントリー: ", supportNames[i]);
+               return;
+            }
          }
       }
    }
 
    //--- レジスタンスレベルでの売りシグナル
    double resistanceLevels[];
+   string resistanceNames[];
    int resistanceCount = 0;
    ArrayResize(resistanceLevels, 0);
+   ArrayResize(resistanceNames, 0);
 
+   //--- 現在価格より上のレジスタンスレベルを収集
    if(UseCentralPivot && close < g_DailyPivot)
    {
       ArrayResize(resistanceLevels, resistanceCount + 1);
-      resistanceLevels[resistanceCount++] = g_DailyPivot;
+      ArrayResize(resistanceNames, resistanceCount + 1);
+      resistanceLevels[resistanceCount] = g_DailyPivot;
+      resistanceNames[resistanceCount++] = "PP";
    }
-   if(UsePivotS1R1)
+   if(UsePivotS1R1 && close < g_DailyR1)
    {
       ArrayResize(resistanceLevels, resistanceCount + 1);
-      resistanceLevels[resistanceCount++] = g_DailyR1;
+      ArrayResize(resistanceNames, resistanceCount + 1);
+      resistanceLevels[resistanceCount] = g_DailyR1;
+      resistanceNames[resistanceCount++] = "R1";
    }
-   if(UsePivotS2R2)
+   if(UsePivotS2R2 && close < g_DailyR2)
    {
       ArrayResize(resistanceLevels, resistanceCount + 1);
-      resistanceLevels[resistanceCount++] = g_DailyR2;
+      ArrayResize(resistanceNames, resistanceCount + 1);
+      resistanceLevels[resistanceCount] = g_DailyR2;
+      resistanceNames[resistanceCount++] = "R2";
    }
 
    //--- レジスタンスでの反発チェック（売り）
@@ -418,23 +463,46 @@ void CheckPivotBounceEntry()
    {
       double level = resistanceLevels[i];
 
+      //--- 価格がレジスタンスにタッチして反発（より厳密な条件）
       bool touchedResistance = high >= level - tolerance && high <= level + tolerance;
-      bool bouncedDown = close < level && close < rates[1].open;  // 陰線で反発
+      bool bouncedDown = close < open && close < level;  // 陰線で反発してレベル下に閉じた
 
-      if(touchedResistance && bouncedDown)
+      //--- 連続確認：直近のバーが全て反発方向
+      bool confirmBounce = true;
+      for(int j = 1; j <= PivotBounceConfirmBars; j++)
       {
-         Print("ピボットレジスタンス反発検出: Level=", DoubleToString(level, _Digits));
-
-         double sl = CalculatePivotSL(rates, false, level);
-         if(sl == 0) continue;
-
-         double tp = CalculateTP(close, sl, false);
-
-         if(ExecuteTrade(ORDER_TYPE_SELL, sl, tp, "Pivot_Bounce_Sell"))
+         if(rates[j].close >= rates[j].open)  // 陽線があればNG
          {
-            g_TodayTradeCount++;
-            Print("ピボットバウンス売りエントリー: Level=", DoubleToString(level, _Digits));
-            return;
+            confirmBounce = false;
+            break;
+         }
+      }
+
+      if(touchedResistance && bouncedDown && confirmBounce)
+      {
+         //--- プライスアクション確認（v1.05追加）
+         bool priceActionOK = true;
+         if(RequirePivotPriceAction)
+         {
+            int signal = CheckPriceActionSignal(rates, false);
+            priceActionOK = (signal > 0);
+         }
+
+         if(priceActionOK)
+         {
+            Print("ピボットレジスタンス反発検出: ", resistanceNames[i], "=", DoubleToString(level, _Digits));
+
+            double sl = CalculatePivotSL(rates, false, level);
+            if(sl == 0) continue;
+
+            double tp = CalculateTP(close, sl, false);
+
+            if(ExecuteTrade(ORDER_TYPE_SELL, sl, tp, "Pivot_" + resistanceNames[i] + "_Sell"))
+            {
+               g_TodayTradeCount++;
+               Print("ピボットバウンス売りエントリー: ", resistanceNames[i]);
+               return;
+            }
          }
       }
    }
