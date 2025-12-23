@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Neckline Roll Reversal EA"
 #property link      ""
-#property version   "1.03"
+#property version   "1.04"
 #property strict
 
 //+------------------------------------------------------------------+
@@ -51,21 +51,23 @@ input group "===== リスク管理設定 ====="
 input double   RiskRewardRatio      = 2.0;       // リスク・リワード比率（1:X）
 input double   SLBufferPoints       = 15;        // SLバッファ（ポイント）
 input bool     UseFixedSL           = true;      // 固定SLを使用 ※推奨ON
-input double   FixedSLPoints        = 250;       // 固定SL幅（ポイント）
-input double   MaxSLPoints          = 350;       // 最大SL幅（ポイント）※緩和
+input double   FixedSLPoints        = 150;       // 固定SL幅（ポイント）※v1.04縮小
+input bool     UseFixedTP           = true;      // 固定TPを使用 ※v1.04追加・推奨ON
+input double   FixedTPPoints        = 300;       // 固定TP幅（ポイント）※v1.04追加 R:R=1:2
+input double   MaxSLPoints          = 200;       // 最大SL幅（ポイント）※v1.04厳格化
 input bool     SkipWideStopTrades   = false;     // SLが広すぎるトレードをスキップ ※OFF
 input double   EntryNearNeckline    = 200;       // ネックライン近接エントリー許容範囲（ポイント）※緩和
 
 input group "===== 建値決済設定 ====="
-input bool     UseBreakeven         = true;      // 建値決済を使用
-input double   BreakevenTrigger     = 50;        // 建値決済発動ポイント
-input double   BreakevenProfit      = 25;        // 建値決済時の確保ポイント
+input bool     UseBreakeven         = false;     // 建値決済を使用 ※v1.04デフォルトOFF（TPを狙う）
+input double   BreakevenTrigger     = 150;       // 建値決済発動ポイント ※v1.04遅延
+input double   BreakevenProfit      = 50;        // 建値決済時の確保ポイント ※v1.04増加
 
 input group "===== トレーリングストップ設定 ====="
-input bool     UseTrailingStop      = true;      // トレーリングストップを使用
-input double   TrailingStart        = 80;        // トレーリング開始ポイント（含み益）
-input double   TrailingStep         = 30;        // トレーリングステップ（ポイント）
-input double   TrailingDistance     = 50;        // トレーリング距離（ポイント）
+input bool     UseTrailingStop      = false;     // トレーリングストップを使用 ※v1.04デフォルトOFF（TPを狙う）
+input double   TrailingStart        = 250;       // トレーリング開始ポイント（含み益）※v1.04遅延
+input double   TrailingStep         = 50;        // トレーリングステップ（ポイント）※v1.04拡大
+input double   TrailingDistance     = 100;       // トレーリング距離（ポイント）※v1.04拡大
 
 input group "===== タイムフレーム・フィルター設定 ====="
 input ENUM_TIMEFRAMES  TradingTimeframe = PERIOD_H1;  // 取引タイムフレーム
@@ -131,10 +133,13 @@ int OnInit()
 
    CalculateDailyPivot();
 
-   Print("=== ネックライン＋ピボットバウンスEA v1.03 起動 ===");
+   Print("=== ネックライン＋ピボットバウンスEA v1.04 起動 ===");
    Print("初期資金: ", DoubleToString(g_InitialBalance, 0), " ", AccountInfoString(ACCOUNT_CURRENCY));
    Print("ネックライン戦略: ", UseNecklineStrategy ? "ON" : "OFF");
    Print("ピボットバウンス戦略: ", UsePivotBounce ? "ON" : "OFF");
+   Print("固定SL: ", UseFixedSL ? DoubleToString(FixedSLPoints, 0) + "pt" : "OFF");
+   Print("固定TP: ", UseFixedTP ? DoubleToString(FixedTPPoints, 0) + "pt" : "OFF");
+   Print("R:R比率: 1:", DoubleToString(FixedTPPoints / FixedSLPoints, 1));
    Print("デイリーピボット: ", DoubleToString(g_DailyPivot, _Digits));
 
    return(INIT_SUCCEEDED);
@@ -1012,8 +1017,19 @@ double CalculateSL(MqlRates &rates[], bool isBuy, double necklinePrice)
 //+------------------------------------------------------------------+
 double CalculateTP(double entryPrice, double sl, bool isBuy)
 {
-   double slDistance = MathAbs(entryPrice - sl);
-   double tpDistance = slDistance * RiskRewardRatio;
+   double tpDistance;
+
+   //--- 固定TPを使用する場合（v1.04追加：R:R比率を保証）
+   if(UseFixedTP)
+   {
+      tpDistance = FixedTPPoints * _Point;
+   }
+   else
+   {
+      //--- SLに基づくR:R計算
+      double slDistance = MathAbs(entryPrice - sl);
+      tpDistance = slDistance * RiskRewardRatio;
+   }
 
    double tp;
    if(isBuy)
