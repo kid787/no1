@@ -1,11 +1,11 @@
 //+------------------------------------------------------------------+
 //|                                      NecklineRollReversalEA.mq5 |
-//|               XAUUSD専用 ネックラインロールリバーサルEA         |
+//|               XAUUSD専用 ネックライン＋ピボットバウンスEA        |
 //|              Fintokeiチャレンジプラン対応 資金管理付き          |
 //+------------------------------------------------------------------+
 #property copyright "Neckline Roll Reversal EA"
 #property link      ""
-#property version   "1.02"
+#property version   "1.03"
 #property strict
 
 //+------------------------------------------------------------------+
@@ -15,39 +15,46 @@ input group "===== 基本設定 ====="
 input double   InitialBalance       = 0;         // 初期資金（0=自動検出）
 input double   DailyLossLimit       = 4.9;       // 1日の最大損失率(%) ※5%未満に設定
 input double   TotalLossLimit       = 9.9;       // 全体の最大損失率(%) ※10%未満に設定
-input double   MaxRiskPerTrade      = 2.0;       // 1トレードあたりの最大リスク(%) ※タイトSLで高ロット
+input double   MaxRiskPerTrade      = 2.0;       // 1トレードあたりの最大リスク(%)
 input double   MaxOpenRisk          = 3.0;       // 同時オープンポジションの最大リスク(%)
-input int      MagicNumber          = 20251222;  // マジックナンバー
+input int      MagicNumber          = 20251223;  // マジックナンバー
 
-input group "===== ネックライン設定 ====="
+input group "===== 戦略選択 ====="
+input bool     UseNecklineStrategy  = true;      // ネックライン戦略を使用
+input bool     UsePivotBounce       = true;      // ピボットバウンス戦略を使用
+
+input group "===== ネックライン設定（緩和版）====="
 input int      LookbackBars         = 100;       // ネックライン検出のルックバック期間
-input int      SwingStrength        = 5;         // スイングポイント判定の強度（前後のバー数）
-input int      MinTouches           = 2;         // 重要ラインと見なす最小タッチ回数
-input double   NecklineTolerance    = 50;        // ネックライン許容誤差（ポイント）
-input double   BreakoutMinBody      = 100;       // ブレイクアウト確認の最小実体サイズ（ポイント）
+input int      SwingStrength        = 3;         // スイングポイント判定の強度（前後のバー数）※緩和
+input int      MinTouches           = 1;         // 重要ラインと見なす最小タッチ回数 ※緩和
+input double   NecklineTolerance    = 80;        // ネックライン許容誤差（ポイント）※緩和
+input double   BreakoutMinBody      = 80;        // ブレイクアウト確認の最小実体サイズ（ポイント）※緩和
 
 input group "===== ブレイクアウト・リターンムーブ設定 ====="
-input int      BreakoutConfirmBars  = 3;         // ブレイクアウト確認に必要なバー数
-input int      MaxReturnWaitBars    = 20;        // リターンムーブ待機の最大バー数
-input double   ReturnTolerance      = 30;        // リターンムーブ許容誤差（ポイント）
+input int      BreakoutConfirmBars  = 2;         // ブレイクアウト確認に必要なバー数 ※緩和
+input int      MaxReturnWaitBars    = 50;        // リターンムーブ待機の最大バー数 ※延長
+input double   ReturnTolerance      = 50;        // リターンムーブ許容誤差（ポイント）※緩和
 
-input group "===== プライスアクション設定 ====="
-input double   PinBarWickRatio      = 2.0;       // ピンバーのヒゲ/実体比率
-input double   PinBarBodyMaxRatio   = 0.33;      // ピンバーの実体/全体比率上限
-input double   EngulfingMinRatio    = 1.1;       // 包み足の最小サイズ比率
+input group "===== プライスアクション設定（緩和版）====="
+input double   PinBarWickRatio      = 1.5;       // ピンバーのヒゲ/実体比率 ※緩和
+input double   PinBarBodyMaxRatio   = 0.4;       // ピンバーの実体/全体比率上限 ※緩和
+input double   EngulfingMinRatio    = 1.0;       // 包み足の最小サイズ比率 ※緩和
+input bool     RequirePriceAction   = false;     // プライスアクション必須か ※緩和
+
+input group "===== ピボットバウンス設定 ====="
+input double   PivotTolerance       = 100;       // ピボットレベル許容誤差（ポイント）
+input bool     UsePivotS1R1         = true;      // S1/R1でエントリー
+input bool     UsePivotS2R2         = true;      // S2/R2でエントリー
+input bool     UseCentralPivot      = true;      // 中央ピボットでエントリー
 
 input group "===== リスク管理設定 ====="
 input double   RiskRewardRatio      = 2.0;       // リスク・リワード比率（1:X）
 input double   SLBufferPoints       = 15;        // SLバッファ（ポイント）
-input bool     UseFixedSL           = false;     // 固定SLを使用
-input double   FixedSLPoints        = 200;       // 固定SL幅（ポイント）
-input double   MaxSLPoints          = 200;       // 最大SL幅（ポイント）※超えたらエントリー見送り
-input bool     SkipWideStopTrades   = true;      // SLが広すぎるトレードをスキップ
-input double   EntryNearNeckline    = 50;        // ネックライン近接エントリー許容範囲（ポイント）
-
-input group "===== デイリーピボット設定 ====="
-input bool     UsePivotTP           = false;     // ピボットでの利確を使用
-input bool     UsePivotAsTarget     = false;     // ピボットを目標価格として使用
+input bool     UseFixedSL           = true;      // 固定SLを使用 ※推奨ON
+input double   FixedSLPoints        = 250;       // 固定SL幅（ポイント）
+input double   MaxSLPoints          = 350;       // 最大SL幅（ポイント）※緩和
+input bool     SkipWideStopTrades   = false;     // SLが広すぎるトレードをスキップ ※OFF
+input double   EntryNearNeckline    = 200;       // ネックライン近接エントリー許容範囲（ポイント）※緩和
 
 input group "===== 建値決済設定 ====="
 input bool     UseBreakeven         = true;      // 建値決済を使用
@@ -66,68 +73,68 @@ input int      TradingStartHour     = 0;         // 取引開始時間（サー�
 input int      TradingEndHour       = 24;        // 取引終了時間（サーバー時間）
 input bool     TradeOnMonday        = true;      // 月曜日に取引
 input bool     TradeOnFriday        = true;      // 金曜日に取引
+input int      MaxTradesPerDay      = 3;         // 1日の最大トレード数
 
 //+------------------------------------------------------------------+
 //| ネックライン構造体                                               |
 //+------------------------------------------------------------------+
 struct SNeckline
 {
-   double   price;           // ネックライン価格
-   int      touches;         // タッチ回数
-   bool     isResistance;    // レジスタンスかサポートか
-   bool     isBroken;        // ブレイクされたか
-   datetime breakTime;       // ブレイク時刻
-   int      breakBar;        // ブレイクしたバーのインデックス
-   bool     waitingRetest;   // リテスト待ち状態
+   double   price;
+   int      touches;
+   bool     isResistance;
+   bool     isBroken;
+   datetime breakTime;
+   int      breakBar;
+   bool     waitingRetest;
 };
 
 //+------------------------------------------------------------------+
 //| グローバル変数                                                   |
 //+------------------------------------------------------------------+
-double g_InitialBalance;           // 初期資金
-double g_DailyStartEquity;         // 1日の開始時有効証拠金
-datetime g_LastDailyReset;         // 最後の日次リセット時刻
-bool g_TradingBlocked;             // 取引禁止フラグ
-datetime g_LastBarTime;            // 最後のバー時刻
-SNeckline g_Necklines[];           // 検出されたネックライン
-int g_NecklineCount;               // ネックライン数
-double g_DailyPivot;               // デイリーピボット
-double g_DailyR1, g_DailyR2, g_DailyR3;  // レジスタンスレベル
-double g_DailyS1, g_DailyS2, g_DailyS3;  // サポートレベル
-double g_PreviousHigh, g_PreviousLow, g_PreviousClose;  // 前日の高値・安値・終値
+double g_InitialBalance;
+double g_DailyStartEquity;
+datetime g_LastDailyReset;
+bool g_TradingBlocked;
+datetime g_LastBarTime;
+SNeckline g_Necklines[];
+int g_NecklineCount;
+double g_DailyPivot;
+double g_DailyR1, g_DailyR2, g_DailyR3;
+double g_DailyS1, g_DailyS2, g_DailyS3;
+double g_PreviousHigh, g_PreviousLow, g_PreviousClose;
+int g_TodayTradeCount;
+datetime g_LastTradeDate;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   //--- 初期資金の設定
    if(InitialBalance <= 0)
       g_InitialBalance = AccountInfoDouble(ACCOUNT_BALANCE);
    else
       g_InitialBalance = InitialBalance;
 
-   //--- 日次開始証拠金の初期化
    g_DailyStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
    g_LastDailyReset = 0;
    g_TradingBlocked = false;
    g_LastBarTime = 0;
    g_NecklineCount = 0;
+   g_TodayTradeCount = 0;
+   g_LastTradeDate = 0;
 
-   //--- シンボル確認
    if(StringFind(_Symbol, "XAU") < 0 && StringFind(_Symbol, "GOLD") < 0)
    {
       Print("警告: このEAはXAUUSD用に設計されています。現在のシンボル: ", _Symbol);
    }
 
-   //--- デイリーピボットの初期計算
    CalculateDailyPivot();
 
-   Print("=== ネックラインロールリバーサルEA 起動 ===");
+   Print("=== ネックライン＋ピボットバウンスEA v1.03 起動 ===");
    Print("初期資金: ", DoubleToString(g_InitialBalance, 0), " ", AccountInfoString(ACCOUNT_CURRENCY));
-   Print("1日最大損失: ", DoubleToString(DailyLossLimit, 1), "%");
-   Print("全体最大損失: ", DoubleToString(TotalLossLimit, 1), "%");
-   Print("タイムフレーム: ", EnumToString(TradingTimeframe));
+   Print("ネックライン戦略: ", UseNecklineStrategy ? "ON" : "OFF");
+   Print("ピボットバウンス戦略: ", UsePivotBounce ? "ON" : "OFF");
    Print("デイリーピボット: ", DoubleToString(g_DailyPivot, _Digits));
 
    return(INIT_SUCCEEDED);
@@ -138,7 +145,7 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   Print("=== ネックラインロールリバーサルEA 停止 ===");
+   Print("=== EA 停止 ===");
 }
 
 //+------------------------------------------------------------------+
@@ -146,10 +153,8 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   //--- 日次リセットの確認
    CheckDailyReset();
 
-   //--- 損失管理の確認
    if(!CheckRiskLimits())
    {
       if(!g_TradingBlocked)
@@ -161,50 +166,52 @@ void OnTick()
       return;
    }
 
-   //--- 建値決済の確認
    if(UseBreakeven)
       ManageBreakeven();
 
-   //--- トレーリングストップの確認
    if(UseTrailingStop)
       ManageTrailingStop();
 
-   //--- ピボットでの利確確認
-   if(UsePivotTP)
-      CheckPivotTP();
-
-   //--- 含み損監視
    MonitorUnrealizedLoss();
 
-   //--- 新しいバーの確認
    datetime currentBarTime = iTime(_Symbol, TradingTimeframe, 0);
    if(currentBarTime == g_LastBarTime)
-      return;  // 同じバー内では処理しない
+      return;
 
    g_LastBarTime = currentBarTime;
 
-   //--- 取引時間のフィルタリング
    if(!IsTradeTime())
       return;
 
-   //--- 日付が変わったらピボット再計算
+   //--- 日付が変わったらピボット再計算とトレードカウントリセット
    MqlDateTime dt;
    TimeToStruct(TimeCurrent(), dt);
-   static int lastDay = -1;
-   if(dt.day != lastDay)
+   datetime today = StringToTime(StringFormat("%04d.%02d.%02d", dt.year, dt.mon, dt.day));
+
+   if(g_LastTradeDate != today)
    {
       CalculateDailyPivot();
-      lastDay = dt.day;
+      g_TodayTradeCount = 0;
+      g_LastTradeDate = today;
    }
 
-   //--- ネックラインの検出と更新
-   DetectNecklines();
+   //--- 1日の最大トレード数チェック
+   if(g_TodayTradeCount >= MaxTradesPerDay)
+      return;
 
-   //--- ブレイクアウトの確認
-   CheckBreakouts();
+   //--- ネックライン戦略
+   if(UseNecklineStrategy)
+   {
+      DetectNecklines();
+      CheckBreakouts();
+      CheckReturnMoveAndEntry();
+   }
 
-   //--- リターンムーブとエントリーシグナルの確認
-   CheckReturnMoveAndEntry();
+   //--- ピボットバウンス戦略
+   if(UsePivotBounce)
+   {
+      CheckPivotBounceEntry();
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -236,7 +243,6 @@ bool CheckRiskLimits()
 {
    double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
 
-   //--- 1日の最大損失率チェック
    double dailyLossPercent = (g_DailyStartEquity - currentEquity) / g_DailyStartEquity * 100.0;
    if(dailyLossPercent >= DailyLossLimit)
    {
@@ -244,7 +250,6 @@ bool CheckRiskLimits()
       return false;
    }
 
-   //--- 全体の最大損失率チェック
    double totalLossPercent = (g_InitialBalance - currentEquity) / g_InitialBalance * 100.0;
    if(totalLossPercent >= TotalLossLimit)
    {
@@ -263,17 +268,15 @@ bool IsTradeTime()
    MqlDateTime dt;
    TimeToStruct(TimeCurrent(), dt);
 
-   //--- 曜日フィルター
-   if(dt.day_of_week == 0)  // 日曜日
+   if(dt.day_of_week == 0)
       return false;
-   if(dt.day_of_week == 6)  // 土曜日
+   if(dt.day_of_week == 6)
       return false;
    if(dt.day_of_week == 1 && !TradeOnMonday)
       return false;
    if(dt.day_of_week == 5 && !TradeOnFriday)
       return false;
 
-   //--- 時間フィルター
    if(dt.hour < TradingStartHour || dt.hour >= TradingEndHour)
       return false;
 
@@ -285,7 +288,6 @@ bool IsTradeTime()
 //+------------------------------------------------------------------+
 void CalculateDailyPivot()
 {
-   //--- 前日のOHLCを取得
    MqlRates dailyRates[];
    ArraySetAsSeries(dailyRates, true);
 
@@ -299,10 +301,8 @@ void CalculateDailyPivot()
    g_PreviousLow = dailyRates[0].low;
    g_PreviousClose = dailyRates[0].close;
 
-   //--- ピボットポイント計算
    g_DailyPivot = (g_PreviousHigh + g_PreviousLow + g_PreviousClose) / 3.0;
 
-   //--- サポート・レジスタンスレベル
    g_DailyR1 = 2.0 * g_DailyPivot - g_PreviousLow;
    g_DailyS1 = 2.0 * g_DailyPivot - g_PreviousHigh;
    g_DailyR2 = g_DailyPivot + (g_PreviousHigh - g_PreviousLow);
@@ -317,6 +317,174 @@ void CalculateDailyPivot()
 }
 
 //+------------------------------------------------------------------+
+//| ピボットバウンスエントリーの確認                                 |
+//+------------------------------------------------------------------+
+void CheckPivotBounceEntry()
+{
+   if(HasOpenPosition())
+      return;
+
+   if(!CheckOpenRisk())
+      return;
+
+   MqlRates rates[];
+   ArraySetAsSeries(rates, true);
+
+   if(CopyRates(_Symbol, TradingTimeframe, 0, 3, rates) < 3)
+      return;
+
+   double tolerance = PivotTolerance * _Point;
+   double close = rates[1].close;
+   double low = rates[1].low;
+   double high = rates[1].high;
+   double prevClose = rates[2].close;
+
+   //--- サポートレベルでの買いシグナル
+   double supportLevels[];
+   int supportCount = 0;
+   ArrayResize(supportLevels, 0);
+
+   if(UseCentralPivot && close > g_DailyPivot)
+   {
+      ArrayResize(supportLevels, supportCount + 1);
+      supportLevels[supportCount++] = g_DailyPivot;
+   }
+   if(UsePivotS1R1)
+   {
+      ArrayResize(supportLevels, supportCount + 1);
+      supportLevels[supportCount++] = g_DailyS1;
+   }
+   if(UsePivotS2R2)
+   {
+      ArrayResize(supportLevels, supportCount + 1);
+      supportLevels[supportCount++] = g_DailyS2;
+   }
+
+   //--- サポートでの反発チェック（買い）
+   for(int i = 0; i < supportCount; i++)
+   {
+      double level = supportLevels[i];
+
+      //--- 価格がサポートにタッチして反発
+      bool touchedSupport = low <= level + tolerance && low >= level - tolerance;
+      bool bouncedUp = close > level && close > rates[1].open;  // 陽線で反発
+
+      if(touchedSupport && bouncedUp)
+      {
+         Print("ピボットサポート反発検出: Level=", DoubleToString(level, _Digits));
+
+         double sl = CalculatePivotSL(rates, true, level);
+         if(sl == 0) continue;
+
+         double tp = CalculateTP(close, sl, true);
+
+         if(ExecuteTrade(ORDER_TYPE_BUY, sl, tp, "Pivot_Bounce_Buy"))
+         {
+            g_TodayTradeCount++;
+            Print("ピボットバウンス買いエントリー: Level=", DoubleToString(level, _Digits));
+            return;
+         }
+      }
+   }
+
+   //--- レジスタンスレベルでの売りシグナル
+   double resistanceLevels[];
+   int resistanceCount = 0;
+   ArrayResize(resistanceLevels, 0);
+
+   if(UseCentralPivot && close < g_DailyPivot)
+   {
+      ArrayResize(resistanceLevels, resistanceCount + 1);
+      resistanceLevels[resistanceCount++] = g_DailyPivot;
+   }
+   if(UsePivotS1R1)
+   {
+      ArrayResize(resistanceLevels, resistanceCount + 1);
+      resistanceLevels[resistanceCount++] = g_DailyR1;
+   }
+   if(UsePivotS2R2)
+   {
+      ArrayResize(resistanceLevels, resistanceCount + 1);
+      resistanceLevels[resistanceCount++] = g_DailyR2;
+   }
+
+   //--- レジスタンスでの反発チェック（売り）
+   for(int i = 0; i < resistanceCount; i++)
+   {
+      double level = resistanceLevels[i];
+
+      bool touchedResistance = high >= level - tolerance && high <= level + tolerance;
+      bool bouncedDown = close < level && close < rates[1].open;  // 陰線で反発
+
+      if(touchedResistance && bouncedDown)
+      {
+         Print("ピボットレジスタンス反発検出: Level=", DoubleToString(level, _Digits));
+
+         double sl = CalculatePivotSL(rates, false, level);
+         if(sl == 0) continue;
+
+         double tp = CalculateTP(close, sl, false);
+
+         if(ExecuteTrade(ORDER_TYPE_SELL, sl, tp, "Pivot_Bounce_Sell"))
+         {
+            g_TodayTradeCount++;
+            Print("ピボットバウンス売りエントリー: Level=", DoubleToString(level, _Digits));
+            return;
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| ピボット用SL計算                                                 |
+//+------------------------------------------------------------------+
+double CalculatePivotSL(MqlRates &rates[], bool isBuy, double pivotLevel)
+{
+   double buffer = SLBufferPoints * _Point;
+   double maxSL = MaxSLPoints * _Point;
+   double entryPrice = rates[1].close;
+
+   if(UseFixedSL)
+   {
+      double fixedSL = FixedSLPoints * _Point;
+      if(isBuy)
+         return entryPrice - fixedSL;
+      else
+         return entryPrice + fixedSL;
+   }
+
+   double sl;
+   double slDistance;
+
+   if(isBuy)
+   {
+      sl = rates[1].low - buffer;
+      slDistance = entryPrice - sl;
+
+      if(slDistance > maxSL)
+      {
+         if(SkipWideStopTrades)
+            return 0;
+         sl = entryPrice - maxSL;
+      }
+   }
+   else
+   {
+      sl = rates[1].high + buffer;
+      slDistance = sl - entryPrice;
+
+      if(slDistance > maxSL)
+      {
+         if(SkipWideStopTrades)
+            return 0;
+         sl = entryPrice + maxSL;
+      }
+   }
+
+   return sl;
+}
+
+//+------------------------------------------------------------------+
 //| ネックラインの検出                                               |
 //+------------------------------------------------------------------+
 void DetectNecklines()
@@ -327,7 +495,6 @@ void DetectNecklines()
    if(CopyRates(_Symbol, TradingTimeframe, 0, LookbackBars, rates) < LookbackBars)
       return;
 
-   //--- スイングハイ・スイングローの検出
    double swingHighs[];
    double swingLows[];
    ArrayResize(swingHighs, 0);
@@ -335,7 +502,6 @@ void DetectNecklines()
 
    for(int i = SwingStrength; i < LookbackBars - SwingStrength; i++)
    {
-      //--- スイングハイの判定
       bool isSwingHigh = true;
       for(int j = 1; j <= SwingStrength; j++)
       {
@@ -352,7 +518,6 @@ void DetectNecklines()
          swingHighs[size] = rates[i].high;
       }
 
-      //--- スイングローの判定
       bool isSwingLow = true;
       for(int j = 1; j <= SwingStrength; j++)
       {
@@ -370,13 +535,11 @@ void DetectNecklines()
       }
    }
 
-   //--- 重要なレベルの特定（複数タッチ）
    ArrayResize(g_Necklines, 0);
    g_NecklineCount = 0;
 
    double tolerance = NecklineTolerance * _Point;
 
-   //--- レジスタンスレベルの検出
    for(int i = 0; i < ArraySize(swingHighs); i++)
    {
       int touches = 1;
@@ -393,7 +556,6 @@ void DetectNecklines()
 
       if(touches >= MinTouches)
       {
-         //--- 既存のネックラインと重複チェック
          bool exists = false;
          for(int k = 0; k < g_NecklineCount; k++)
          {
@@ -417,7 +579,6 @@ void DetectNecklines()
       }
    }
 
-   //--- サポートレベルの検出
    for(int i = 0; i < ArraySize(swingLows); i++)
    {
       int touches = 1;
@@ -479,14 +640,12 @@ void CheckBreakouts()
 
       double necklinePrice = g_Necklines[i].price;
 
-      //--- レジスタンスのブレイクアウト確認（上抜け）
       if(g_Necklines[i].isResistance)
       {
-         //--- 直近バーの実体終値がラインより上で確定
          double body = MathAbs(rates[1].close - rates[1].open);
          bool isBullishBreak = rates[1].close > necklinePrice + tolerance &&
-                               rates[1].close > rates[1].open &&  // 陽線
-                               body >= minBody;                    // 大きな実体
+                               rates[1].close > rates[1].open &&
+                               body >= minBody;
 
          if(isBullishBreak)
          {
@@ -497,13 +656,12 @@ void CheckBreakouts()
             Print("レジスタンスブレイクアウト検出: ", DoubleToString(necklinePrice, _Digits));
          }
       }
-      //--- サポートのブレイクアウト確認（下抜け）
       else
       {
          double body = MathAbs(rates[1].close - rates[1].open);
          bool isBearishBreak = rates[1].close < necklinePrice - tolerance &&
-                               rates[1].close < rates[1].open &&  // 陰線
-                               body >= minBody;                    // 大きな実体
+                               rates[1].close < rates[1].open &&
+                               body >= minBody;
 
          if(isBearishBreak)
          {
@@ -522,11 +680,9 @@ void CheckBreakouts()
 //+------------------------------------------------------------------+
 void CheckReturnMoveAndEntry()
 {
-   //--- 既にポジションがある場合はスキップ
    if(HasOpenPosition())
       return;
 
-   //--- オープンリスクの確認
    if(!CheckOpenRisk())
       return;
 
@@ -543,40 +699,39 @@ void CheckReturnMoveAndEntry()
       if(!g_Necklines[i].isBroken || !g_Necklines[i].waitingRetest)
          continue;
 
-      //--- リターンムーブ待機期間のチェック
       int barsSinceBreak = iBarShift(_Symbol, TradingTimeframe, g_Necklines[i].breakTime);
       if(barsSinceBreak > MaxReturnWaitBars)
       {
-         g_Necklines[i].waitingRetest = false;  // 待機期限切れ
+         g_Necklines[i].waitingRetest = false;
          continue;
       }
 
       double necklinePrice = g_Necklines[i].price;
 
-      //--- 元レジスタンス→サポートへの転換（買いエントリー）
       if(g_Necklines[i].isResistance)
       {
-         //--- 価格がネックラインまで戻ってきたか
          bool isRetesting = rates[1].low <= necklinePrice + returnTol &&
                             rates[1].close >= necklinePrice - returnTol;
 
-         //--- エントリー価格がネックラインに十分近いか確認
          double entryDistance = MathAbs(rates[1].close - necklinePrice);
          double nearNeckline = EntryNearNeckline * _Point;
 
          if(isRetesting && entryDistance <= nearNeckline)
          {
-            //--- プライスアクションシグナルの確認
-            int signal = CheckPriceActionSignal(rates, true);  // 買いシグナル
+            //--- プライスアクション確認（オプション）
+            bool signalOK = true;
+            if(RequirePriceAction)
+            {
+               int signal = CheckPriceActionSignal(rates, true);
+               signalOK = (signal > 0);
+            }
 
-            if(signal > 0)
+            if(signalOK)
             {
                double sl = CalculateSL(rates, true, necklinePrice);
 
-               //--- SL=0はスキップ信号
                if(sl == 0)
                {
-                  Print("SL条件不成立のためエントリースキップ(BUY)");
                   continue;
                }
 
@@ -585,12 +740,12 @@ void CheckReturnMoveAndEntry()
                if(ExecuteTrade(ORDER_TYPE_BUY, sl, tp, "Neckline_RR_Buy"))
                {
                   g_Necklines[i].waitingRetest = false;
+                  g_TodayTradeCount++;
                   Print("ロールリバーサル買いエントリー: Price=", DoubleToString(rates[1].close, _Digits));
                }
             }
          }
       }
-      //--- 元サポート→レジスタンスへの転換（売りエントリー）
       else
       {
          bool isRetesting = rates[1].high >= necklinePrice - returnTol &&
@@ -601,15 +756,19 @@ void CheckReturnMoveAndEntry()
 
          if(isRetesting && entryDistance <= nearNeckline)
          {
-            int signal = CheckPriceActionSignal(rates, false);  // 売りシグナル
+            bool signalOK = true;
+            if(RequirePriceAction)
+            {
+               int signal = CheckPriceActionSignal(rates, false);
+               signalOK = (signal > 0);
+            }
 
-            if(signal > 0)
+            if(signalOK)
             {
                double sl = CalculateSL(rates, false, necklinePrice);
 
                if(sl == 0)
                {
-                  Print("SL条件不成立のためエントリースキップ(SELL)");
                   continue;
                }
 
@@ -618,6 +777,7 @@ void CheckReturnMoveAndEntry()
                if(ExecuteTrade(ORDER_TYPE_SELL, sl, tp, "Neckline_RR_Sell"))
                {
                   g_Necklines[i].waitingRetest = false;
+                  g_TodayTradeCount++;
                   Print("ロールリバーサル売りエントリー: Price=", DoubleToString(rates[1].close, _Digits));
                }
             }
@@ -631,15 +791,12 @@ void CheckReturnMoveAndEntry()
 //+------------------------------------------------------------------+
 int CheckPriceActionSignal(MqlRates &rates[], bool isBuy)
 {
-   //--- ピンバーの確認
    if(IsPinBar(rates, isBuy))
       return 1;
 
-   //--- 包み足の確認
    if(IsEngulfingBar(rates, isBuy))
       return 2;
 
-   //--- ツーバーリバーサルの確認
    if(IsTwoBarReversal(rates, isBuy))
       return 3;
 
@@ -647,7 +804,7 @@ int CheckPriceActionSignal(MqlRates &rates[], bool isBuy)
 }
 
 //+------------------------------------------------------------------+
-//| ピンバーの判定                                                   |
+//| ピンバーの判定（緩和版）                                         |
 //+------------------------------------------------------------------+
 bool IsPinBar(MqlRates &rates[], bool isBuy)
 {
@@ -668,25 +825,21 @@ bool IsPinBar(MqlRates &rates[], bool isBuy)
 
    if(isBuy)
    {
-      //--- 買いピンバー（ハンマー）: 下ヒゲが長い
       double wickRatio = (body > 0) ? lowerWick / body : 0;
       if(lowerWick > upperWick * PinBarWickRatio &&
          bodyRatio <= PinBarBodyMaxRatio &&
          wickRatio >= PinBarWickRatio)
       {
-         Print("買いピンバー検出");
          return true;
       }
    }
    else
    {
-      //--- 売りピンバー（シューティングスター）: 上ヒゲが長い
       double wickRatio = (body > 0) ? upperWick / body : 0;
       if(upperWick > lowerWick * PinBarWickRatio &&
          bodyRatio <= PinBarBodyMaxRatio &&
          wickRatio >= PinBarWickRatio)
       {
-         Print("売りピンバー検出");
          return true;
       }
    }
@@ -695,7 +848,7 @@ bool IsPinBar(MqlRates &rates[], bool isBuy)
 }
 
 //+------------------------------------------------------------------+
-//| 包み足の判定                                                     |
+//| 包み足の判定（緩和版）                                           |
 //+------------------------------------------------------------------+
 bool IsEngulfingBar(MqlRates &rates[], bool isBuy)
 {
@@ -712,7 +865,6 @@ bool IsEngulfingBar(MqlRates &rates[], bool isBuy)
 
    if(isBuy)
    {
-      //--- 買い包み足: 陽線が前の陰線を完全に包む
       bool prevBearish = prevClose < prevOpen;
       bool currBullish = currClose > currOpen;
       bool engulfs = currOpen <= prevClose && currClose >= prevOpen;
@@ -720,13 +872,11 @@ bool IsEngulfingBar(MqlRates &rates[], bool isBuy)
 
       if(prevBearish && currBullish && engulfs && sizeOK)
       {
-         Print("買い包み足検出");
          return true;
       }
    }
    else
    {
-      //--- 売り包み足: 陰線が前の陽線を完全に包む
       bool prevBullish = prevClose > prevOpen;
       bool currBearish = currClose < currOpen;
       bool engulfs = currOpen >= prevClose && currClose <= prevOpen;
@@ -734,7 +884,6 @@ bool IsEngulfingBar(MqlRates &rates[], bool isBuy)
 
       if(prevBullish && currBearish && engulfs && sizeOK)
       {
-         Print("売り包み足検出");
          return true;
       }
    }
@@ -759,23 +908,19 @@ bool IsTwoBarReversal(MqlRates &rates[], bool isBuy)
 
    if(isBuy)
    {
-      //--- 2本合わせて下ヒゲが長い形状
       double combinedLow = MathMin(low1, low2);
       double combinedHigh = MathMax(high1, high2);
-      double combinedBody = MathAbs(close1 - open2);
       double lowerWick = MathMin(open2, close1) - combinedLow;
       double totalRange = combinedHigh - combinedLow;
 
       if(totalRange == 0)
          return false;
 
-      //--- 1本目が陰線、2本目が陽線で反転
       bool pattern = close2 < open2 && close1 > open1 && close1 > open2;
       double wickRatio = lowerWick / totalRange;
 
-      if(pattern && wickRatio >= 0.5)
+      if(pattern && wickRatio >= 0.4)
       {
-         Print("買いツーバーリバーサル検出");
          return true;
       }
    }
@@ -783,20 +928,17 @@ bool IsTwoBarReversal(MqlRates &rates[], bool isBuy)
    {
       double combinedLow = MathMin(low1, low2);
       double combinedHigh = MathMax(high1, high2);
-      double combinedBody = MathAbs(close1 - open2);
       double upperWick = combinedHigh - MathMax(open2, close1);
       double totalRange = combinedHigh - combinedLow;
 
       if(totalRange == 0)
          return false;
 
-      //--- 1本目が陽線、2本目が陰線で反転
       bool pattern = close2 > open2 && close1 < open1 && close1 < open2;
       double wickRatio = upperWick / totalRange;
 
-      if(pattern && wickRatio >= 0.5)
+      if(pattern && wickRatio >= 0.4)
       {
-         Print("売りツーバーリバーサル検出");
          return true;
       }
    }
@@ -805,7 +947,7 @@ bool IsTwoBarReversal(MqlRates &rates[], bool isBuy)
 }
 
 //+------------------------------------------------------------------+
-//| SLの計算（タイトSL重視）                                         |
+//| SLの計算                                                         |
 //+------------------------------------------------------------------+
 double CalculateSL(MqlRates &rates[], bool isBuy, double necklinePrice)
 {
@@ -813,7 +955,6 @@ double CalculateSL(MqlRates &rates[], bool isBuy, double necklinePrice)
    double maxSL = MaxSLPoints * _Point;
    double entryPrice = rates[1].close;
 
-   //--- 固定SLを使用する場合
    if(UseFixedSL)
    {
       double fixedSL = FixedSLPoints * _Point;
@@ -828,25 +969,19 @@ double CalculateSL(MqlRates &rates[], bool isBuy, double necklinePrice)
 
    if(isBuy)
    {
-      //--- シグナル足の安値をSLとする（ネックラインより近い場合）
       double signalLow = rates[1].low;
       sl = signalLow - buffer;
       slDistance = entryPrice - sl;
 
-      //--- SLが広すぎる場合の処理
       if(slDistance > maxSL)
       {
          if(SkipWideStopTrades)
          {
-            Print("SLが広すぎるためスキップ: 計算SL=", DoubleToString(slDistance/_Point, 0),
-                  "pts > MaxSL=", DoubleToString(MaxSLPoints, 0), "pts");
-            return 0;  // 0を返してエントリーをスキップ
+            return 0;
          }
          else
          {
-            //--- 最大SL幅に制限
             sl = entryPrice - maxSL;
-            Print("SLを最大幅に制限: ", DoubleToString(MaxSLPoints, 0), "pts");
          }
       }
    }
@@ -860,14 +995,11 @@ double CalculateSL(MqlRates &rates[], bool isBuy, double necklinePrice)
       {
          if(SkipWideStopTrades)
          {
-            Print("SLが広すぎるためスキップ: 計算SL=", DoubleToString(slDistance/_Point, 0),
-                  "pts > MaxSL=", DoubleToString(MaxSLPoints, 0), "pts");
             return 0;
          }
          else
          {
             sl = entryPrice + maxSL;
-            Print("SLを最大幅に制限: ", DoubleToString(MaxSLPoints, 0), "pts");
          }
       }
    }
@@ -887,77 +1019,13 @@ double CalculateTP(double entryPrice, double sl, bool isBuy)
    if(isBuy)
    {
       tp = entryPrice + tpDistance;
-
-      //--- ピボットを目標として使用
-      if(UsePivotAsTarget)
-      {
-         //--- 次のピボットレベルを探す
-         double nearestPivot = FindNearestPivotLevel(entryPrice, true);
-         if(nearestPivot > entryPrice && nearestPivot < tp)
-         {
-            //--- ピボットがTP以前にある場合、ピボットをTPとして使用
-            tp = nearestPivot;
-         }
-      }
    }
    else
    {
       tp = entryPrice - tpDistance;
-
-      if(UsePivotAsTarget)
-      {
-         double nearestPivot = FindNearestPivotLevel(entryPrice, false);
-         if(nearestPivot < entryPrice && nearestPivot > tp)
-         {
-            tp = nearestPivot;
-         }
-      }
    }
 
    return tp;
-}
-
-//+------------------------------------------------------------------+
-//| 最寄りのピボットレベルを検索                                     |
-//+------------------------------------------------------------------+
-double FindNearestPivotLevel(double price, bool above)
-{
-   double levels[];
-   ArrayResize(levels, 7);
-   levels[0] = g_DailyPivot;
-   levels[1] = g_DailyR1;
-   levels[2] = g_DailyR2;
-   levels[3] = g_DailyR3;
-   levels[4] = g_DailyS1;
-   levels[5] = g_DailyS2;
-   levels[6] = g_DailyS3;
-
-   double nearest = 0;
-   double minDist = DBL_MAX;
-
-   for(int i = 0; i < 7; i++)
-   {
-      if(above && levels[i] > price)
-      {
-         double dist = levels[i] - price;
-         if(dist < minDist)
-         {
-            minDist = dist;
-            nearest = levels[i];
-         }
-      }
-      else if(!above && levels[i] < price)
-      {
-         double dist = price - levels[i];
-         if(dist < minDist)
-         {
-            minDist = dist;
-            nearest = levels[i];
-         }
-      }
-   }
-
-   return nearest;
 }
 
 //+------------------------------------------------------------------+
@@ -985,7 +1053,6 @@ bool CheckOpenRisk()
 
    if(riskPercent >= MaxOpenRisk)
    {
-      Print("オープンリスク制限到達: ", DoubleToString(riskPercent, 2), "%");
       return false;
    }
 
@@ -1003,7 +1070,6 @@ double CalculatePositionRisk(ulong ticket)
    double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
    double sl = PositionGetDouble(POSITION_SL);
    double volume = PositionGetDouble(POSITION_VOLUME);
-   ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
 
    if(sl == 0)
       return 0;
@@ -1033,47 +1099,39 @@ bool HasOpenPosition()
 }
 
 //+------------------------------------------------------------------+
-//| ロットサイズ計算（リスクベース）                                 |
+//| ロットサイズ計算                                                 |
 //+------------------------------------------------------------------+
 double CalculateLotSize(double slPoints)
 {
    double accountBalance = AccountInfoDouble(ACCOUNT_BALANCE);
    double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
 
-   //--- 残りの許容損失を計算
    double remainingDailyLoss = g_DailyStartEquity * (DailyLossLimit / 100.0) - (g_DailyStartEquity - currentEquity);
    double remainingTotalLoss = g_InitialBalance * (TotalLossLimit / 100.0) - (g_InitialBalance - currentEquity);
 
-   //--- より厳しい方を採用
    double maxAllowedLoss = MathMin(remainingDailyLoss, remainingTotalLoss);
 
-   //--- トレードリスク制限を適用
    double tradeRiskAmount = accountBalance * (MaxRiskPerTrade / 100.0);
    maxAllowedLoss = MathMin(maxAllowedLoss, tradeRiskAmount);
 
    if(maxAllowedLoss <= 0)
    {
-      Print("ロット計算エラー: 許容損失が0以下");
       return 0;
    }
 
-   //--- Pip価値とサイズの取得
    double pipValue = GetPipValue();
    double pipSize = GetPipSize();
    double slPips = slPoints / pipSize;
 
-   //--- SL pipsでの損失額（1ロットあたり）
    double lossPerLot = slPips * pipValue;
 
    if(lossPerLot <= 0)
    {
-      Print("ロット計算エラー: lossPerLot=", lossPerLot);
       return 0;
    }
 
    double calculatedLots = maxAllowedLoss / lossPerLot;
 
-   //--- ロットサイズの正規化
    double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
    double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
@@ -1085,10 +1143,6 @@ double CalculateLotSize(double slPoints)
    if(calculatedLots > maxLot)
       calculatedLots = maxLot;
 
-   Print("ロット計算: 許容損失=", DoubleToString(maxAllowedLoss, 0),
-         " SL Points=", DoubleToString(slPoints, 1),
-         " ロット=", DoubleToString(calculatedLots, 2));
-
    return calculatedLots;
 }
 
@@ -1099,7 +1153,7 @@ double GetPipSize()
 {
    if(StringFind(_Symbol, "XAU") >= 0 || StringFind(_Symbol, "GOLD") >= 0)
    {
-      return 0.1;  // 金の場合は0.1ドル = 1 pip
+      return 0.1;
    }
    else if(StringFind(_Symbol, "JPY") >= 0)
    {
@@ -1171,7 +1225,7 @@ double GetUSDJPYRate()
 }
 
 //+------------------------------------------------------------------+
-//| サポートされるフィリングモードを取得                             |
+//| フィリングモード取得                                             |
 //+------------------------------------------------------------------+
 ENUM_ORDER_TYPE_FILLING GetFillingMode()
 {
@@ -1197,7 +1251,6 @@ bool ExecuteTrade(ENUM_ORDER_TYPE orderType, double sl, double tp, string commen
    else
       price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
 
-   //--- SL幅（ポイント）からロット計算
    double slPoints = MathAbs(price - sl) / _Point;
    double lots = CalculateLotSize(slPoints * _Point);
 
@@ -1277,7 +1330,6 @@ void ManageBreakeven()
             if(currentSL < newSL)
             {
                ModifyPosition(ticket, newSL, currentTP);
-               Print("建値決済設定: Ticket=", ticket, " 新SL=", DoubleToString(newSL, _Digits));
             }
          }
       }
@@ -1292,7 +1344,6 @@ void ManageBreakeven()
             if(currentSL > newSL || currentSL == 0)
             {
                ModifyPosition(ticket, newSL, currentTP);
-               Print("建値決済設定: Ticket=", ticket, " 新SL=", DoubleToString(newSL, _Digits));
             }
          }
       }
@@ -1331,27 +1382,20 @@ void ManageTrailingStop()
          currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
          profit = currentPrice - openPrice;
 
-         //--- トレーリング開始条件を満たしているか
          if(profit >= startPoints)
          {
-            //--- 新しいSL = 現在価格 - トレーリング距離
             newSL = currentPrice - distancePoints;
 
-            //--- 現在のSLよりステップ以上高い場合のみ更新
             if(currentSL == 0 || newSL >= currentSL + stepPoints)
             {
-               //--- エントリー価格より上にSLを設定
                if(newSL > openPrice)
                {
                   ModifyPosition(ticket, newSL, currentTP);
-                  Print("トレーリングストップ更新(BUY): Ticket=", ticket,
-                        " 新SL=", DoubleToString(newSL, _Digits),
-                        " 含み益=", DoubleToString(profit / _Point, 0), "pts");
                }
             }
          }
       }
-      else  // SELL
+      else
       {
          currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
          profit = openPrice - currentPrice;
@@ -1365,66 +1409,7 @@ void ManageTrailingStop()
                if(newSL < openPrice)
                {
                   ModifyPosition(ticket, newSL, currentTP);
-                  Print("トレーリングストップ更新(SELL): Ticket=", ticket,
-                        " 新SL=", DoubleToString(newSL, _Digits),
-                        " 含み益=", DoubleToString(profit / _Point, 0), "pts");
                }
-            }
-         }
-      }
-   }
-}
-
-//+------------------------------------------------------------------+
-//| ピボットでの利確確認                                             |
-//+------------------------------------------------------------------+
-void CheckPivotTP()
-{
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      ulong ticket = PositionGetTicket(i);
-      if(ticket <= 0)
-         continue;
-
-      if(PositionGetInteger(POSITION_MAGIC) != MagicNumber)
-         continue;
-
-      double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
-      ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
-
-      double currentPrice;
-      double tolerance = 10 * _Point;  // ピボット到達判定の許容誤差
-
-      if(posType == POSITION_TYPE_BUY)
-      {
-         currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-
-         //--- 価格がピボットレベルに到達したか確認
-         if((currentPrice >= g_DailyPivot - tolerance && openPrice < g_DailyPivot) ||
-            (currentPrice >= g_DailyR1 - tolerance && openPrice < g_DailyR1) ||
-            (currentPrice >= g_DailyR2 - tolerance && openPrice < g_DailyR2))
-         {
-            double profit = PositionGetDouble(POSITION_PROFIT);
-            if(profit > 0)
-            {
-               ClosePosition(ticket);
-               Print("ピボット到達決済(BUY): Ticket=", ticket);
-            }
-         }
-      }
-      else
-      {
-         currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-
-         if((currentPrice <= g_DailyPivot + tolerance && openPrice > g_DailyPivot) ||
-            (currentPrice <= g_DailyS1 + tolerance && openPrice > g_DailyS1) ||
-            (currentPrice <= g_DailyS2 + tolerance && openPrice > g_DailyS2))
-         {
-            double profit = PositionGetDouble(POSITION_PROFIT);
-            if(profit > 0)
-            {
-               ClosePosition(ticket);
-               Print("ピボット到達決済(SELL): Ticket=", ticket);
             }
          }
       }
@@ -1463,7 +1448,6 @@ bool ModifyPosition(ulong ticket, double sl, double tp)
 
    if(!OrderSend(request, result))
    {
-      Print("ポジション修正エラー: ", result.retcode);
       return false;
    }
 
@@ -1505,7 +1489,6 @@ bool ClosePosition(ulong ticket)
 
    if(!OrderSend(request, result))
    {
-      Print("決済エラー: Ticket=", ticket, " Error=", result.retcode);
       return false;
    }
 
@@ -1560,7 +1543,6 @@ void CloseWorstPosition()
 
    if(worstTicket > 0)
    {
-      Print("最大損失ポジション決済: Ticket=", worstTicket, " Loss=", DoubleToString(worstProfit, 2));
       ClosePosition(worstTicket);
    }
 }
@@ -1574,25 +1556,22 @@ string GetRetcodeDescription(uint retcode)
    {
       case TRADE_RETCODE_REQUOTE:           return "Requote";
       case TRADE_RETCODE_REJECT:            return "Request rejected";
-      case TRADE_RETCODE_CANCEL:            return "Request canceled by trader";
+      case TRADE_RETCODE_CANCEL:            return "Request canceled";
       case TRADE_RETCODE_PLACED:            return "Order placed";
       case TRADE_RETCODE_DONE:              return "Request completed";
-      case TRADE_RETCODE_DONE_PARTIAL:      return "Only part of the request was completed";
-      case TRADE_RETCODE_ERROR:             return "Request processing error";
-      case TRADE_RETCODE_TIMEOUT:           return "Request canceled by timeout";
+      case TRADE_RETCODE_DONE_PARTIAL:      return "Partial completion";
+      case TRADE_RETCODE_ERROR:             return "Error";
+      case TRADE_RETCODE_TIMEOUT:           return "Timeout";
       case TRADE_RETCODE_INVALID:           return "Invalid request";
-      case TRADE_RETCODE_INVALID_VOLUME:    return "Invalid volume in the request";
-      case TRADE_RETCODE_INVALID_PRICE:     return "Invalid price in the request";
-      case TRADE_RETCODE_INVALID_STOPS:     return "Invalid stops in the request";
-      case TRADE_RETCODE_TRADE_DISABLED:    return "Trade is disabled";
-      case TRADE_RETCODE_MARKET_CLOSED:     return "Market is closed";
-      case TRADE_RETCODE_NO_MONEY:          return "There is not enough money to complete the request";
-      case TRADE_RETCODE_PRICE_CHANGED:     return "Prices changed";
-      case TRADE_RETCODE_PRICE_OFF:         return "There are no quotes to process the request";
-      case TRADE_RETCODE_INVALID_EXPIRATION: return "Invalid order expiration date in the request";
-      case TRADE_RETCODE_ORDER_CHANGED:     return "Order state changed";
-      case TRADE_RETCODE_TOO_MANY_REQUESTS: return "Too frequent requests";
-      default:                              return "Unknown error";
+      case TRADE_RETCODE_INVALID_VOLUME:    return "Invalid volume";
+      case TRADE_RETCODE_INVALID_PRICE:     return "Invalid price";
+      case TRADE_RETCODE_INVALID_STOPS:     return "Invalid stops";
+      case TRADE_RETCODE_TRADE_DISABLED:    return "Trade disabled";
+      case TRADE_RETCODE_MARKET_CLOSED:     return "Market closed";
+      case TRADE_RETCODE_NO_MONEY:          return "No money";
+      case TRADE_RETCODE_PRICE_CHANGED:     return "Price changed";
+      case TRADE_RETCODE_PRICE_OFF:         return "No quotes";
+      default:                              return "Unknown";
    }
 }
 //+------------------------------------------------------------------+
