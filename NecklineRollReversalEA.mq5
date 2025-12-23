@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Neckline Roll Reversal EA"
 #property link      ""
-#property version   "1.01"
+#property version   "1.02"
 #property strict
 
 //+------------------------------------------------------------------+
@@ -15,7 +15,7 @@ input group "===== 基本設定 ====="
 input double   InitialBalance       = 0;         // 初期資金（0=自動検出）
 input double   DailyLossLimit       = 4.9;       // 1日の最大損失率(%) ※5%未満に設定
 input double   TotalLossLimit       = 9.9;       // 全体の最大損失率(%) ※10%未満に設定
-input double   MaxRiskPerTrade      = 3.0;       // 1トレードあたりの最大リスク(%)
+input double   MaxRiskPerTrade      = 2.0;       // 1トレードあたりの最大リスク(%) ※タイトSLで高ロット
 input double   MaxOpenRisk          = 3.0;       // 同時オープンポジションの最大リスク(%)
 input int      MagicNumber          = 20251222;  // マジックナンバー
 
@@ -40,7 +40,10 @@ input group "===== リスク管理設定 ====="
 input double   RiskRewardRatio      = 2.0;       // リスク・リワード比率（1:X）
 input double   SLBufferPoints       = 15;        // SLバッファ（ポイント）
 input bool     UseFixedSL           = false;     // 固定SLを使用
-input double   FixedSLPoints        = 500;       // 固定SL幅（ポイント）
+input double   FixedSLPoints        = 200;       // 固定SL幅（ポイント）
+input double   MaxSLPoints          = 200;       // 最大SL幅（ポイント）※超えたらエントリー見送り
+input bool     SkipWideStopTrades   = true;      // SLが広すぎるトレードをスキップ
+input double   EntryNearNeckline    = 50;        // ネックライン近接エントリー許容範囲（ポイント）
 
 input group "===== デイリーピボット設定 ====="
 input bool     UsePivotTP           = false;     // ピボットでの利確を使用
@@ -557,7 +560,11 @@ void CheckReturnMoveAndEntry()
          bool isRetesting = rates[1].low <= necklinePrice + returnTol &&
                             rates[1].close >= necklinePrice - returnTol;
 
-         if(isRetesting)
+         //--- エントリー価格がネックラインに十分近いか確認
+         double entryDistance = MathAbs(rates[1].close - necklinePrice);
+         double nearNeckline = EntryNearNeckline * _Point;
+
+         if(isRetesting && entryDistance <= nearNeckline)
          {
             //--- プライスアクションシグナルの確認
             int signal = CheckPriceActionSignal(rates, true);  // 買いシグナル
@@ -565,6 +572,14 @@ void CheckReturnMoveAndEntry()
             if(signal > 0)
             {
                double sl = CalculateSL(rates, true, necklinePrice);
+
+               //--- SL=0はスキップ信号
+               if(sl == 0)
+               {
+                  Print("SL条件不成立のためエントリースキップ(BUY)");
+                  continue;
+               }
+
                double tp = CalculateTP(rates[1].close, sl, true);
 
                if(ExecuteTrade(ORDER_TYPE_BUY, sl, tp, "Neckline_RR_Buy"))
@@ -581,13 +596,23 @@ void CheckReturnMoveAndEntry()
          bool isRetesting = rates[1].high >= necklinePrice - returnTol &&
                             rates[1].close <= necklinePrice + returnTol;
 
-         if(isRetesting)
+         double entryDistance = MathAbs(rates[1].close - necklinePrice);
+         double nearNeckline = EntryNearNeckline * _Point;
+
+         if(isRetesting && entryDistance <= nearNeckline)
          {
             int signal = CheckPriceActionSignal(rates, false);  // 売りシグナル
 
             if(signal > 0)
             {
                double sl = CalculateSL(rates, false, necklinePrice);
+
+               if(sl == 0)
+               {
+                  Print("SL条件不成立のためエントリースキップ(SELL)");
+                  continue;
+               }
+
                double tp = CalculateTP(rates[1].close, sl, false);
 
                if(ExecuteTrade(ORDER_TYPE_SELL, sl, tp, "Neckline_RR_Sell"))
@@ -780,35 +805,74 @@ bool IsTwoBarReversal(MqlRates &rates[], bool isBuy)
 }
 
 //+------------------------------------------------------------------+
-//| SLの計算                                                         |
+//| SLの計算（タイトSL重視）                                         |
 //+------------------------------------------------------------------+
 double CalculateSL(MqlRates &rates[], bool isBuy, double necklinePrice)
 {
    double buffer = SLBufferPoints * _Point;
+   double maxSL = MaxSLPoints * _Point;
+   double entryPrice = rates[1].close;
 
+   //--- 固定SLを使用する場合
    if(UseFixedSL)
    {
       double fixedSL = FixedSLPoints * _Point;
       if(isBuy)
-         return rates[1].close - fixedSL;
+         return entryPrice - fixedSL;
       else
-         return rates[1].close + fixedSL;
+         return entryPrice + fixedSL;
    }
+
+   double sl;
+   double slDistance;
 
    if(isBuy)
    {
-      //--- シグナル足の安値またはネックラインの下
+      //--- シグナル足の安値をSLとする（ネックラインより近い場合）
       double signalLow = rates[1].low;
-      double sl = MathMin(signalLow, necklinePrice) - buffer;
-      return sl;
+      sl = signalLow - buffer;
+      slDistance = entryPrice - sl;
+
+      //--- SLが広すぎる場合の処理
+      if(slDistance > maxSL)
+      {
+         if(SkipWideStopTrades)
+         {
+            Print("SLが広すぎるためスキップ: 計算SL=", DoubleToString(slDistance/_Point, 0),
+                  "pts > MaxSL=", DoubleToString(MaxSLPoints, 0), "pts");
+            return 0;  // 0を返してエントリーをスキップ
+         }
+         else
+         {
+            //--- 最大SL幅に制限
+            sl = entryPrice - maxSL;
+            Print("SLを最大幅に制限: ", DoubleToString(MaxSLPoints, 0), "pts");
+         }
+      }
    }
    else
    {
-      //--- シグナル足の高値またはネックラインの上
       double signalHigh = rates[1].high;
-      double sl = MathMax(signalHigh, necklinePrice) + buffer;
-      return sl;
+      sl = signalHigh + buffer;
+      slDistance = sl - entryPrice;
+
+      if(slDistance > maxSL)
+      {
+         if(SkipWideStopTrades)
+         {
+            Print("SLが広すぎるためスキップ: 計算SL=", DoubleToString(slDistance/_Point, 0),
+                  "pts > MaxSL=", DoubleToString(MaxSLPoints, 0), "pts");
+            return 0;
+         }
+         else
+         {
+            sl = entryPrice + maxSL;
+            Print("SLを最大幅に制限: ", DoubleToString(MaxSLPoints, 0), "pts");
+         }
+      }
    }
+
+   return sl;
 }
 
 //+------------------------------------------------------------------+
