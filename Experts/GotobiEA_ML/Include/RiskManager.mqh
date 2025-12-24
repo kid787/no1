@@ -574,9 +574,12 @@ double CRiskManager::CalculateHistoricalVaR(double confidenceLevel)
    int index = (int)MathFloor((1.0 - confidenceLevel) * m_priceChangeCount);
    index = MathMax(0, MathMin(index, m_priceChangeCount - 1));
 
+   // 結果を保存してから配列を解放
+   double result = MathAbs(sortedChanges[index]);
+
    ArrayFree(sortedChanges);
 
-   return MathAbs(sortedChanges[index]);
+   return result;
 }
 
 //+------------------------------------------------------------------+
