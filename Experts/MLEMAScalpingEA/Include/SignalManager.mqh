@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                               SignalManager.mqh |
 //|                          ML EMA Scalping EA - Signal Module      |
-//|                         v3.0 - H1 Range Breakout + EMA Strategy  |
+//|                         v3.1 - M1 Range Breakout + EMA Strategy  |
 //+------------------------------------------------------------------+
 #property copyright "ML EMA Scalping EA"
 #property strict
@@ -30,7 +30,7 @@ enum ENUM_TRADING_SESSION
 
 //+------------------------------------------------------------------+
 //| Signal Manager Class                                              |
-//| Handles SMA/EMA + H1 Range Breakout strategy                     |
+//| Handles SMA/EMA + M1 Range Breakout strategy                     |
 //+------------------------------------------------------------------+
 class CSignalManager
 {
@@ -43,7 +43,6 @@ private:
    int               m_handleEMA20;
    int               m_handleATR;
    int               m_handleADX;
-   int               m_handleATR_H1;     // H1 ATR for range calculation
 
    // Indicator buffers
    double            m_sma900Buffer[];
@@ -52,7 +51,6 @@ private:
    double            m_adxBuffer[];
    double            m_plusDIBuffer[];
    double            m_minusDIBuffer[];
-   double            m_atrH1Buffer[];
 
    // Settings
    int               m_smaPeriod;
@@ -62,12 +60,12 @@ private:
    double            m_minADX;
    double            m_minATRMultiple;
 
-   // H1 Range Breakout settings
-   bool              m_useH1Breakout;
-   int               m_h1RangeBars;      // Number of H1 bars for range
-   double            m_breakoutBuffer;   // Buffer in pips for breakout confirmation
-   double            m_h1RangeHigh;      // Current H1 range high
-   double            m_h1RangeLow;       // Current H1 range low
+   // M1 Range Breakout settings (changed from H1)
+   bool              m_useRangeBreakout;
+   int               m_rangeBars;          // Number of M1 bars for range
+   double            m_breakoutBuffer;     // Buffer in pips for breakout confirmation
+   double            m_rangeHigh;          // Current range high
+   double            m_rangeLow;           // Current range low
    datetime          m_lastRangeCalcTime;
 
    // State tracking
@@ -100,14 +98,13 @@ public:
       m_handleEMA20 = INVALID_HANDLE;
       m_handleATR = INVALID_HANDLE;
       m_handleADX = INVALID_HANDLE;
-      m_handleATR_H1 = INVALID_HANDLE;
 
-      // H1 Breakout defaults
-      m_useH1Breakout = true;
-      m_h1RangeBars = 4;         // Look at last 4 H1 bars (4 hours)
-      m_breakoutBuffer = 5.0;    // 5 pips buffer
-      m_h1RangeHigh = 0;
-      m_h1RangeLow = 0;
+      // M1 Range Breakout defaults (30 bars = 30 minutes on M1)
+      m_useRangeBreakout = true;
+      m_rangeBars = 30;           // Look at last 30 M1 bars (30 minutes)
+      m_breakoutBuffer = 2.0;     // 2 pips buffer (smaller for M1)
+      m_rangeHigh = 0;
+      m_rangeLow = 0;
       m_lastRangeCalcTime = 0;
 
       // Session filter defaults
@@ -142,20 +139,17 @@ public:
       ArraySetAsSeries(m_adxBuffer, true);
       ArraySetAsSeries(m_plusDIBuffer, true);
       ArraySetAsSeries(m_minusDIBuffer, true);
-      ArraySetAsSeries(m_atrH1Buffer, true);
 
       // Create indicator handles
       m_handleSMA900 = iMA(m_symbol, m_timeframe, m_smaPeriod, 0, MODE_SMA, PRICE_CLOSE);
       m_handleEMA20 = iMA(m_symbol, m_timeframe, m_emaPeriod, 0, MODE_EMA, PRICE_CLOSE);
       m_handleATR = iATR(m_symbol, m_timeframe, m_atrPeriod);
       m_handleADX = iADX(m_symbol, m_timeframe, m_adxPeriod);
-      m_handleATR_H1 = iATR(m_symbol, PERIOD_H1, m_atrPeriod);
 
       if(m_handleSMA900 == INVALID_HANDLE ||
          m_handleEMA20 == INVALID_HANDLE ||
          m_handleATR == INVALID_HANDLE ||
-         m_handleADX == INVALID_HANDLE ||
-         m_handleATR_H1 == INVALID_HANDLE)
+         m_handleADX == INVALID_HANDLE)
       {
          Print("Error creating indicator handles: ", GetLastError());
          return false;
@@ -174,7 +168,6 @@ public:
       if(m_handleEMA20 != INVALID_HANDLE) { IndicatorRelease(m_handleEMA20); m_handleEMA20 = INVALID_HANDLE; }
       if(m_handleATR != INVALID_HANDLE) { IndicatorRelease(m_handleATR); m_handleATR = INVALID_HANDLE; }
       if(m_handleADX != INVALID_HANDLE) { IndicatorRelease(m_handleADX); m_handleADX = INVALID_HANDLE; }
-      if(m_handleATR_H1 != INVALID_HANDLE) { IndicatorRelease(m_handleATR_H1); m_handleATR_H1 = INVALID_HANDLE; }
       m_isInitialized = false;
    }
 
@@ -191,77 +184,76 @@ public:
       if(CopyBuffer(m_handleADX, 0, 0, 3, m_adxBuffer) < 3) return false;
       if(CopyBuffer(m_handleADX, 1, 0, 3, m_plusDIBuffer) < 3) return false;
       if(CopyBuffer(m_handleADX, 2, 0, 3, m_minusDIBuffer) < 3) return false;
-      if(CopyBuffer(m_handleATR_H1, 0, 0, 3, m_atrH1Buffer) < 3) return false;
 
-      // Update H1 range
-      UpdateH1Range();
+      // Update M1 range
+      UpdateM1Range();
 
       return true;
    }
 
    //+------------------------------------------------------------------+
-   //| Calculate H1 Range (High/Low of last N H1 bars)                  |
+   //| Calculate M1 Range (High/Low of last N M1 bars)                  |
    //+------------------------------------------------------------------+
-   void UpdateH1Range()
+   void UpdateM1Range()
    {
-      datetime currentH1Bar = iTime(m_symbol, PERIOD_H1, 0);
+      datetime currentM1Bar = iTime(m_symbol, PERIOD_M1, 0);
 
-      // Only recalculate on new H1 bar
-      if(currentH1Bar == m_lastRangeCalcTime) return;
+      // Recalculate on every new M1 bar for more responsive range
+      if(currentM1Bar == m_lastRangeCalcTime) return;
 
-      m_lastRangeCalcTime = currentH1Bar;
+      m_lastRangeCalcTime = currentM1Bar;
 
       // Get high/low of the range (excluding current bar)
       double highs[], lows[];
       ArraySetAsSeries(highs, true);
       ArraySetAsSeries(lows, true);
 
-      if(CopyHigh(m_symbol, PERIOD_H1, 1, m_h1RangeBars, highs) < m_h1RangeBars) return;
-      if(CopyLow(m_symbol, PERIOD_H1, 1, m_h1RangeBars, lows) < m_h1RangeBars) return;
+      if(CopyHigh(m_symbol, PERIOD_M1, 1, m_rangeBars, highs) < m_rangeBars) return;
+      if(CopyLow(m_symbol, PERIOD_M1, 1, m_rangeBars, lows) < m_rangeBars) return;
 
       // Find highest high and lowest low
-      m_h1RangeHigh = highs[0];
-      m_h1RangeLow = lows[0];
+      m_rangeHigh = highs[0];
+      m_rangeLow = lows[0];
 
-      for(int i = 1; i < m_h1RangeBars; i++)
+      for(int i = 1; i < m_rangeBars; i++)
       {
-         if(highs[i] > m_h1RangeHigh) m_h1RangeHigh = highs[i];
-         if(lows[i] < m_h1RangeLow) m_h1RangeLow = lows[i];
+         if(highs[i] > m_rangeHigh) m_rangeHigh = highs[i];
+         if(lows[i] < m_rangeLow) m_rangeLow = lows[i];
       }
    }
 
    //+------------------------------------------------------------------+
-   //| Check for H1 Range Breakout UP                                   |
+   //| Check for M1 Range Breakout UP                                   |
    //+------------------------------------------------------------------+
-   bool CheckH1BreakoutUp()
+   bool CheckRangeBreakoutUp()
    {
-      if(!m_useH1Breakout) return true;  // If disabled, don't filter
+      if(!m_useRangeBreakout) return true;  // If disabled, don't filter
 
-      if(m_h1RangeHigh == 0) return false;
+      if(m_rangeHigh == 0) return false;
 
       double currentPrice = SymbolInfoDouble(m_symbol, SYMBOL_BID);
       double pipSize = GetPipSize();
       double buffer = m_breakoutBuffer * pipSize;
 
       // Price must be above range high + buffer
-      return currentPrice > (m_h1RangeHigh + buffer);
+      return currentPrice > (m_rangeHigh + buffer);
    }
 
    //+------------------------------------------------------------------+
-   //| Check for H1 Range Breakout DOWN                                 |
+   //| Check for M1 Range Breakout DOWN                                 |
    //+------------------------------------------------------------------+
-   bool CheckH1BreakoutDown()
+   bool CheckRangeBreakoutDown()
    {
-      if(!m_useH1Breakout) return true;
+      if(!m_useRangeBreakout) return true;
 
-      if(m_h1RangeLow == 0) return false;
+      if(m_rangeLow == 0) return false;
 
       double currentPrice = SymbolInfoDouble(m_symbol, SYMBOL_BID);
       double pipSize = GetPipSize();
       double buffer = m_breakoutBuffer * pipSize;
 
       // Price must be below range low - buffer
-      return currentPrice < (m_h1RangeLow - buffer);
+      return currentPrice < (m_rangeLow - buffer);
    }
 
    //+------------------------------------------------------------------+
@@ -317,9 +309,14 @@ public:
    double GetEMA20(int shift = 0) { return (shift < ArraySize(m_ema20Buffer)) ? m_ema20Buffer[shift] : 0; }
    double GetATR(int shift = 0) { return (shift < ArraySize(m_atrBuffer)) ? m_atrBuffer[shift] : 0; }
    double GetADX(int shift = 0) { return (shift < ArraySize(m_adxBuffer)) ? m_adxBuffer[shift] : 0; }
-   double GetH1RangeHigh() { return m_h1RangeHigh; }
-   double GetH1RangeLow() { return m_h1RangeLow; }
-   double GetH1RangeSize() { return (m_h1RangeHigh - m_h1RangeLow) / GetPipSize(); }
+   double GetRangeHigh() { return m_rangeHigh; }
+   double GetRangeLow() { return m_rangeLow; }
+   double GetRangeSize() { return (m_rangeHigh - m_rangeLow) / GetPipSize(); }
+
+   // Legacy accessors for compatibility
+   double GetH1RangeHigh() { return m_rangeHigh; }
+   double GetH1RangeLow() { return m_rangeLow; }
+   double GetH1RangeSize() { return GetRangeSize(); }
 
    //+------------------------------------------------------------------+
    //| Check ADX strength                                                |
@@ -432,7 +429,7 @@ public:
 
    //+------------------------------------------------------------------+
    //| Generate trading signal                                          |
-   //| v3.0: EMA Breakout + H1 Range Breakout confirmation              |
+   //| v3.1: EMA Breakout + M1 Range Breakout confirmation              |
    //+------------------------------------------------------------------+
    ENUM_SIGNAL_TYPE GetSignal()
    {
@@ -448,10 +445,10 @@ public:
       // 1. SMA900 up trend + Price above SMA
       // 2. EMA20 up trend + EMA breakout
       // 3. ADX strong + DI bullish
-      // 4. H1 Range breakout UP
+      // 4. M1 Range breakout UP
 
       if(IsSMAUpTrend() && IsPriceAboveSMA() && IsEMAUpTrend() &&
-         IsDIBullish() && CheckEMABreakoutUp() && CheckH1BreakoutUp())
+         IsDIBullish() && CheckEMABreakoutUp() && CheckRangeBreakoutUp())
       {
          return SIGNAL_BUY;
       }
@@ -460,10 +457,10 @@ public:
       // 1. SMA900 down trend + Price below SMA
       // 2. EMA20 down trend + EMA breakout
       // 3. ADX strong + DI bearish
-      // 4. H1 Range breakout DOWN
+      // 4. M1 Range breakout DOWN
 
       if(IsSMADownTrend() && IsPriceBelowSMA() && IsEMADownTrend() &&
-         IsDIBearish() && CheckEMABreakoutDown() && CheckH1BreakoutDown())
+         IsDIBearish() && CheckEMABreakoutDown() && CheckRangeBreakoutDown())
       {
          return SIGNAL_SELL;
       }
@@ -502,7 +499,7 @@ public:
    }
 
    //+------------------------------------------------------------------+
-   //| Calculate dynamic SL based on ATR and H1 range                   |
+   //| Calculate dynamic SL based on ATR and M1 range                   |
    //+------------------------------------------------------------------+
    double CalculateDynamicSL(ENUM_SIGNAL_TYPE signalType, double atrMultiplier = 1.5)
    {
@@ -522,18 +519,18 @@ public:
       double minSL = spread * 3;
       if(slDistance < minSL) slDistance = minSL;
 
-      // For H1 breakout: SL can be at breakout level
-      if(m_useH1Breakout)
+      // For M1 breakout: SL can be at breakout level
+      if(m_useRangeBreakout)
       {
-         if(signalType == SIGNAL_BUY && m_h1RangeHigh > 0)
+         if(signalType == SIGNAL_BUY && m_rangeHigh > 0)
          {
-            double rangeBasedSL = currentPrice - m_h1RangeHigh;
+            double rangeBasedSL = currentPrice - m_rangeHigh;
             if(rangeBasedSL > 0 && rangeBasedSL < slDistance)
                slDistance = rangeBasedSL + (atr * 0.3);  // Add small buffer
          }
-         else if(signalType == SIGNAL_SELL && m_h1RangeLow > 0)
+         else if(signalType == SIGNAL_SELL && m_rangeLow > 0)
          {
-            double rangeBasedSL = m_h1RangeLow - currentPrice;
+            double rangeBasedSL = m_rangeLow - currentPrice;
             if(rangeBasedSL > 0 && rangeBasedSL < slDistance)
                slDistance = rangeBasedSL + (atr * 0.3);
          }
@@ -585,11 +582,18 @@ public:
       m_allowNewYork = allowNY;
    }
 
+   // New method name for M1 range
+   void SetRangeBreakoutParams(bool useBreakout, int rangeBars, double bufferPips)
+   {
+      m_useRangeBreakout = useBreakout;
+      m_rangeBars = rangeBars;
+      m_breakoutBuffer = bufferPips;
+   }
+
+   // Legacy method for compatibility
    void SetH1BreakoutParams(bool useBreakout, int rangeBars, double bufferPips)
    {
-      m_useH1Breakout = useBreakout;
-      m_h1RangeBars = rangeBars;
-      m_breakoutBuffer = bufferPips;
+      SetRangeBreakoutParams(useBreakout, rangeBars, bufferPips);
    }
 
    //+------------------------------------------------------------------+
@@ -598,5 +602,6 @@ public:
    string GetSymbol() { return m_symbol; }
    ENUM_TIMEFRAMES GetTimeframe() { return m_timeframe; }
    bool IsInitialized() { return m_isInitialized; }
-   bool IsH1BreakoutEnabled() { return m_useH1Breakout; }
+   bool IsRangeBreakoutEnabled() { return m_useRangeBreakout; }
+   bool IsH1BreakoutEnabled() { return m_useRangeBreakout; }  // Legacy
 };
