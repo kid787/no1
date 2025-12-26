@@ -1,9 +1,9 @@
 //+------------------------------------------------------------------+
 //|                                               SignalManager.mqh |
-//|                          ML EMA Scalping EA - Signal Module      |
-//|                         v4.0 - Session Breakout Strategy         |
+//|                          Session Breakout EA - Signal Module     |
+//|                         v4.1 - GMT Offset Support                |
 //+------------------------------------------------------------------+
-#property copyright "ML EMA Scalping EA"
+#property copyright "Session Breakout EA"
 #property strict
 
 //+------------------------------------------------------------------+
@@ -18,9 +18,9 @@ enum ENUM_SIGNAL_TYPE
 
 //+------------------------------------------------------------------+
 //| Signal Manager Class                                              |
-//| Session Breakout Strategy                                         |
-//| - Calculates Asian session range                                  |
-//| - Trades breakout at London open                                  |
+//| Session Breakout Strategy with GMT Offset Support                |
+//| - Session times are defined in GMT                               |
+//| - Automatically converts to server time using GMT offset         |
 //+------------------------------------------------------------------+
 class CSignalManager
 {
@@ -37,11 +37,15 @@ private:
    // Settings
    int               m_atrPeriod;
 
-   // Session times (server time hours)
-   int               m_asianStartHour;    // Asian session start (default 0 = 00:00)
-   int               m_asianEndHour;      // Asian session end (default 7 = 07:00)
-   int               m_londonStartHour;   // London trading window start (default 7)
-   int               m_londonEndHour;     // London trading window end (default 16)
+   // GMT Offset (broker server time - GMT)
+   // Example: Titan FX GMT+2 winter = 2, GMT+3 summer = 3
+   int               m_gmtOffset;
+
+   // Session times in GMT (world standard times)
+   int               m_asianStartGMT;     // Asian session start in GMT (default 0 = 00:00 GMT = Tokyo 9:00)
+   int               m_asianEndGMT;       // Asian session end in GMT (default 7 = 07:00 GMT)
+   int               m_londonStartGMT;    // London trading start in GMT (default 7 = 07:00 GMT)
+   int               m_londonEndGMT;      // London trading end in GMT (default 16 = 16:00 GMT)
 
    // Breakout settings
    double            m_breakoutBuffer;    // Buffer in pips for breakout confirmation
@@ -63,6 +67,25 @@ private:
    // State
    bool              m_isInitialized;
 
+   //+------------------------------------------------------------------+
+   //| Convert GMT hour to Server hour                                   |
+   //+------------------------------------------------------------------+
+   int GMTToServerHour(int gmtHour)
+   {
+      int serverHour = gmtHour + m_gmtOffset;
+      if(serverHour >= 24) serverHour -= 24;
+      if(serverHour < 0) serverHour += 24;
+      return serverHour;
+   }
+
+   //+------------------------------------------------------------------+
+   //| Get server time Asian session start hour                         |
+   //+------------------------------------------------------------------+
+   int GetServerAsianStart() { return GMTToServerHour(m_asianStartGMT); }
+   int GetServerAsianEnd() { return GMTToServerHour(m_asianEndGMT); }
+   int GetServerLondonStart() { return GMTToServerHour(m_londonStartGMT); }
+   int GetServerLondonEnd() { return GMTToServerHour(m_londonEndGMT); }
+
 public:
    // Constructor
    CSignalManager()
@@ -72,16 +95,21 @@ public:
       m_atrPeriod = 14;
       m_handleATR = INVALID_HANDLE;
 
-      // Default session times (UTC/Server time)
-      m_asianStartHour = 0;    // 00:00
-      m_asianEndHour = 7;      // 07:00
-      m_londonStartHour = 7;   // 07:00
-      m_londonEndHour = 16;    // 16:00
+      // Default GMT offset for Titan FX (GMT+2 winter time)
+      m_gmtOffset = 2;
+
+      // Default session times in GMT
+      // Tokyo opens at 00:00 GMT (9:00 JST)
+      // London opens at 08:00 GMT (winter) / 07:00 GMT (summer)
+      m_asianStartGMT = 0;     // 00:00 GMT = Tokyo 9:00
+      m_asianEndGMT = 7;       // 07:00 GMT = Before London open
+      m_londonStartGMT = 7;    // 07:00 GMT = London open area
+      m_londonEndGMT = 16;     // 16:00 GMT = London afternoon
 
       // Breakout settings
       m_breakoutBuffer = 5.0;   // 5 pips buffer
       m_minRangeSize = 15.0;    // Min 15 pips range
-      m_maxRangeSize = 80.0;    // Max 80 pips range (avoid news days)
+      m_maxRangeSize = 80.0;    // Max 80 pips range
 
       // Range tracking
       m_asianHigh = 0;
@@ -140,14 +168,35 @@ public:
    }
 
    //+------------------------------------------------------------------+
-   //| Set session times                                                 |
+   //| Set GMT Offset                                                    |
+   //| Example: Titan FX winter = 2, summer = 3                         |
+   //+------------------------------------------------------------------+
+   void SetGMTOffset(int offset)
+   {
+      m_gmtOffset = offset;
+      Print("GMT Offset set to: ", m_gmtOffset);
+      Print("Server times - Asian: ", GetServerAsianStart(), ":00-", GetServerAsianEnd(), ":00");
+      Print("Server times - London: ", GetServerLondonStart(), ":00-", GetServerLondonEnd(), ":00");
+   }
+
+   //+------------------------------------------------------------------+
+   //| Set session times in GMT                                          |
+   //+------------------------------------------------------------------+
+   void SetSessionTimesGMT(int asianStartGMT, int asianEndGMT, int londonStartGMT, int londonEndGMT)
+   {
+      m_asianStartGMT = asianStartGMT;
+      m_asianEndGMT = asianEndGMT;
+      m_londonStartGMT = londonStartGMT;
+      m_londonEndGMT = londonEndGMT;
+   }
+
+   //+------------------------------------------------------------------+
+   //| Set session times (legacy - assumes server time input)           |
    //+------------------------------------------------------------------+
    void SetSessionTimes(int asianStart, int asianEnd, int londonStart, int londonEnd)
    {
-      m_asianStartHour = asianStart;
-      m_asianEndHour = asianEnd;
-      m_londonStartHour = londonStart;
-      m_londonEndHour = londonEnd;
+      // For backwards compatibility, if using this method, assume GMT times
+      SetSessionTimesGMT(asianStart, asianEnd, londonStart, londonEnd);
    }
 
    //+------------------------------------------------------------------+
@@ -199,12 +248,25 @@ public:
          m_sellTakenToday = false;
       }
 
-      // Reset range if new day
-      if(m_rangeDate != today)
+      // Reset range if new day (based on Asian session start)
+      int serverHour = dt.hour;
+      int asianStartServer = GetServerAsianStart();
+
+      // If we're past midnight but before Asian start, don't reset yet
+      // If Asian start is at 2:00 server time, reset at 2:00
+      if(m_rangeDate != today && serverHour >= asianStartServer)
       {
-         m_rangeCalculated = false;
-         m_asianHigh = 0;
-         m_asianLow = 0;
+         // Check if range was from previous day
+         MqlDateTime rangedt;
+         TimeToStruct(m_rangeDate, rangedt);
+         datetime rangeDay = StringToTime(StringFormat("%04d.%02d.%02d", rangedt.year, rangedt.mon, rangedt.day));
+
+         if(rangeDay != today)
+         {
+            m_rangeCalculated = false;
+            m_asianHigh = 0;
+            m_asianLow = 0;
+         }
       }
    }
 
@@ -217,23 +279,39 @@ public:
       TimeToStruct(TimeCurrent(), dt);
       int currentHour = dt.hour;
 
+      int asianEndServer = GetServerAsianEnd();
+
       // Only calculate range after Asian session ends
-      if(currentHour < m_asianEndHour) return;
+      if(currentHour < asianEndServer) return;
 
       datetime today = StringToTime(StringFormat("%04d.%02d.%02d", dt.year, dt.mon, dt.day));
 
       // Already calculated today
       if(m_rangeCalculated && m_rangeDate == today) return;
 
-      // Calculate range from Asian session
-      datetime asianStart = today + m_asianStartHour * 3600;
-      datetime asianEnd = today + m_asianEndHour * 3600;
+      // Calculate range from Asian session (in server time)
+      int asianStartServer = GetServerAsianStart();
+
+      datetime asianStart = today + asianStartServer * 3600;
+      datetime asianEnd = today + asianEndServer * 3600;
+
+      // Handle case where Asian start is before midnight
+      // (e.g., if GMT offset makes it go to previous day)
+      if(asianStartServer > asianEndServer)
+      {
+         // Asian session spans midnight
+         asianStart = today - (24 - asianStartServer) * 3600;
+      }
 
       // Find bars within Asian session
       int startBar = iBarShift(m_symbol, PERIOD_M5, asianStart);
       int endBar = iBarShift(m_symbol, PERIOD_M5, asianEnd);
 
-      if(startBar < 0 || endBar < 0 || startBar <= endBar) return;
+      if(startBar < 0 || endBar < 0 || startBar <= endBar)
+      {
+         Print("Warning: Could not find Asian session bars. Start: ", startBar, " End: ", endBar);
+         return;
+      }
 
       // Get high and low of Asian session
       double highs[], lows[];
@@ -258,8 +336,10 @@ public:
       m_rangeCalculated = true;
 
       double rangeSize = GetRangeSize();
-      Print("Asian Range calculated: High=", m_asianHigh, " Low=", m_asianLow,
-            " Size=", DoubleToString(rangeSize, 1), " pips");
+      Print("=== Asian Range Calculated ===");
+      Print("GMT Times: ", m_asianStartGMT, ":00 - ", m_asianEndGMT, ":00 GMT");
+      Print("Server Times: ", asianStartServer, ":00 - ", asianEndServer, ":00");
+      Print("Range: High=", m_asianHigh, " Low=", m_asianLow, " Size=", DoubleToString(rangeSize, 1), " pips");
    }
 
    //+------------------------------------------------------------------+
@@ -281,7 +361,18 @@ public:
       TimeToStruct(TimeCurrent(), dt);
       int hour = dt.hour;
 
-      return (hour >= m_londonStartHour && hour < m_londonEndHour);
+      int londonStartServer = GetServerLondonStart();
+      int londonEndServer = GetServerLondonEnd();
+
+      // Handle case where London session spans midnight (unlikely but possible)
+      if(londonStartServer < londonEndServer)
+      {
+         return (hour >= londonStartServer && hour < londonEndServer);
+      }
+      else
+      {
+         return (hour >= londonStartServer || hour < londonEndServer);
+      }
    }
 
    //+------------------------------------------------------------------+
@@ -375,18 +466,12 @@ public:
       double pipSize = GetPipSize();
       double atr = m_atrBuffer[0];
 
-      // SL options:
-      // Option 1: Opposite side of range
-      // Option 2: Middle of range
-      // Option 3: ATR-based
-
       double slPrice;
 
       if(signalType == SIGNAL_BUY)
       {
-         // SL below Asian low or middle of range
-         double rangeMid = (m_asianHigh + m_asianLow) / 2.0;
-         slPrice = MathMin(m_asianLow - (5 * pipSize), rangeMid);
+         // SL below Asian low
+         slPrice = m_asianLow - (5 * pipSize);
 
          // Ensure minimum SL distance
          double minSL = atr * 1.0;
@@ -395,8 +480,8 @@ public:
       }
       else // SELL
       {
-         double rangeMid = (m_asianHigh + m_asianLow) / 2.0;
-         slPrice = MathMax(m_asianHigh + (5 * pipSize), rangeMid);
+         // SL above Asian high
+         slPrice = m_asianHigh + (5 * pipSize);
 
          double minSL = atr * 1.0;
          if((slPrice - currentPrice) < minSL)
@@ -438,13 +523,12 @@ public:
    //+------------------------------------------------------------------+
    bool ShouldCloseEarly(ENUM_SIGNAL_TYPE positionType)
    {
-      // For session breakout, we generally let SL/TP handle exit
-      // But close if we're past London session
       MqlDateTime dt;
       TimeToStruct(TimeCurrent(), dt);
 
-      // Close positions after London close (optional)
-      if(dt.hour >= 20) return true;
+      // Close positions after London close (20:00 GMT = server time)
+      int closeHour = GMTToServerHour(20);
+      if(dt.hour >= closeHour) return true;
 
       return false;
    }
@@ -458,8 +542,15 @@ public:
    bool IsRangeCalculated() { return m_rangeCalculated; }
    bool IsBuyTakenToday() { return m_buyTakenToday; }
    bool IsSellTakenToday() { return m_sellTakenToday; }
+   int GetGMTOffset() { return m_gmtOffset; }
 
-   // Legacy accessors for compatibility (return 0 or neutral values)
+   // Get session times in server time
+   int GetAsianStartServer() { return GetServerAsianStart(); }
+   int GetAsianEndServer() { return GetServerAsianEnd(); }
+   int GetLondonStartServer() { return GetServerLondonStart(); }
+   int GetLondonEndServer() { return GetServerLondonEnd(); }
+
+   // Legacy accessors for compatibility
    double GetSMA900(int shift = 0) { return 0; }
    double GetEMA20(int shift = 0) { return 0; }
    double GetADX(int shift = 0) { return 0; }
@@ -469,9 +560,7 @@ public:
    double GetRangeHigh() { return m_asianHigh; }
    double GetRangeLow() { return m_asianLow; }
 
-   //+------------------------------------------------------------------+
-   //| Legacy method stubs for compatibility                            |
-   //+------------------------------------------------------------------+
+   // Legacy method stubs
    void SetADXParams(double minADX) { }
    void SetSessionFilter(bool useFilter, bool allowAsian, bool allowLondon, bool allowNY) { }
    void SetRangeBreakoutParams(bool useBreakout, int rangeBars, double bufferPips) { }

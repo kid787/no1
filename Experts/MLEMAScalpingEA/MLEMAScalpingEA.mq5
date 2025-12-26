@@ -1,20 +1,21 @@
 //+------------------------------------------------------------------+
 //|                                              MLEMAScalpingEA.mq5 |
 //|                     Session Breakout EA for MT5                  |
-//|                                v4.0 - Asian Session Breakout     |
+//|                           v4.1 - GMT Offset Support              |
 //|                                                                  |
 //|  Strategy:                                                       |
-//|  - Calculate Asian session (00:00-07:00) high/low range          |
-//|  - Trade breakout during London session (07:00-16:00)            |
+//|  - Calculate Asian session high/low range (configurable in GMT) |
+//|  - Trade breakout during London session                          |
 //|  - BUY: Price breaks above Asian high + buffer                   |
 //|  - SELL: Price breaks below Asian low - buffer                   |
 //|  - One trade per direction per day                               |
 //|  - SL at opposite side of range                                  |
 //|  - Fintokei challenge rule compliance                            |
+//|  - GMT offset for easy broker time adjustment                    |
 //+------------------------------------------------------------------+
-#property copyright "Session Breakout EA v4.0"
+#property copyright "Session Breakout EA v4.1"
 #property link      ""
-#property version   "4.00"
+#property version   "4.10"
 #property description "Asian Session Breakout EA with Fintokei compliance"
 #property strict
 
@@ -39,12 +40,19 @@ input string   InpEAName           = "Session_Breakout"; // EA Name (for magic n
 input bool     InpEnableTrading    = true;               // Enable Trading
 input bool     InpShowChartInfo    = true;               // Show Chart Information
 
-//--- Session Breakout Settings
-input group "=== Session Breakout Settings ==="
-input int      InpAsianStartHour   = 0;                  // Asian Session Start (Server Hour)
-input int      InpAsianEndHour     = 7;                  // Asian Session End (Server Hour)
-input int      InpLondonStartHour  = 7;                  // London Trading Start (Server Hour)
-input int      InpLondonEndHour    = 16;                 // London Trading End (Server Hour)
+//--- Broker Time Settings
+input group "=== Broker Time Settings ==="
+input int      InpGMTOffset        = 2;                  // GMT Offset (Titan FX: Winter=2, Summer=3)
+
+//--- Session Breakout Settings (Times in GMT)
+input group "=== Session Times (GMT) ==="
+input int      InpAsianStartGMT    = 0;                  // Asian Start (GMT) - Tokyo 9:00 = GMT 0:00
+input int      InpAsianEndGMT      = 7;                  // Asian End (GMT) - Before London
+input int      InpLondonStartGMT   = 7;                  // London Start (GMT) - London open
+input int      InpLondonEndGMT     = 16;                 // London End (GMT) - London close
+
+//--- Breakout Settings
+input group "=== Breakout Settings ==="
 input double   InpBreakoutBuffer   = 5.0;                // Breakout Buffer (Pips)
 input double   InpMinRangeSize     = 15.0;               // Minimum Range Size (Pips)
 input double   InpMaxRangeSize     = 80.0;               // Maximum Range Size (Pips)
@@ -107,7 +115,7 @@ bool              g_inCooldown;        // Currently in cooldown
 int OnInit()
 {
    Print("===========================================");
-   Print("Session Breakout EA v4.0 Initializing...");
+   Print("Session Breakout EA v4.1 Initializing...");
    Print("===========================================");
 
    //--- Generate magic number from EA name
@@ -127,15 +135,21 @@ int OnInit()
       return INIT_FAILED;
    }
 
-   // Set session times
-   SignalMgr.SetSessionTimes(InpAsianStartHour, InpAsianEndHour, InpLondonStartHour, InpLondonEndHour);
+   // Set GMT offset first (important!)
+   SignalMgr.SetGMTOffset(InpGMTOffset);
+
+   // Set session times in GMT
+   SignalMgr.SetSessionTimesGMT(InpAsianStartGMT, InpAsianEndGMT, InpLondonStartGMT, InpLondonEndGMT);
 
    // Set breakout parameters
    SignalMgr.SetBreakoutParams(InpBreakoutBuffer, InpMinRangeSize, InpMaxRangeSize);
 
    Print("Signal Manager initialized");
-   Print("Asian Session: ", InpAsianStartHour, ":00 - ", InpAsianEndHour, ":00");
-   Print("London Trading: ", InpLondonStartHour, ":00 - ", InpLondonEndHour, ":00");
+   Print("GMT Offset: +", InpGMTOffset);
+   Print("Asian Session (GMT): ", InpAsianStartGMT, ":00 - ", InpAsianEndGMT, ":00");
+   Print("Asian Session (Server): ", SignalMgr.GetAsianStartServer(), ":00 - ", SignalMgr.GetAsianEndServer(), ":00");
+   Print("London Trading (GMT): ", InpLondonStartGMT, ":00 - ", InpLondonEndGMT, ":00");
+   Print("London Trading (Server): ", SignalMgr.GetLondonStartServer(), ":00 - ", SignalMgr.GetLondonEndServer(), ":00");
    Print("Breakout Buffer: ", InpBreakoutBuffer, " pips");
    Print("Range Limits: ", InpMinRangeSize, " - ", InpMaxRangeSize, " pips");
 
@@ -665,13 +679,13 @@ void DisplayChartInfo()
    int yStep = 15;
 
    //--- EA Info
-   CreateLabel(prefix + "Title", "=== Session Breakout EA v4.0 ===", x, y, clrGold, 10);
+   CreateLabel(prefix + "Title", "=== Session Breakout EA v4.1 ===", x, y, clrGold, 10);
    y += yStep + 5;
 
    //--- Symbol and time
    MqlDateTime dt;
    TimeToStruct(TimeCurrent(), dt);
-   CreateLabel(prefix + "Symbol", StringFormat("Symbol: %s | Time: %02d:%02d", _Symbol, dt.hour, dt.min), x, y, clrWhite, 9);
+   CreateLabel(prefix + "Symbol", StringFormat("Symbol: %s | Server: %02d:%02d (GMT+%d)", _Symbol, dt.hour, dt.min, InpGMTOffset), x, y, clrWhite, 9);
    y += yStep;
 
    //--- Asian Range info
@@ -721,7 +735,14 @@ void DisplayChartInfo()
    bool isLondonTime = SignalMgr.IsLondonTradingTime();
    string windowStr = isLondonTime ? "OPEN" : "CLOSED";
    color windowColor = isLondonTime ? clrLime : clrGray;
-   CreateLabel(prefix + "Window", StringFormat("Trading Window: %s (%02d:00-%02d:00)", windowStr, InpLondonStartHour, InpLondonEndHour), x, y, windowColor, 9);
+   CreateLabel(prefix + "Window", StringFormat("Trading Window: %s (Server %02d:00-%02d:00)", windowStr,
+               SignalMgr.GetLondonStartServer(), SignalMgr.GetLondonEndServer()), x, y, windowColor, 9);
+   y += yStep;
+
+   //--- Asian session info
+   CreateLabel(prefix + "AsianTime", StringFormat("Asian Range Time: Server %02d:00-%02d:00 (GMT %02d:00-%02d:00)",
+               SignalMgr.GetAsianStartServer(), SignalMgr.GetAsianEndServer(),
+               InpAsianStartGMT, InpAsianEndGMT), x, y, clrSilver, 9);
    y += yStep;
 
    //--- Trades taken today
