@@ -382,7 +382,7 @@ public:
       double slDistance = atr * atrMultiplier;
 
       // Minimum SL distance based on spread
-      double spread = SymbolInfoDouble(m_symbol, SYMBOL_SPREAD) *
+      double spread = (double)SymbolInfoInteger(m_symbol, SYMBOL_SPREAD) *
                       SymbolInfoDouble(m_symbol, SYMBOL_POINT);
       double minSL = spread * 3;  // At least 3x spread
 

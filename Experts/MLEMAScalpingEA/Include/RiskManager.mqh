@@ -507,7 +507,7 @@ public:
       IndicatorRelease(atrHandle);
 
       // Get spread in pips
-      double spread = SymbolInfoDouble(symbol, SYMBOL_SPREAD) *
+      double spread = (double)SymbolInfoInteger(symbol, SYMBOL_SPREAD) *
                       SymbolInfoDouble(symbol, SYMBOL_POINT);
       double pipSize = GetPipSize(symbol);
       double spreadPips = spread / pipSize;
