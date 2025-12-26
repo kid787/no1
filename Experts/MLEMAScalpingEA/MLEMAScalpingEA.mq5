@@ -1,20 +1,23 @@
 //+------------------------------------------------------------------+
 //|                                              MLEMAScalpingEA.mq5 |
 //|                     ML-Enhanced 5-Minute EMA Scalping EA for MT5 |
+//|                                    v2.0 - Enhanced Signal Quality |
 //|                                                                  |
 //|  Features:                                                       |
 //|  - 900 SMA trend filter (daily level trend on 5-min chart)       |
 //|  - 20 EMA entry trigger with breakout detection                  |
+//|  - ADX trend strength filter                                     |
+//|  - Trading session filter                                        |
 //|  - Machine learning time optimization                            |
 //|  - VaR-based position sizing                                     |
 //|  - Correlation analysis (USDJPY/GBPJPY)                          |
 //|  - Fintokei challenge rule compliance                            |
+//|  - Consecutive loss cooldown                                     |
 //|  - Dynamic SL/TP based on ATR                                    |
-//|  - Comprehensive reporting with CSV export                       |
 //+------------------------------------------------------------------+
-#property copyright "ML EMA Scalping EA"
+#property copyright "ML EMA Scalping EA v2.0"
 #property link      ""
-#property version   "1.00"
+#property version   "2.00"
 #property description "Advanced 5-minute EMA Scalping EA with ML optimization and Fintokei compliance"
 #property strict
 
@@ -45,15 +48,24 @@ input int      InpSMAPeriod        = 900;                // SMA Period (Trend Fi
 input int      InpEMAPeriod        = 20;                 // EMA Period (Entry Trigger)
 input int      InpATRPeriod        = 14;                 // ATR Period
 input double   InpATRMultiplier    = 1.5;                // ATR Multiplier for SL
+input double   InpMinADX           = 25.0;               // Minimum ADX for Entry
+input bool     InpUseSessionFilter = true;               // Use Session Filter
+input bool     InpAllowAsianSession = false;             // Allow Asian Session
 
 //--- Risk Management
 input group "=== Risk Management ==="
 input double   InpRiskPercent      = 2.0;                // Risk Per Trade (%)
-input double   InpRRRatio          = 1.0;                // Risk:Reward Ratio
+input double   InpRRRatio          = 1.5;                // Risk:Reward Ratio (1.5 recommended)
 input double   InpMaxDailyLoss     = 5.0;                // Max Daily Loss (%) - Fintokei
 input double   InpMaxTotalLoss     = 10.0;               // Max Total Loss (%) - Fintokei
 input double   InpMaxPositionRisk  = 3.0;                // Max Position Risk (%) - Fintokei
 input double   InpDrawdownThreshold = 5.0;               // DD Threshold for Lot Reduction (%)
+
+//--- Loss Cooldown Settings
+input group "=== Loss Cooldown ==="
+input bool     InpUseCooldown      = true;               // Use Loss Cooldown
+input int      InpMaxConsecLosses  = 3;                  // Max Consecutive Losses Before Cooldown
+input int      InpCooldownBars     = 12;                 // Cooldown Period (Bars = 1 hour on M5)
 
 //--- ML Optimization
 input group "=== ML Optimization ==="
@@ -95,13 +107,18 @@ bool              g_isNewBar;          // New bar flag
 int               g_totalTrades;       // Total trades taken
 datetime          g_lastTradeTime;     // Last trade timestamp
 
+// Cooldown tracking
+int               g_consecutiveLosses; // Consecutive loss counter
+datetime          g_cooldownEndTime;   // Cooldown end time
+bool              g_inCooldown;        // Currently in cooldown
+
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
 //+------------------------------------------------------------------+
 int OnInit()
 {
    Print("===========================================");
-   Print("ML EMA Scalping EA Initializing...");
+   Print("ML EMA Scalping EA v2.0 Initializing...");
    Print("===========================================");
 
    //--- Generate magic number from EA name
@@ -120,7 +137,11 @@ int OnInit()
       Print("ERROR: Failed to initialize Signal Manager");
       return INIT_FAILED;
    }
-   Print("Signal Manager initialized");
+   // Set ADX parameters
+   SignalMgr.SetADXParams(InpMinADX);
+   // Set session filter
+   SignalMgr.SetSessionFilter(InpUseSessionFilter, InpAllowAsianSession, true, true);
+   Print("Signal Manager initialized with ADX filter (min: ", InpMinADX, ")");
 
    //--- Initialize ML Optimizer
    if(!MLOptimizer.Init(_Symbol, InpMLLearningDays, InpMinExpectancy))
@@ -170,6 +191,9 @@ int OnInit()
    g_isNewBar = false;
    g_totalTrades = 0;
    g_lastTradeTime = 0;
+   g_consecutiveLosses = 0;
+   g_cooldownEndTime = 0;
+   g_inCooldown = false;
 
    //--- Display initial info
    if(InpShowChartInfo)
@@ -182,7 +206,10 @@ int OnInit()
    Print("Symbol: ", _Symbol);
    Print("Timeframe: M5");
    Print("Risk Per Trade: ", InpRiskPercent, "%");
+   Print("Risk:Reward Ratio: 1:", InpRRRatio);
    Print("ML Enabled: ", InpEnableML ? "Yes" : "No");
+   Print("ADX Filter: ", InpMinADX);
+   Print("Session Filter: ", InpUseSessionFilter ? "Yes" : "No");
    Print("===========================================");
 
    return INIT_SUCCEEDED;
@@ -234,10 +261,10 @@ void OnTick()
    if(InpShowChartInfo)
    {
       static datetime lastInfoUpdate = 0;
-      if(TimeCurrent() - lastInfoUpdate >= 1)  // Update every second
+      if(TimeCurrent() - lastInfoUpdate >= 1)
       {
          DisplayChartInfo();
-         FintokeiRules.DisplayOnChart(10, 180);
+         FintokeiRules.DisplayOnChart(10, 220);
          lastInfoUpdate = TimeCurrent();
       }
    }
@@ -248,11 +275,19 @@ void OnTick()
       MonitorPositionsForEarlyExit();
    }
 
-   //--- Check for emergency close due to Fintokei rules
+   //--- CRITICAL: Check for emergency close due to Fintokei rules
    if(FintokeiRules.ShouldEmergencyClose())
    {
       Print("EMERGENCY: Fintokei limit approaching - closing all positions");
       CloseAllPositions();
+      return;
+   }
+
+   //--- Additional Fintokei safety check
+   double currentLoss = FintokeiRules.GetTotalLossPercent();
+   if(currentLoss >= InpMaxTotalLoss * 0.9)  // 90% of limit
+   {
+      Print("WARNING: Approaching total loss limit (", currentLoss, "%) - blocking new trades");
       return;
    }
 
@@ -264,10 +299,47 @@ void OnTick()
 }
 
 //+------------------------------------------------------------------+
+//| Check if currently in cooldown period                            |
+//+------------------------------------------------------------------+
+bool IsInCooldown()
+{
+   if(!InpUseCooldown) return false;
+
+   if(g_inCooldown)
+   {
+      if(TimeCurrent() >= g_cooldownEndTime)
+      {
+         g_inCooldown = false;
+         g_consecutiveLosses = 0;
+         Print("Cooldown period ended - resuming trading");
+         return false;
+      }
+      return true;
+   }
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Start cooldown period                                            |
+//+------------------------------------------------------------------+
+void StartCooldown()
+{
+   g_inCooldown = true;
+   g_cooldownEndTime = TimeCurrent() + (InpCooldownBars * PeriodSeconds(PERIOD_M5));
+   Print("COOLDOWN STARTED: ", g_consecutiveLosses, " consecutive losses. Resuming at ", TimeToString(g_cooldownEndTime));
+}
+
+//+------------------------------------------------------------------+
 //| Process main trading logic                                       |
 //+------------------------------------------------------------------+
 void ProcessTradingLogic()
 {
+   //--- Check cooldown
+   if(IsInCooldown())
+   {
+      return;
+   }
+
    //--- Check Fintokei rules first
    if(!FintokeiRules.IsTradingAllowed())
    {
@@ -285,8 +357,6 @@ void ProcessTradingLogic()
    //--- Check ML time filter
    if(InpEnableML && !MLOptimizer.IsOptimalTime())
    {
-      // Optionally log this
-      // Print("Non-optimal trading hour - skipping");
       return;
    }
 
@@ -300,7 +370,7 @@ void ProcessTradingLogic()
    //--- Check if we already have a position
    if(HasOpenPosition())
    {
-      return;  // Only one position at a time
+      return;
    }
 
    //--- Get trading signal
@@ -364,7 +434,7 @@ void ExecuteBuyTrade()
    if(Trade.Buy(lots, _Symbol, entryPrice, slPrice, tpPrice, comment))
    {
       Print("BUY order executed: ", lots, " lots at ", entryPrice);
-      Print("SL: ", slPrice, " | TP: ", tpPrice);
+      Print("SL: ", slPrice, " | TP: ", tpPrice, " | RR: 1:", InpRRRatio);
       g_totalTrades++;
       g_lastTradeTime = TimeCurrent();
    }
@@ -418,7 +488,7 @@ void ExecuteSellTrade()
    if(Trade.Sell(lots, _Symbol, entryPrice, slPrice, tpPrice, comment))
    {
       Print("SELL order executed: ", lots, " lots at ", entryPrice);
-      Print("SL: ", slPrice, " | TP: ", tpPrice);
+      Print("SL: ", slPrice, " | TP: ", tpPrice, " | RR: 1:", InpRRRatio);
       g_totalTrades++;
       g_lastTradeTime = TimeCurrent();
    }
@@ -459,8 +529,6 @@ void MonitorPositionsForEarlyExit()
          if(Trade.PositionClose(ticket))
          {
             Print("Position closed successfully");
-
-            //--- Record trade for ML and reporting
             RecordClosedTrade(ticket, profit, true);
          }
          else
@@ -476,23 +544,33 @@ void MonitorPositionsForEarlyExit()
 //+------------------------------------------------------------------+
 void RecordClosedTrade(ulong ticket, double profit, bool wasEarlyExit = false)
 {
-   //--- This would normally use history select
-   //--- For simplicity, we record with current time
    datetime closeTime = TimeCurrent();
-   datetime openTime = closeTime - PeriodSeconds(PERIOD_M5);  // Approximate
+   datetime openTime = closeTime - PeriodSeconds(PERIOD_M5);
 
    //--- Calculate profit in pips
    double pipSize = GetPipSize(_Symbol);
-   double profitPips = profit / (SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE) / pipSize);
+   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double profitPips = (tickValue > 0) ? profit / tickValue * pipSize : 0;
+
+   //--- Update consecutive loss counter
+   if(profit < 0)
+   {
+      g_consecutiveLosses++;
+      if(InpUseCooldown && g_consecutiveLosses >= InpMaxConsecLosses)
+      {
+         StartCooldown();
+      }
+   }
+   else
+   {
+      g_consecutiveLosses = 0;  // Reset on win
+   }
 
    //--- Record in ML Optimizer
    if(InpEnableML)
    {
       MLOptimizer.AddTradeRecord(openTime, closeTime, profit, profitPips, wasEarlyExit);
    }
-
-   //--- Record in Report Generator (using deal history would be more accurate)
-   // This is a simplified version
 }
 
 //+------------------------------------------------------------------+
@@ -500,15 +578,13 @@ void RecordClosedTrade(ulong ticket, double profit, bool wasEarlyExit = false)
 //+------------------------------------------------------------------+
 void OnTrade()
 {
-   //--- Check for closed positions
    static int lastHistoryDeals = 0;
+
+   HistorySelect(0, TimeCurrent());
    int totalDeals = HistoryDealsTotal();
 
    if(totalDeals > lastHistoryDeals)
    {
-      //--- New deal detected
-      HistorySelect(0, TimeCurrent());
-
       for(int i = lastHistoryDeals; i < totalDeals; i++)
       {
          ulong ticket = HistoryDealGetTicket(i);
@@ -520,7 +596,6 @@ void OnTrade()
          ENUM_DEAL_ENTRY entry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(ticket, DEAL_ENTRY);
          if(entry == DEAL_ENTRY_OUT || entry == DEAL_ENTRY_INOUT)
          {
-            //--- Position closed
             double profit = HistoryDealGetDouble(ticket, DEAL_PROFIT);
             double commission = HistoryDealGetDouble(ticket, DEAL_COMMISSION);
             double swap = HistoryDealGetDouble(ticket, DEAL_SWAP);
@@ -532,25 +607,38 @@ void OnTrade()
 
             double netProfit = profit + commission + swap;
 
-            //--- Get entry deal for complete record
-            ulong positionId = HistoryDealGetInteger(ticket, DEAL_POSITION_ID);
-            datetime openTime = time - PeriodSeconds(PERIOD_M5);  // Approximate
-            double openPrice = price;  // Would need to find entry deal
+            //--- Update consecutive loss counter
+            if(netProfit < 0)
+            {
+               g_consecutiveLosses++;
+               if(InpUseCooldown && g_consecutiveLosses >= InpMaxConsecLosses)
+               {
+                  StartCooldown();
+               }
+            }
+            else
+            {
+               g_consecutiveLosses = 0;
+            }
 
             //--- Record in ML
             if(InpEnableML)
             {
+               datetime openTime = time - PeriodSeconds(PERIOD_M5);
                double pipSize = GetPipSize(symbol);
-               double profitPips = profit / (SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE) / pipSize);
+               double tickValue = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
+               double profitPips = (tickValue > 0) ? profit / tickValue * pipSize : 0;
                MLOptimizer.AddTradeRecord(openTime, time, netProfit, profitPips, false);
             }
 
             //--- Record in Report Generator
-            int posType = (type == DEAL_TYPE_BUY) ? 1 : 0;  // Closing deal is opposite
+            int posType = (type == DEAL_TYPE_BUY) ? 1 : 0;
+            datetime openTime = time - PeriodSeconds(PERIOD_M5);
             ReportGen.AddTrade((long)ticket, openTime, time, symbol, posType,
-                               volume, openPrice, price, 0, 0, profit, commission, swap, "");
+                               volume, price, price, 0, 0, profit, commission, swap, "");
 
-            Print("Trade closed - Net Profit: ", netProfit);
+            Print("Trade closed - Net Profit: ", netProfit,
+                  " | Consecutive Losses: ", g_consecutiveLosses);
          }
       }
 
@@ -682,10 +770,9 @@ void DisplayChartInfo()
    string prefix = "MLEMA_";
    int x = 10, y = 20;
    int yStep = 13;
-   color textColor = clrWhite;
 
    //--- EA Info
-   CreateLabel(prefix + "Title", "=== ML EMA Scalping EA ===", x, y, clrGold, 10);
+   CreateLabel(prefix + "Title", "=== ML EMA Scalping EA v2.0 ===", x, y, clrGold, 10);
    y += yStep + 5;
 
    //--- Symbol and time
@@ -707,6 +794,23 @@ void DisplayChartInfo()
    CreateLabel(prefix + "Trend", StringFormat("SMA900: %s | EMA20: %s", trendStr, emaTrendStr), x, y, clrSilver, 9);
    y += yStep;
 
+   //--- ADX info
+   double adx = SignalMgr.GetADX();
+   color adxColor = (adx >= InpMinADX) ? clrLime : clrYellow;
+   CreateLabel(prefix + "ADX", StringFormat("ADX: %.1f (min: %.0f)", adx, InpMinADX), x, y, adxColor, 9);
+   y += yStep;
+
+   //--- Cooldown status
+   if(InpUseCooldown)
+   {
+      string cooldownStr = g_inCooldown ?
+                           StringFormat("COOLDOWN (ends: %s)", TimeToString(g_cooldownEndTime, TIME_MINUTES)) :
+                           StringFormat("Active (Losses: %d/%d)", g_consecutiveLosses, InpMaxConsecLosses);
+      color cooldownColor = g_inCooldown ? clrOrange : clrLime;
+      CreateLabel(prefix + "Cooldown", "Status: " + cooldownStr, x, y, cooldownColor, 9);
+      y += yStep;
+   }
+
    //--- ML Status
    if(InpEnableML)
    {
@@ -722,18 +826,9 @@ void DisplayChartInfo()
    y += yStep;
 
    double dd = RiskMgr.GetCurrentDrawdown();
-   color ddColor = (dd > 10) ? clrRed : (dd > 5) ? clrYellow : clrLime;
+   color ddColor = (dd > 7) ? clrRed : (dd > 4) ? clrYellow : clrLime;
    CreateLabel(prefix + "DD", StringFormat("Drawdown: %.2f%%", dd), x, y, ddColor, 9);
    y += yStep;
-
-   //--- Correlation
-   if(InpEnableCorrelation)
-   {
-      double corr = RiskMgr.GetCorrelation();
-      color corrColor = (MathAbs(corr) > InpMaxCorrelation) ? clrRed : clrSilver;
-      CreateLabel(prefix + "Corr", StringFormat("Correlation: %.3f", corr), x, y, corrColor, 9);
-      y += yStep;
-   }
 
    //--- Trade stats
    CreateLabel(prefix + "Trades", StringFormat("Trades: %d | Win Rate: %.1f%%",

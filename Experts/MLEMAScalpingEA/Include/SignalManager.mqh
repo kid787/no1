@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                               SignalManager.mqh |
 //|                          ML EMA Scalping EA - Signal Module      |
-//|                                                                  |
+//|                                  v2.0 - Enhanced Signal Quality  |
 //+------------------------------------------------------------------+
 #property copyright "ML EMA Scalping EA"
 #property strict
@@ -14,6 +14,18 @@ enum ENUM_SIGNAL_TYPE
    SIGNAL_NONE = 0,      // No signal
    SIGNAL_BUY = 1,       // Buy signal
    SIGNAL_SELL = -1      // Sell signal
+};
+
+//+------------------------------------------------------------------+
+//| Trading session enumeration                                       |
+//+------------------------------------------------------------------+
+enum ENUM_TRADING_SESSION
+{
+   SESSION_ASIAN = 0,    // Tokyo session (0:00-9:00 UTC)
+   SESSION_LONDON = 1,   // London session (7:00-16:00 UTC)
+   SESSION_NEWYORK = 2,  // New York session (13:00-22:00 UTC)
+   SESSION_OVERLAP = 3,  // London/NY overlap (13:00-16:00 UTC)
+   SESSION_OFF = 4       // Off-market hours
 };
 
 //+------------------------------------------------------------------+
@@ -30,21 +42,34 @@ private:
    int               m_handleSMA900;
    int               m_handleEMA20;
    int               m_handleATR;
+   int               m_handleADX;       // ADX for trend strength
 
    // Indicator buffers
    double            m_sma900Buffer[];
    double            m_ema20Buffer[];
    double            m_atrBuffer[];
+   double            m_adxBuffer[];     // ADX main line
+   double            m_plusDIBuffer[];  // +DI
+   double            m_minusDIBuffer[]; // -DI
 
    // Settings
    int               m_smaPeriod;
    int               m_emaPeriod;
    int               m_atrPeriod;
+   int               m_adxPeriod;
+   double            m_minADX;          // Minimum ADX for entry
+   double            m_minATRMultiple;  // Minimum ATR for volatility filter
 
    // State tracking
    double            m_prevEMA20;
    double            m_prevClose;
    bool              m_isInitialized;
+
+   // Session filter
+   bool              m_useSessionFilter;
+   bool              m_allowAsian;
+   bool              m_allowLondon;
+   bool              m_allowNewYork;
 
 public:
    // Constructor
@@ -55,12 +80,22 @@ public:
       m_smaPeriod = 900;
       m_emaPeriod = 20;
       m_atrPeriod = 14;
+      m_adxPeriod = 14;
+      m_minADX = 20.0;         // Minimum ADX value for trend
+      m_minATRMultiple = 0.5;  // Minimum volatility
       m_prevEMA20 = 0;
       m_prevClose = 0;
       m_isInitialized = false;
       m_handleSMA900 = INVALID_HANDLE;
       m_handleEMA20 = INVALID_HANDLE;
       m_handleATR = INVALID_HANDLE;
+      m_handleADX = INVALID_HANDLE;
+
+      // Session filter defaults
+      m_useSessionFilter = true;
+      m_allowAsian = false;      // Skip low volatility Asian session
+      m_allowLondon = true;
+      m_allowNewYork = true;
    }
 
    // Destructor
@@ -85,15 +120,20 @@ public:
       ArraySetAsSeries(m_sma900Buffer, true);
       ArraySetAsSeries(m_ema20Buffer, true);
       ArraySetAsSeries(m_atrBuffer, true);
+      ArraySetAsSeries(m_adxBuffer, true);
+      ArraySetAsSeries(m_plusDIBuffer, true);
+      ArraySetAsSeries(m_minusDIBuffer, true);
 
       // Create indicator handles
       m_handleSMA900 = iMA(m_symbol, m_timeframe, m_smaPeriod, 0, MODE_SMA, PRICE_CLOSE);
       m_handleEMA20 = iMA(m_symbol, m_timeframe, m_emaPeriod, 0, MODE_EMA, PRICE_CLOSE);
       m_handleATR = iATR(m_symbol, m_timeframe, m_atrPeriod);
+      m_handleADX = iADX(m_symbol, m_timeframe, m_adxPeriod);
 
       if(m_handleSMA900 == INVALID_HANDLE ||
          m_handleEMA20 == INVALID_HANDLE ||
-         m_handleATR == INVALID_HANDLE)
+         m_handleATR == INVALID_HANDLE ||
+         m_handleADX == INVALID_HANDLE)
       {
          Print("Error creating indicator handles: ", GetLastError());
          return false;
@@ -123,6 +163,11 @@ public:
          IndicatorRelease(m_handleATR);
          m_handleATR = INVALID_HANDLE;
       }
+      if(m_handleADX != INVALID_HANDLE)
+      {
+         IndicatorRelease(m_handleADX);
+         m_handleADX = INVALID_HANDLE;
+      }
       m_isInitialized = false;
    }
 
@@ -133,12 +178,70 @@ public:
    {
       if(!m_isInitialized) return false;
 
-      // Copy indicator values (need at least 3 bars for slope calculation)
+      // Copy indicator values (need at least 5 bars for slope calculation)
       if(CopyBuffer(m_handleSMA900, 0, 0, 5, m_sma900Buffer) < 5) return false;
       if(CopyBuffer(m_handleEMA20, 0, 0, 5, m_ema20Buffer) < 5) return false;
       if(CopyBuffer(m_handleATR, 0, 0, 3, m_atrBuffer) < 3) return false;
+      if(CopyBuffer(m_handleADX, 0, 0, 3, m_adxBuffer) < 3) return false;      // ADX main
+      if(CopyBuffer(m_handleADX, 1, 0, 3, m_plusDIBuffer) < 3) return false;   // +DI
+      if(CopyBuffer(m_handleADX, 2, 0, 3, m_minusDIBuffer) < 3) return false;  // -DI
 
       return true;
+   }
+
+   //+------------------------------------------------------------------+
+   //| Get current trading session                                       |
+   //+------------------------------------------------------------------+
+   ENUM_TRADING_SESSION GetCurrentSession()
+   {
+      MqlDateTime dt;
+      TimeToStruct(TimeCurrent(), dt);
+      int hour = dt.hour;  // Server time (usually UTC or UTC+2/3)
+
+      // Adjust for broker server time if needed
+      // These times assume UTC
+
+      // London/NY Overlap (best volatility)
+      if(hour >= 13 && hour < 16)
+         return SESSION_OVERLAP;
+
+      // London session
+      if(hour >= 7 && hour < 16)
+         return SESSION_LONDON;
+
+      // New York session
+      if(hour >= 13 && hour < 22)
+         return SESSION_NEWYORK;
+
+      // Asian session
+      if(hour >= 0 && hour < 9)
+         return SESSION_ASIAN;
+
+      return SESSION_OFF;
+   }
+
+   //+------------------------------------------------------------------+
+   //| Check if current session allows trading                          |
+   //+------------------------------------------------------------------+
+   bool IsSessionAllowed()
+   {
+      if(!m_useSessionFilter) return true;
+
+      ENUM_TRADING_SESSION session = GetCurrentSession();
+
+      switch(session)
+      {
+         case SESSION_OVERLAP:
+            return true;  // Always allow overlap (best liquidity)
+         case SESSION_LONDON:
+            return m_allowLondon;
+         case SESSION_NEWYORK:
+            return m_allowNewYork;
+         case SESSION_ASIAN:
+            return m_allowAsian;
+         default:
+            return false;
+      }
    }
 
    //+------------------------------------------------------------------+
@@ -172,19 +275,58 @@ public:
    }
 
    //+------------------------------------------------------------------+
+   //| Get current ADX value                                            |
+   //+------------------------------------------------------------------+
+   double GetADX(int shift = 0)
+   {
+      if(shift < ArraySize(m_adxBuffer))
+         return m_adxBuffer[shift];
+      return 0;
+   }
+
+   //+------------------------------------------------------------------+
+   //| Check if ADX indicates strong trend                              |
+   //+------------------------------------------------------------------+
+   bool IsStrongTrend()
+   {
+      if(ArraySize(m_adxBuffer) < 1) return false;
+      return m_adxBuffer[0] >= m_minADX;
+   }
+
+   //+------------------------------------------------------------------+
+   //| Check if +DI > -DI (bullish)                                     |
+   //+------------------------------------------------------------------+
+   bool IsDIBullish()
+   {
+      if(ArraySize(m_plusDIBuffer) < 1 || ArraySize(m_minusDIBuffer) < 1) return false;
+      return m_plusDIBuffer[0] > m_minusDIBuffer[0];
+   }
+
+   //+------------------------------------------------------------------+
+   //| Check if -DI > +DI (bearish)                                     |
+   //+------------------------------------------------------------------+
+   bool IsDIBearish()
+   {
+      if(ArraySize(m_plusDIBuffer) < 1 || ArraySize(m_minusDIBuffer) < 1) return false;
+      return m_minusDIBuffer[0] > m_plusDIBuffer[0];
+   }
+
+   //+------------------------------------------------------------------+
    //| Check if SMA900 is trending up                                   |
    //| Uses slope calculation over multiple bars                        |
    //+------------------------------------------------------------------+
    bool IsSMAUpTrend()
    {
-      if(ArraySize(m_sma900Buffer) < 3) return false;
+      if(ArraySize(m_sma900Buffer) < 4) return false;
 
       // Calculate average slope over 3 bars
       double slope1 = m_sma900Buffer[0] - m_sma900Buffer[1];
       double slope2 = m_sma900Buffer[1] - m_sma900Buffer[2];
-      double avgSlope = (slope1 + slope2) / 2.0;
+      double slope3 = m_sma900Buffer[2] - m_sma900Buffer[3];
+      double avgSlope = (slope1 + slope2 + slope3) / 3.0;
 
-      return avgSlope > 0;
+      // Require consistent upward slope
+      return avgSlope > 0 && slope1 > 0;
    }
 
    //+------------------------------------------------------------------+
@@ -192,13 +334,14 @@ public:
    //+------------------------------------------------------------------+
    bool IsSMADownTrend()
    {
-      if(ArraySize(m_sma900Buffer) < 3) return false;
+      if(ArraySize(m_sma900Buffer) < 4) return false;
 
       double slope1 = m_sma900Buffer[0] - m_sma900Buffer[1];
       double slope2 = m_sma900Buffer[1] - m_sma900Buffer[2];
-      double avgSlope = (slope1 + slope2) / 2.0;
+      double slope3 = m_sma900Buffer[2] - m_sma900Buffer[3];
+      double avgSlope = (slope1 + slope2 + slope3) / 3.0;
 
-      return avgSlope < 0;
+      return avgSlope < 0 && slope1 < 0;
    }
 
    //+------------------------------------------------------------------+
@@ -206,13 +349,14 @@ public:
    //+------------------------------------------------------------------+
    bool IsEMAUpTrend()
    {
-      if(ArraySize(m_ema20Buffer) < 3) return false;
+      if(ArraySize(m_ema20Buffer) < 4) return false;
 
       double slope1 = m_ema20Buffer[0] - m_ema20Buffer[1];
       double slope2 = m_ema20Buffer[1] - m_ema20Buffer[2];
-      double avgSlope = (slope1 + slope2) / 2.0;
+      double slope3 = m_ema20Buffer[2] - m_ema20Buffer[3];
+      double avgSlope = (slope1 + slope2 + slope3) / 3.0;
 
-      return avgSlope > 0;
+      return avgSlope > 0 && slope1 > 0;
    }
 
    //+------------------------------------------------------------------+
@@ -220,13 +364,14 @@ public:
    //+------------------------------------------------------------------+
    bool IsEMADownTrend()
    {
-      if(ArraySize(m_ema20Buffer) < 3) return false;
+      if(ArraySize(m_ema20Buffer) < 4) return false;
 
       double slope1 = m_ema20Buffer[0] - m_ema20Buffer[1];
       double slope2 = m_ema20Buffer[1] - m_ema20Buffer[2];
-      double avgSlope = (slope1 + slope2) / 2.0;
+      double slope3 = m_ema20Buffer[2] - m_ema20Buffer[3];
+      double avgSlope = (slope1 + slope2 + slope3) / 3.0;
 
-      return avgSlope < 0;
+      return avgSlope < 0 && slope1 < 0;
    }
 
    //+------------------------------------------------------------------+
@@ -248,65 +393,113 @@ public:
    }
 
    //+------------------------------------------------------------------+
-   //| Check for EMA breakout (price crossing EMA20)                    |
+   //| Check for EMA breakout UP with confirmation                      |
+   //| Improved: requires stronger confirmation candle                  |
    //+------------------------------------------------------------------+
    bool CheckEMABreakoutUp()
    {
-      // Get previous candle's close and open
+      // Get candle data
       double prevClose = iClose(m_symbol, m_timeframe, 1);
       double prevOpen = iOpen(m_symbol, m_timeframe, 1);
+      double prevHigh = iHigh(m_symbol, m_timeframe, 1);
+      double prevLow = iLow(m_symbol, m_timeframe, 1);
       double prev2Close = iClose(m_symbol, m_timeframe, 2);
-
-      // EMA values
-      double ema20Current = m_ema20Buffer[1];  // EMA at candle 1
-      double ema20Prev = m_ema20Buffer[2];     // EMA at candle 2
-
-      // Breakout condition: previous candle closed above EMA, candle before was below or at EMA
-      bool crossedUp = (prevClose > ema20Current) && (prev2Close <= ema20Prev);
-
-      // Additional confirmation: candle body should be bullish
-      bool isBullishCandle = prevClose > prevOpen;
-
-      return crossedUp && isBullishCandle;
-   }
-
-   //+------------------------------------------------------------------+
-   //| Check for EMA breakout down (price crossing EMA20)               |
-   //+------------------------------------------------------------------+
-   bool CheckEMABreakoutDown()
-   {
-      // Get previous candle's close and open
-      double prevClose = iClose(m_symbol, m_timeframe, 1);
-      double prevOpen = iOpen(m_symbol, m_timeframe, 1);
-      double prev2Close = iClose(m_symbol, m_timeframe, 2);
+      double prev2Low = iLow(m_symbol, m_timeframe, 2);
 
       // EMA values
       double ema20Current = m_ema20Buffer[1];
       double ema20Prev = m_ema20Buffer[2];
 
-      // Breakout condition: previous candle closed below EMA, candle before was above or at EMA
-      bool crossedDown = (prevClose < ema20Current) && (prev2Close >= ema20Prev);
+      // Basic breakout: close above EMA, previous close at or below
+      bool basicBreakout = (prevClose > ema20Current) && (prev2Close <= ema20Prev);
 
-      // Additional confirmation: candle body should be bearish
-      bool isBearishCandle = prevClose < prevOpen;
+      if(!basicBreakout) return false;
 
-      return crossedDown && isBearishCandle;
+      // Confirmation 1: Bullish candle (close > open)
+      bool isBullish = prevClose > prevOpen;
+
+      // Confirmation 2: Candle body is at least 50% of total range
+      double bodySize = MathAbs(prevClose - prevOpen);
+      double totalRange = prevHigh - prevLow;
+      bool hasGoodBody = totalRange > 0 && (bodySize / totalRange) >= 0.5;
+
+      // Confirmation 3: Close in upper 30% of candle range
+      bool closeNearHigh = totalRange > 0 && (prevClose - prevLow) / totalRange >= 0.7;
+
+      // Confirmation 4: ATR filter - ensure sufficient volatility
+      double atr = m_atrBuffer[0];
+      double avgATR = (m_atrBuffer[0] + m_atrBuffer[1] + m_atrBuffer[2]) / 3.0;
+      bool hasVolatility = atr >= avgATR * m_minATRMultiple;
+
+      return isBullish && hasGoodBody && closeNearHigh && hasVolatility;
+   }
+
+   //+------------------------------------------------------------------+
+   //| Check for EMA breakout DOWN with confirmation                    |
+   //+------------------------------------------------------------------+
+   bool CheckEMABreakoutDown()
+   {
+      // Get candle data
+      double prevClose = iClose(m_symbol, m_timeframe, 1);
+      double prevOpen = iOpen(m_symbol, m_timeframe, 1);
+      double prevHigh = iHigh(m_symbol, m_timeframe, 1);
+      double prevLow = iLow(m_symbol, m_timeframe, 1);
+      double prev2Close = iClose(m_symbol, m_timeframe, 2);
+      double prev2High = iHigh(m_symbol, m_timeframe, 2);
+
+      // EMA values
+      double ema20Current = m_ema20Buffer[1];
+      double ema20Prev = m_ema20Buffer[2];
+
+      // Basic breakout: close below EMA, previous close at or above
+      bool basicBreakout = (prevClose < ema20Current) && (prev2Close >= ema20Prev);
+
+      if(!basicBreakout) return false;
+
+      // Confirmation 1: Bearish candle (close < open)
+      bool isBearish = prevClose < prevOpen;
+
+      // Confirmation 2: Candle body is at least 50% of total range
+      double bodySize = MathAbs(prevClose - prevOpen);
+      double totalRange = prevHigh - prevLow;
+      bool hasGoodBody = totalRange > 0 && (bodySize / totalRange) >= 0.5;
+
+      // Confirmation 3: Close in lower 30% of candle range
+      bool closeNearLow = totalRange > 0 && (prevHigh - prevClose) / totalRange >= 0.7;
+
+      // Confirmation 4: ATR filter - ensure sufficient volatility
+      double atr = m_atrBuffer[0];
+      double avgATR = (m_atrBuffer[0] + m_atrBuffer[1] + m_atrBuffer[2]) / 3.0;
+      bool hasVolatility = atr >= avgATR * m_minATRMultiple;
+
+      return isBearish && hasGoodBody && closeNearLow && hasVolatility;
    }
 
    //+------------------------------------------------------------------+
    //| Generate trading signal based on strategy                        |
+   //| v2.0: Added ADX, DI, and session filters                        |
    //+------------------------------------------------------------------+
    ENUM_SIGNAL_TYPE GetSignal()
    {
       if(!UpdateData()) return SIGNAL_NONE;
 
+      // Session filter
+      if(!IsSessionAllowed())
+         return SIGNAL_NONE;
+
+      // ADX filter - require strong trend
+      if(!IsStrongTrend())
+         return SIGNAL_NONE;
+
       // BUY CONDITIONS:
       // 1. SMA900 is trending up
       // 2. Price is above SMA900
       // 3. EMA20 is trending up
-      // 4. Price breaks EMA20 from below
+      // 4. ADX shows strong trend with +DI > -DI
+      // 5. Price breaks EMA20 from below with confirmation
 
-      if(IsSMAUpTrend() && IsPriceAboveSMA() && IsEMAUpTrend() && CheckEMABreakoutUp())
+      if(IsSMAUpTrend() && IsPriceAboveSMA() && IsEMAUpTrend() &&
+         IsDIBullish() && CheckEMABreakoutUp())
       {
          return SIGNAL_BUY;
       }
@@ -315,9 +508,11 @@ public:
       // 1. SMA900 is trending down
       // 2. Price is below SMA900
       // 3. EMA20 is trending down
-      // 4. Price breaks EMA20 from above
+      // 4. ADX shows strong trend with -DI > +DI
+      // 5. Price breaks EMA20 from above with confirmation
 
-      if(IsSMADownTrend() && IsPriceBelowSMA() && IsEMADownTrend() && CheckEMABreakoutDown())
+      if(IsSMADownTrend() && IsPriceBelowSMA() && IsEMADownTrend() &&
+         IsDIBearish() && CheckEMABreakoutDown())
       {
          return SIGNAL_SELL;
       }
@@ -340,12 +535,14 @@ public:
 
          // Check if current price is significantly below EMA20
          double atr = m_atrBuffer[0];
-         double threshold = ema20 - (atr * 0.3);  // Small buffer to avoid premature exits
+         double threshold = ema20 - (atr * 0.3);
 
          if(currentPrice < threshold)
-         {
             return true;
-         }
+
+         // Also close if EMA20 turns down
+         if(IsEMADownTrend())
+            return true;
       }
 
       // For SELL position: close if price breaks above EMA20
@@ -358,9 +555,11 @@ public:
          double threshold = ema20 + (atr * 0.3);
 
          if(currentPrice > threshold)
-         {
             return true;
-         }
+
+         // Also close if EMA20 turns up
+         if(IsEMAUpTrend())
+            return true;
       }
 
       return false;
@@ -406,7 +605,7 @@ public:
    }
 
    //+------------------------------------------------------------------+
-   //| Calculate Take Profit (1:1 Risk Reward)                          |
+   //| Calculate Take Profit (Risk Reward Ratio)                        |
    //+------------------------------------------------------------------+
    double CalculateTP(double entryPrice, double slPrice, ENUM_SIGNAL_TYPE signalType, double rrRatio = 1.0)
    {
@@ -430,6 +629,22 @@ public:
       double slPrice = CalculateDynamicSL(signalType);
 
       return MathAbs(currentPrice - slPrice) / SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+   }
+
+   //+------------------------------------------------------------------+
+   //| Set ADX parameters                                               |
+   //+------------------------------------------------------------------+
+   void SetADXParams(double minADX) { m_minADX = minADX; }
+
+   //+------------------------------------------------------------------+
+   //| Set session filter parameters                                    |
+   //+------------------------------------------------------------------+
+   void SetSessionFilter(bool useFilter, bool allowAsian, bool allowLondon, bool allowNY)
+   {
+      m_useSessionFilter = useFilter;
+      m_allowAsian = allowAsian;
+      m_allowLondon = allowLondon;
+      m_allowNewYork = allowNY;
    }
 
    //+------------------------------------------------------------------+
