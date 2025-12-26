@@ -53,7 +53,7 @@ input double   InpRRRatio          = 1.0;                // Risk:Reward Ratio
 input double   InpMaxDailyLoss     = 5.0;                // Max Daily Loss (%) - Fintokei
 input double   InpMaxTotalLoss     = 10.0;               // Max Total Loss (%) - Fintokei
 input double   InpMaxPositionRisk  = 3.0;                // Max Position Risk (%) - Fintokei
-input double   InpDrawdownThreshold = 20.0;              // DD Threshold for Lot Reduction (%)
+input double   InpDrawdownThreshold = 5.0;               // DD Threshold for Lot Reduction (%)
 
 //--- ML Optimization
 input group "=== ML Optimization ==="

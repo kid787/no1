@@ -72,7 +72,7 @@ public:
       m_maxDailyLossPercent = 5.0;      // Fintokei rule
       m_maxTotalLossPercent = 10.0;     // Fintokei rule
       m_maxPositionRiskPercent = 3.0;   // Fintokei rule
-      m_maxDrawdownPercent = 20.0;
+      m_maxDrawdownPercent = 5.0;  // Fintokei compliant
       m_lotReductionFactor = 0.5;
 
       m_varConfidenceLevel = 0.99;
