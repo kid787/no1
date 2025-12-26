@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              MLEMAScalpingEA.mq5 |
 //|                     ML-Enhanced 5-Minute EMA Scalping EA for MT5 |
-//|                                    v2.0 - Enhanced Signal Quality |
+//|                                v3.0 - H1 Range Breakout Strategy |
 //|                                                                  |
 //|  Features:                                                       |
 //|  - 900 SMA trend filter (daily level trend on 5-min chart)       |
@@ -15,9 +15,9 @@
 //|  - Consecutive loss cooldown                                     |
 //|  - Dynamic SL/TP based on ATR                                    |
 //+------------------------------------------------------------------+
-#property copyright "ML EMA Scalping EA v2.0"
+#property copyright "ML EMA Scalping EA v3.0"
 #property link      ""
-#property version   "2.00"
+#property version   "3.00"
 #property description "Advanced 5-minute EMA Scalping EA with ML optimization and Fintokei compliance"
 #property strict
 
@@ -51,6 +51,12 @@ input double   InpATRMultiplier    = 1.5;                // ATR Multiplier for S
 input double   InpMinADX           = 25.0;               // Minimum ADX for Entry
 input bool     InpUseSessionFilter = true;               // Use Session Filter
 input bool     InpAllowAsianSession = false;             // Allow Asian Session
+
+//--- H1 Range Breakout Settings
+input group "=== H1 Range Breakout ==="
+input bool     InpUseH1Breakout    = true;               // Use H1 Range Breakout Filter
+input int      InpH1RangeBars      = 4;                  // H1 Range Period (Bars)
+input double   InpBreakoutBuffer   = 5.0;                // Breakout Buffer (Pips)
 
 //--- Risk Management
 input group "=== Risk Management ==="
@@ -141,7 +147,11 @@ int OnInit()
    SignalMgr.SetADXParams(InpMinADX);
    // Set session filter
    SignalMgr.SetSessionFilter(InpUseSessionFilter, InpAllowAsianSession, true, true);
+   // Set H1 breakout parameters
+   SignalMgr.SetH1BreakoutParams(InpUseH1Breakout, InpH1RangeBars, InpBreakoutBuffer);
    Print("Signal Manager initialized with ADX filter (min: ", InpMinADX, ")");
+   Print("H1 Breakout: ", InpUseH1Breakout ? "Enabled" : "Disabled",
+         " | Range: ", InpH1RangeBars, " bars | Buffer: ", InpBreakoutBuffer, " pips");
 
    //--- Initialize ML Optimizer
    if(!MLOptimizer.Init(_Symbol, InpMLLearningDays, InpMinExpectancy))
@@ -799,6 +809,23 @@ void DisplayChartInfo()
    color adxColor = (adx >= InpMinADX) ? clrLime : clrYellow;
    CreateLabel(prefix + "ADX", StringFormat("ADX: %.1f (min: %.0f)", adx, InpMinADX), x, y, adxColor, 9);
    y += yStep;
+
+   //--- H1 Range Breakout info
+   if(InpUseH1Breakout)
+   {
+      double h1High = SignalMgr.GetH1RangeHigh();
+      double h1Low = SignalMgr.GetH1RangeLow();
+      double rangeSize = SignalMgr.GetH1RangeSize();
+      double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+
+      string breakoutStatus = "IN RANGE";
+      color breakoutColor = clrYellow;
+      if(currentPrice > h1High) { breakoutStatus = "ABOVE (BUY OK)"; breakoutColor = clrLime; }
+      else if(currentPrice < h1Low) { breakoutStatus = "BELOW (SELL OK)"; breakoutColor = clrRed; }
+
+      CreateLabel(prefix + "H1Range", StringFormat("H1 Range: %.1f pips | %s", rangeSize, breakoutStatus), x, y, breakoutColor, 9);
+      y += yStep;
+   }
 
    //--- Cooldown status
    if(InpUseCooldown)

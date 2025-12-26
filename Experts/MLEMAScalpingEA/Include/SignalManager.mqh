@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                               SignalManager.mqh |
 //|                          ML EMA Scalping EA - Signal Module      |
-//|                                  v2.0 - Enhanced Signal Quality  |
+//|                         v3.0 - H1 Range Breakout + EMA Strategy  |
 //+------------------------------------------------------------------+
 #property copyright "ML EMA Scalping EA"
 #property strict
@@ -30,7 +30,7 @@ enum ENUM_TRADING_SESSION
 
 //+------------------------------------------------------------------+
 //| Signal Manager Class                                              |
-//| Handles SMA/EMA logic based on the 5-minute scalping strategy    |
+//| Handles SMA/EMA + H1 Range Breakout strategy                     |
 //+------------------------------------------------------------------+
 class CSignalManager
 {
@@ -42,23 +42,33 @@ private:
    int               m_handleSMA900;
    int               m_handleEMA20;
    int               m_handleATR;
-   int               m_handleADX;       // ADX for trend strength
+   int               m_handleADX;
+   int               m_handleATR_H1;     // H1 ATR for range calculation
 
    // Indicator buffers
    double            m_sma900Buffer[];
    double            m_ema20Buffer[];
    double            m_atrBuffer[];
-   double            m_adxBuffer[];     // ADX main line
-   double            m_plusDIBuffer[];  // +DI
-   double            m_minusDIBuffer[]; // -DI
+   double            m_adxBuffer[];
+   double            m_plusDIBuffer[];
+   double            m_minusDIBuffer[];
+   double            m_atrH1Buffer[];
 
    // Settings
    int               m_smaPeriod;
    int               m_emaPeriod;
    int               m_atrPeriod;
    int               m_adxPeriod;
-   double            m_minADX;          // Minimum ADX for entry
-   double            m_minATRMultiple;  // Minimum ATR for volatility filter
+   double            m_minADX;
+   double            m_minATRMultiple;
+
+   // H1 Range Breakout settings
+   bool              m_useH1Breakout;
+   int               m_h1RangeBars;      // Number of H1 bars for range
+   double            m_breakoutBuffer;   // Buffer in pips for breakout confirmation
+   double            m_h1RangeHigh;      // Current H1 range high
+   double            m_h1RangeLow;       // Current H1 range low
+   datetime          m_lastRangeCalcTime;
 
    // State tracking
    double            m_prevEMA20;
@@ -81,8 +91,8 @@ public:
       m_emaPeriod = 20;
       m_atrPeriod = 14;
       m_adxPeriod = 14;
-      m_minADX = 20.0;         // Minimum ADX value for trend
-      m_minATRMultiple = 0.5;  // Minimum volatility
+      m_minADX = 20.0;
+      m_minATRMultiple = 0.5;
       m_prevEMA20 = 0;
       m_prevClose = 0;
       m_isInitialized = false;
@@ -90,10 +100,19 @@ public:
       m_handleEMA20 = INVALID_HANDLE;
       m_handleATR = INVALID_HANDLE;
       m_handleADX = INVALID_HANDLE;
+      m_handleATR_H1 = INVALID_HANDLE;
+
+      // H1 Breakout defaults
+      m_useH1Breakout = true;
+      m_h1RangeBars = 4;         // Look at last 4 H1 bars (4 hours)
+      m_breakoutBuffer = 5.0;    // 5 pips buffer
+      m_h1RangeHigh = 0;
+      m_h1RangeLow = 0;
+      m_lastRangeCalcTime = 0;
 
       // Session filter defaults
       m_useSessionFilter = true;
-      m_allowAsian = false;      // Skip low volatility Asian session
+      m_allowAsian = false;
       m_allowLondon = true;
       m_allowNewYork = true;
    }
@@ -123,17 +142,20 @@ public:
       ArraySetAsSeries(m_adxBuffer, true);
       ArraySetAsSeries(m_plusDIBuffer, true);
       ArraySetAsSeries(m_minusDIBuffer, true);
+      ArraySetAsSeries(m_atrH1Buffer, true);
 
       // Create indicator handles
       m_handleSMA900 = iMA(m_symbol, m_timeframe, m_smaPeriod, 0, MODE_SMA, PRICE_CLOSE);
       m_handleEMA20 = iMA(m_symbol, m_timeframe, m_emaPeriod, 0, MODE_EMA, PRICE_CLOSE);
       m_handleATR = iATR(m_symbol, m_timeframe, m_atrPeriod);
       m_handleADX = iADX(m_symbol, m_timeframe, m_adxPeriod);
+      m_handleATR_H1 = iATR(m_symbol, PERIOD_H1, m_atrPeriod);
 
       if(m_handleSMA900 == INVALID_HANDLE ||
          m_handleEMA20 == INVALID_HANDLE ||
          m_handleATR == INVALID_HANDLE ||
-         m_handleADX == INVALID_HANDLE)
+         m_handleADX == INVALID_HANDLE ||
+         m_handleATR_H1 == INVALID_HANDLE)
       {
          Print("Error creating indicator handles: ", GetLastError());
          return false;
@@ -148,26 +170,11 @@ public:
    //+------------------------------------------------------------------+
    void Deinit()
    {
-      if(m_handleSMA900 != INVALID_HANDLE)
-      {
-         IndicatorRelease(m_handleSMA900);
-         m_handleSMA900 = INVALID_HANDLE;
-      }
-      if(m_handleEMA20 != INVALID_HANDLE)
-      {
-         IndicatorRelease(m_handleEMA20);
-         m_handleEMA20 = INVALID_HANDLE;
-      }
-      if(m_handleATR != INVALID_HANDLE)
-      {
-         IndicatorRelease(m_handleATR);
-         m_handleATR = INVALID_HANDLE;
-      }
-      if(m_handleADX != INVALID_HANDLE)
-      {
-         IndicatorRelease(m_handleADX);
-         m_handleADX = INVALID_HANDLE;
-      }
+      if(m_handleSMA900 != INVALID_HANDLE) { IndicatorRelease(m_handleSMA900); m_handleSMA900 = INVALID_HANDLE; }
+      if(m_handleEMA20 != INVALID_HANDLE) { IndicatorRelease(m_handleEMA20); m_handleEMA20 = INVALID_HANDLE; }
+      if(m_handleATR != INVALID_HANDLE) { IndicatorRelease(m_handleATR); m_handleATR = INVALID_HANDLE; }
+      if(m_handleADX != INVALID_HANDLE) { IndicatorRelease(m_handleADX); m_handleADX = INVALID_HANDLE; }
+      if(m_handleATR_H1 != INVALID_HANDLE) { IndicatorRelease(m_handleATR_H1); m_handleATR_H1 = INVALID_HANDLE; }
       m_isInitialized = false;
    }
 
@@ -178,15 +185,93 @@ public:
    {
       if(!m_isInitialized) return false;
 
-      // Copy indicator values (need at least 5 bars for slope calculation)
       if(CopyBuffer(m_handleSMA900, 0, 0, 5, m_sma900Buffer) < 5) return false;
       if(CopyBuffer(m_handleEMA20, 0, 0, 5, m_ema20Buffer) < 5) return false;
       if(CopyBuffer(m_handleATR, 0, 0, 3, m_atrBuffer) < 3) return false;
-      if(CopyBuffer(m_handleADX, 0, 0, 3, m_adxBuffer) < 3) return false;      // ADX main
-      if(CopyBuffer(m_handleADX, 1, 0, 3, m_plusDIBuffer) < 3) return false;   // +DI
-      if(CopyBuffer(m_handleADX, 2, 0, 3, m_minusDIBuffer) < 3) return false;  // -DI
+      if(CopyBuffer(m_handleADX, 0, 0, 3, m_adxBuffer) < 3) return false;
+      if(CopyBuffer(m_handleADX, 1, 0, 3, m_plusDIBuffer) < 3) return false;
+      if(CopyBuffer(m_handleADX, 2, 0, 3, m_minusDIBuffer) < 3) return false;
+      if(CopyBuffer(m_handleATR_H1, 0, 0, 3, m_atrH1Buffer) < 3) return false;
+
+      // Update H1 range
+      UpdateH1Range();
 
       return true;
+   }
+
+   //+------------------------------------------------------------------+
+   //| Calculate H1 Range (High/Low of last N H1 bars)                  |
+   //+------------------------------------------------------------------+
+   void UpdateH1Range()
+   {
+      datetime currentH1Bar = iTime(m_symbol, PERIOD_H1, 0);
+
+      // Only recalculate on new H1 bar
+      if(currentH1Bar == m_lastRangeCalcTime) return;
+
+      m_lastRangeCalcTime = currentH1Bar;
+
+      // Get high/low of the range (excluding current bar)
+      double highs[], lows[];
+      ArraySetAsSeries(highs, true);
+      ArraySetAsSeries(lows, true);
+
+      if(CopyHigh(m_symbol, PERIOD_H1, 1, m_h1RangeBars, highs) < m_h1RangeBars) return;
+      if(CopyLow(m_symbol, PERIOD_H1, 1, m_h1RangeBars, lows) < m_h1RangeBars) return;
+
+      // Find highest high and lowest low
+      m_h1RangeHigh = highs[0];
+      m_h1RangeLow = lows[0];
+
+      for(int i = 1; i < m_h1RangeBars; i++)
+      {
+         if(highs[i] > m_h1RangeHigh) m_h1RangeHigh = highs[i];
+         if(lows[i] < m_h1RangeLow) m_h1RangeLow = lows[i];
+      }
+   }
+
+   //+------------------------------------------------------------------+
+   //| Check for H1 Range Breakout UP                                   |
+   //+------------------------------------------------------------------+
+   bool CheckH1BreakoutUp()
+   {
+      if(!m_useH1Breakout) return true;  // If disabled, don't filter
+
+      if(m_h1RangeHigh == 0) return false;
+
+      double currentPrice = SymbolInfoDouble(m_symbol, SYMBOL_BID);
+      double pipSize = GetPipSize();
+      double buffer = m_breakoutBuffer * pipSize;
+
+      // Price must be above range high + buffer
+      return currentPrice > (m_h1RangeHigh + buffer);
+   }
+
+   //+------------------------------------------------------------------+
+   //| Check for H1 Range Breakout DOWN                                 |
+   //+------------------------------------------------------------------+
+   bool CheckH1BreakoutDown()
+   {
+      if(!m_useH1Breakout) return true;
+
+      if(m_h1RangeLow == 0) return false;
+
+      double currentPrice = SymbolInfoDouble(m_symbol, SYMBOL_BID);
+      double pipSize = GetPipSize();
+      double buffer = m_breakoutBuffer * pipSize;
+
+      // Price must be below range low - buffer
+      return currentPrice < (m_h1RangeLow - buffer);
+   }
+
+   //+------------------------------------------------------------------+
+   //| Get pip size                                                      |
+   //+------------------------------------------------------------------+
+   double GetPipSize()
+   {
+      int digits = (int)SymbolInfoInteger(m_symbol, SYMBOL_DIGITS);
+      double point = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
+      return (digits == 3 || digits == 5) ? point * 10.0 : point;
    }
 
    //+------------------------------------------------------------------+
@@ -196,26 +281,12 @@ public:
    {
       MqlDateTime dt;
       TimeToStruct(TimeCurrent(), dt);
-      int hour = dt.hour;  // Server time (usually UTC or UTC+2/3)
+      int hour = dt.hour;
 
-      // Adjust for broker server time if needed
-      // These times assume UTC
-
-      // London/NY Overlap (best volatility)
-      if(hour >= 13 && hour < 16)
-         return SESSION_OVERLAP;
-
-      // London session
-      if(hour >= 7 && hour < 16)
-         return SESSION_LONDON;
-
-      // New York session
-      if(hour >= 13 && hour < 22)
-         return SESSION_NEWYORK;
-
-      // Asian session
-      if(hour >= 0 && hour < 9)
-         return SESSION_ASIAN;
+      if(hour >= 13 && hour < 16) return SESSION_OVERLAP;
+      if(hour >= 7 && hour < 16) return SESSION_LONDON;
+      if(hour >= 13 && hour < 22) return SESSION_NEWYORK;
+      if(hour >= 0 && hour < 9) return SESSION_ASIAN;
 
       return SESSION_OFF;
    }
@@ -231,202 +302,100 @@ public:
 
       switch(session)
       {
-         case SESSION_OVERLAP:
-            return true;  // Always allow overlap (best liquidity)
-         case SESSION_LONDON:
-            return m_allowLondon;
-         case SESSION_NEWYORK:
-            return m_allowNewYork;
-         case SESSION_ASIAN:
-            return m_allowAsian;
-         default:
-            return false;
+         case SESSION_OVERLAP: return true;
+         case SESSION_LONDON: return m_allowLondon;
+         case SESSION_NEWYORK: return m_allowNewYork;
+         case SESSION_ASIAN: return m_allowAsian;
+         default: return false;
       }
    }
 
    //+------------------------------------------------------------------+
-   //| Get current SMA900 value                                         |
+   //| Accessors for indicator values                                    |
    //+------------------------------------------------------------------+
-   double GetSMA900(int shift = 0)
-   {
-      if(shift < ArraySize(m_sma900Buffer))
-         return m_sma900Buffer[shift];
-      return 0;
-   }
+   double GetSMA900(int shift = 0) { return (shift < ArraySize(m_sma900Buffer)) ? m_sma900Buffer[shift] : 0; }
+   double GetEMA20(int shift = 0) { return (shift < ArraySize(m_ema20Buffer)) ? m_ema20Buffer[shift] : 0; }
+   double GetATR(int shift = 0) { return (shift < ArraySize(m_atrBuffer)) ? m_atrBuffer[shift] : 0; }
+   double GetADX(int shift = 0) { return (shift < ArraySize(m_adxBuffer)) ? m_adxBuffer[shift] : 0; }
+   double GetH1RangeHigh() { return m_h1RangeHigh; }
+   double GetH1RangeLow() { return m_h1RangeLow; }
+   double GetH1RangeSize() { return (m_h1RangeHigh - m_h1RangeLow) / GetPipSize(); }
 
    //+------------------------------------------------------------------+
-   //| Get current EMA20 value                                          |
+   //| Check ADX strength                                                |
    //+------------------------------------------------------------------+
-   double GetEMA20(int shift = 0)
-   {
-      if(shift < ArraySize(m_ema20Buffer))
-         return m_ema20Buffer[shift];
-      return 0;
-   }
+   bool IsStrongTrend() { return (ArraySize(m_adxBuffer) > 0) && (m_adxBuffer[0] >= m_minADX); }
+   bool IsDIBullish() { return (ArraySize(m_plusDIBuffer) > 0) && (m_plusDIBuffer[0] > m_minusDIBuffer[0]); }
+   bool IsDIBearish() { return (ArraySize(m_minusDIBuffer) > 0) && (m_minusDIBuffer[0] > m_plusDIBuffer[0]); }
 
    //+------------------------------------------------------------------+
-   //| Get current ATR value                                            |
-   //+------------------------------------------------------------------+
-   double GetATR(int shift = 0)
-   {
-      if(shift < ArraySize(m_atrBuffer))
-         return m_atrBuffer[shift];
-      return 0;
-   }
-
-   //+------------------------------------------------------------------+
-   //| Get current ADX value                                            |
-   //+------------------------------------------------------------------+
-   double GetADX(int shift = 0)
-   {
-      if(shift < ArraySize(m_adxBuffer))
-         return m_adxBuffer[shift];
-      return 0;
-   }
-
-   //+------------------------------------------------------------------+
-   //| Check if ADX indicates strong trend                              |
-   //+------------------------------------------------------------------+
-   bool IsStrongTrend()
-   {
-      if(ArraySize(m_adxBuffer) < 1) return false;
-      return m_adxBuffer[0] >= m_minADX;
-   }
-
-   //+------------------------------------------------------------------+
-   //| Check if +DI > -DI (bullish)                                     |
-   //+------------------------------------------------------------------+
-   bool IsDIBullish()
-   {
-      if(ArraySize(m_plusDIBuffer) < 1 || ArraySize(m_minusDIBuffer) < 1) return false;
-      return m_plusDIBuffer[0] > m_minusDIBuffer[0];
-   }
-
-   //+------------------------------------------------------------------+
-   //| Check if -DI > +DI (bearish)                                     |
-   //+------------------------------------------------------------------+
-   bool IsDIBearish()
-   {
-      if(ArraySize(m_plusDIBuffer) < 1 || ArraySize(m_minusDIBuffer) < 1) return false;
-      return m_minusDIBuffer[0] > m_plusDIBuffer[0];
-   }
-
-   //+------------------------------------------------------------------+
-   //| Check if SMA900 is trending up                                   |
-   //| Uses slope calculation over multiple bars                        |
+   //| Trend checks                                                      |
    //+------------------------------------------------------------------+
    bool IsSMAUpTrend()
    {
       if(ArraySize(m_sma900Buffer) < 4) return false;
-
-      // Calculate average slope over 3 bars
       double slope1 = m_sma900Buffer[0] - m_sma900Buffer[1];
       double slope2 = m_sma900Buffer[1] - m_sma900Buffer[2];
       double slope3 = m_sma900Buffer[2] - m_sma900Buffer[3];
-      double avgSlope = (slope1 + slope2 + slope3) / 3.0;
-
-      // Require consistent upward slope
-      return avgSlope > 0 && slope1 > 0;
+      return ((slope1 + slope2 + slope3) / 3.0 > 0) && (slope1 > 0);
    }
 
-   //+------------------------------------------------------------------+
-   //| Check if SMA900 is trending down                                 |
-   //+------------------------------------------------------------------+
    bool IsSMADownTrend()
    {
       if(ArraySize(m_sma900Buffer) < 4) return false;
-
       double slope1 = m_sma900Buffer[0] - m_sma900Buffer[1];
       double slope2 = m_sma900Buffer[1] - m_sma900Buffer[2];
       double slope3 = m_sma900Buffer[2] - m_sma900Buffer[3];
-      double avgSlope = (slope1 + slope2 + slope3) / 3.0;
-
-      return avgSlope < 0 && slope1 < 0;
+      return ((slope1 + slope2 + slope3) / 3.0 < 0) && (slope1 < 0);
    }
 
-   //+------------------------------------------------------------------+
-   //| Check if EMA20 is trending up                                    |
-   //+------------------------------------------------------------------+
    bool IsEMAUpTrend()
    {
       if(ArraySize(m_ema20Buffer) < 4) return false;
-
       double slope1 = m_ema20Buffer[0] - m_ema20Buffer[1];
       double slope2 = m_ema20Buffer[1] - m_ema20Buffer[2];
       double slope3 = m_ema20Buffer[2] - m_ema20Buffer[3];
-      double avgSlope = (slope1 + slope2 + slope3) / 3.0;
-
-      return avgSlope > 0 && slope1 > 0;
+      return ((slope1 + slope2 + slope3) / 3.0 > 0) && (slope1 > 0);
    }
 
-   //+------------------------------------------------------------------+
-   //| Check if EMA20 is trending down                                  |
-   //+------------------------------------------------------------------+
    bool IsEMADownTrend()
    {
       if(ArraySize(m_ema20Buffer) < 4) return false;
-
       double slope1 = m_ema20Buffer[0] - m_ema20Buffer[1];
       double slope2 = m_ema20Buffer[1] - m_ema20Buffer[2];
       double slope3 = m_ema20Buffer[2] - m_ema20Buffer[3];
-      double avgSlope = (slope1 + slope2 + slope3) / 3.0;
-
-      return avgSlope < 0 && slope1 < 0;
+      return ((slope1 + slope2 + slope3) / 3.0 < 0) && (slope1 < 0);
    }
 
-   //+------------------------------------------------------------------+
-   //| Check if price is above SMA900                                   |
-   //+------------------------------------------------------------------+
-   bool IsPriceAboveSMA()
-   {
-      double currentPrice = SymbolInfoDouble(m_symbol, SYMBOL_BID);
-      return currentPrice > m_sma900Buffer[0];
-   }
+   bool IsPriceAboveSMA() { return SymbolInfoDouble(m_symbol, SYMBOL_BID) > m_sma900Buffer[0]; }
+   bool IsPriceBelowSMA() { return SymbolInfoDouble(m_symbol, SYMBOL_BID) < m_sma900Buffer[0]; }
 
    //+------------------------------------------------------------------+
-   //| Check if price is below SMA900                                   |
-   //+------------------------------------------------------------------+
-   bool IsPriceBelowSMA()
-   {
-      double currentPrice = SymbolInfoDouble(m_symbol, SYMBOL_BID);
-      return currentPrice < m_sma900Buffer[0];
-   }
-
-   //+------------------------------------------------------------------+
-   //| Check for EMA breakout UP with confirmation                      |
-   //| Improved: requires stronger confirmation candle                  |
+   //| Check for EMA breakout with candle confirmation                   |
    //+------------------------------------------------------------------+
    bool CheckEMABreakoutUp()
    {
-      // Get candle data
       double prevClose = iClose(m_symbol, m_timeframe, 1);
       double prevOpen = iOpen(m_symbol, m_timeframe, 1);
       double prevHigh = iHigh(m_symbol, m_timeframe, 1);
       double prevLow = iLow(m_symbol, m_timeframe, 1);
       double prev2Close = iClose(m_symbol, m_timeframe, 2);
-      double prev2Low = iLow(m_symbol, m_timeframe, 2);
 
-      // EMA values
       double ema20Current = m_ema20Buffer[1];
       double ema20Prev = m_ema20Buffer[2];
 
-      // Basic breakout: close above EMA, previous close at or below
+      // Basic breakout
       bool basicBreakout = (prevClose > ema20Current) && (prev2Close <= ema20Prev);
-
       if(!basicBreakout) return false;
 
-      // Confirmation 1: Bullish candle (close > open)
+      // Confirmations
       bool isBullish = prevClose > prevOpen;
-
-      // Confirmation 2: Candle body is at least 50% of total range
       double bodySize = MathAbs(prevClose - prevOpen);
       double totalRange = prevHigh - prevLow;
       bool hasGoodBody = totalRange > 0 && (bodySize / totalRange) >= 0.5;
-
-      // Confirmation 3: Close in upper 30% of candle range
       bool closeNearHigh = totalRange > 0 && (prevClose - prevLow) / totalRange >= 0.7;
 
-      // Confirmation 4: ATR filter - ensure sufficient volatility
+      // ATR filter
       double atr = m_atrBuffer[0];
       double avgATR = (m_atrBuffer[0] + m_atrBuffer[1] + m_atrBuffer[2]) / 3.0;
       bool hasVolatility = atr >= avgATR * m_minATRMultiple;
@@ -434,40 +403,26 @@ public:
       return isBullish && hasGoodBody && closeNearHigh && hasVolatility;
    }
 
-   //+------------------------------------------------------------------+
-   //| Check for EMA breakout DOWN with confirmation                    |
-   //+------------------------------------------------------------------+
    bool CheckEMABreakoutDown()
    {
-      // Get candle data
       double prevClose = iClose(m_symbol, m_timeframe, 1);
       double prevOpen = iOpen(m_symbol, m_timeframe, 1);
       double prevHigh = iHigh(m_symbol, m_timeframe, 1);
       double prevLow = iLow(m_symbol, m_timeframe, 1);
       double prev2Close = iClose(m_symbol, m_timeframe, 2);
-      double prev2High = iHigh(m_symbol, m_timeframe, 2);
 
-      // EMA values
       double ema20Current = m_ema20Buffer[1];
       double ema20Prev = m_ema20Buffer[2];
 
-      // Basic breakout: close below EMA, previous close at or above
       bool basicBreakout = (prevClose < ema20Current) && (prev2Close >= ema20Prev);
-
       if(!basicBreakout) return false;
 
-      // Confirmation 1: Bearish candle (close < open)
       bool isBearish = prevClose < prevOpen;
-
-      // Confirmation 2: Candle body is at least 50% of total range
       double bodySize = MathAbs(prevClose - prevOpen);
       double totalRange = prevHigh - prevLow;
       bool hasGoodBody = totalRange > 0 && (bodySize / totalRange) >= 0.5;
-
-      // Confirmation 3: Close in lower 30% of candle range
       bool closeNearLow = totalRange > 0 && (prevHigh - prevClose) / totalRange >= 0.7;
 
-      // Confirmation 4: ATR filter - ensure sufficient volatility
       double atr = m_atrBuffer[0];
       double avgATR = (m_atrBuffer[0] + m_atrBuffer[1] + m_atrBuffer[2]) / 3.0;
       bool hasVolatility = atr >= avgATR * m_minATRMultiple;
@@ -476,43 +431,39 @@ public:
    }
 
    //+------------------------------------------------------------------+
-   //| Generate trading signal based on strategy                        |
-   //| v2.0: Added ADX, DI, and session filters                        |
+   //| Generate trading signal                                          |
+   //| v3.0: EMA Breakout + H1 Range Breakout confirmation              |
    //+------------------------------------------------------------------+
    ENUM_SIGNAL_TYPE GetSignal()
    {
       if(!UpdateData()) return SIGNAL_NONE;
 
       // Session filter
-      if(!IsSessionAllowed())
-         return SIGNAL_NONE;
+      if(!IsSessionAllowed()) return SIGNAL_NONE;
 
-      // ADX filter - require strong trend
-      if(!IsStrongTrend())
-         return SIGNAL_NONE;
+      // ADX filter
+      if(!IsStrongTrend()) return SIGNAL_NONE;
 
       // BUY CONDITIONS:
-      // 1. SMA900 is trending up
-      // 2. Price is above SMA900
-      // 3. EMA20 is trending up
-      // 4. ADX shows strong trend with +DI > -DI
-      // 5. Price breaks EMA20 from below with confirmation
+      // 1. SMA900 up trend + Price above SMA
+      // 2. EMA20 up trend + EMA breakout
+      // 3. ADX strong + DI bullish
+      // 4. H1 Range breakout UP
 
       if(IsSMAUpTrend() && IsPriceAboveSMA() && IsEMAUpTrend() &&
-         IsDIBullish() && CheckEMABreakoutUp())
+         IsDIBullish() && CheckEMABreakoutUp() && CheckH1BreakoutUp())
       {
          return SIGNAL_BUY;
       }
 
       // SELL CONDITIONS:
-      // 1. SMA900 is trending down
-      // 2. Price is below SMA900
-      // 3. EMA20 is trending down
-      // 4. ADX shows strong trend with -DI > +DI
-      // 5. Price breaks EMA20 from above with confirmation
+      // 1. SMA900 down trend + Price below SMA
+      // 2. EMA20 down trend + EMA breakout
+      // 3. ADX strong + DI bearish
+      // 4. H1 Range breakout DOWN
 
       if(IsSMADownTrend() && IsPriceBelowSMA() && IsEMADownTrend() &&
-         IsDIBearish() && CheckEMABreakoutDown())
+         IsDIBearish() && CheckEMABreakoutDown() && CheckH1BreakoutDown())
       {
          return SIGNAL_SELL;
       }
@@ -521,52 +472,37 @@ public:
    }
 
    //+------------------------------------------------------------------+
-   //| Check if position should be closed early (reversal protection)   |
+   //| Check if position should be closed early                         |
    //+------------------------------------------------------------------+
    bool ShouldCloseEarly(ENUM_SIGNAL_TYPE positionType)
    {
       if(!UpdateData()) return false;
 
-      // For BUY position: close if price breaks below EMA20
       if(positionType == SIGNAL_BUY)
       {
          double currentPrice = SymbolInfoDouble(m_symbol, SYMBOL_BID);
          double ema20 = m_ema20Buffer[0];
-
-         // Check if current price is significantly below EMA20
          double atr = m_atrBuffer[0];
-         double threshold = ema20 - (atr * 0.3);
 
-         if(currentPrice < threshold)
-            return true;
-
-         // Also close if EMA20 turns down
-         if(IsEMADownTrend())
-            return true;
+         if(currentPrice < (ema20 - atr * 0.3)) return true;
+         if(IsEMADownTrend()) return true;
       }
 
-      // For SELL position: close if price breaks above EMA20
       if(positionType == SIGNAL_SELL)
       {
          double currentPrice = SymbolInfoDouble(m_symbol, SYMBOL_ASK);
          double ema20 = m_ema20Buffer[0];
-
          double atr = m_atrBuffer[0];
-         double threshold = ema20 + (atr * 0.3);
 
-         if(currentPrice > threshold)
-            return true;
-
-         // Also close if EMA20 turns up
-         if(IsEMAUpTrend())
-            return true;
+         if(currentPrice > (ema20 + atr * 0.3)) return true;
+         if(IsEMAUpTrend()) return true;
       }
 
       return false;
    }
 
    //+------------------------------------------------------------------+
-   //| Calculate dynamic Stop Loss based on ATR                         |
+   //| Calculate dynamic SL based on ATR and H1 range                   |
    //+------------------------------------------------------------------+
    double CalculateDynamicSL(ENUM_SIGNAL_TYPE signalType, double atrMultiplier = 1.5)
    {
@@ -580,32 +516,37 @@ public:
 
       double slDistance = atr * atrMultiplier;
 
-      // Minimum SL distance based on spread
+      // Minimum SL = 3x spread
       double spread = (double)SymbolInfoInteger(m_symbol, SYMBOL_SPREAD) *
                       SymbolInfoDouble(m_symbol, SYMBOL_POINT);
-      double minSL = spread * 3;  // At least 3x spread
-
+      double minSL = spread * 3;
       if(slDistance < minSL) slDistance = minSL;
 
-      // SL should be beyond EMA20 for better protection
+      // For H1 breakout: SL can be at breakout level
+      if(m_useH1Breakout)
+      {
+         if(signalType == SIGNAL_BUY && m_h1RangeHigh > 0)
+         {
+            double rangeBasedSL = currentPrice - m_h1RangeHigh;
+            if(rangeBasedSL > 0 && rangeBasedSL < slDistance)
+               slDistance = rangeBasedSL + (atr * 0.3);  // Add small buffer
+         }
+         else if(signalType == SIGNAL_SELL && m_h1RangeLow > 0)
+         {
+            double rangeBasedSL = m_h1RangeLow - currentPrice;
+            if(rangeBasedSL > 0 && rangeBasedSL < slDistance)
+               slDistance = rangeBasedSL + (atr * 0.3);
+         }
+      }
+
       if(signalType == SIGNAL_BUY)
-      {
-         double emaBasedSL = currentPrice - ema20;
-         if(emaBasedSL > 0 && slDistance < emaBasedSL * 1.2)
-            slDistance = emaBasedSL * 1.2;
          return currentPrice - slDistance;
-      }
-      else // SELL
-      {
-         double emaBasedSL = ema20 - currentPrice;
-         if(emaBasedSL > 0 && slDistance < emaBasedSL * 1.2)
-            slDistance = emaBasedSL * 1.2;
+      else
          return currentPrice + slDistance;
-      }
    }
 
    //+------------------------------------------------------------------+
-   //| Calculate Take Profit (Risk Reward Ratio)                        |
+   //| Calculate Take Profit                                            |
    //+------------------------------------------------------------------+
    double CalculateTP(double entryPrice, double slPrice, ENUM_SIGNAL_TYPE signalType, double rrRatio = 1.0)
    {
@@ -632,13 +573,10 @@ public:
    }
 
    //+------------------------------------------------------------------+
-   //| Set ADX parameters                                               |
+   //| Settings                                                          |
    //+------------------------------------------------------------------+
    void SetADXParams(double minADX) { m_minADX = minADX; }
 
-   //+------------------------------------------------------------------+
-   //| Set session filter parameters                                    |
-   //+------------------------------------------------------------------+
    void SetSessionFilter(bool useFilter, bool allowAsian, bool allowLondon, bool allowNY)
    {
       m_useSessionFilter = useFilter;
@@ -647,10 +585,18 @@ public:
       m_allowNewYork = allowNY;
    }
 
+   void SetH1BreakoutParams(bool useBreakout, int rangeBars, double bufferPips)
+   {
+      m_useH1Breakout = useBreakout;
+      m_h1RangeBars = rangeBars;
+      m_breakoutBuffer = bufferPips;
+   }
+
    //+------------------------------------------------------------------+
    //| Accessors                                                         |
    //+------------------------------------------------------------------+
    string GetSymbol() { return m_symbol; }
    ENUM_TIMEFRAMES GetTimeframe() { return m_timeframe; }
    bool IsInitialized() { return m_isInitialized; }
+   bool IsH1BreakoutEnabled() { return m_useH1Breakout; }
 };
