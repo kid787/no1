@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                              MLEMAScalpingEA.mq5 |
 //|                     Session Breakout EA for MT5                  |
-//|                           v4.1 - GMT Offset Support              |
+//|                           v4.2 - Fintokei DD Protection Fix      |
 //|                                                                  |
 //|  Strategy:                                                       |
 //|  - Calculate Asian session high/low range (configurable in GMT) |
@@ -12,10 +12,17 @@
 //|  - SL at opposite side of range                                  |
 //|  - Fintokei challenge rule compliance                            |
 //|  - GMT offset for easy broker time adjustment                    |
+//|                                                                  |
+//|  v4.2 Changes:                                                   |
+//|  - Fixed: 10% DD limit now properly enforced                     |
+//|  - Added: Hard stop at 8% DD blocks new trades                   |
+//|  - Added: Emergency close at 9% DD closes all positions          |
+//|  - Fixed: Lot calculation returns 0 if below minimum to prevent  |
+//|           exceeding remaining risk allowance                     |
 //+------------------------------------------------------------------+
-#property copyright "Session Breakout EA v4.1"
+#property copyright "Session Breakout EA v4.2"
 #property link      ""
-#property version   "4.10"
+#property version   "4.20"
 #property description "Asian Session Breakout EA with Fintokei compliance"
 #property strict
 
@@ -115,7 +122,8 @@ bool              g_inCooldown;        // Currently in cooldown
 int OnInit()
 {
    Print("===========================================");
-   Print("Session Breakout EA v4.1 Initializing...");
+   Print("Session Breakout EA v4.2 Initializing...");
+   Print("Fintokei DD Protection Fix");
    Print("===========================================");
 
    //--- Generate magic number from EA name
@@ -277,18 +285,36 @@ void OnTick()
    }
 
    //--- CRITICAL: Check for emergency close due to Fintokei rules
-   if(FintokeiRules.ShouldEmergencyClose())
+   //--- This runs on EVERY tick for maximum protection
+   double currentTotalLoss = FintokeiRules.GetTotalLossPercent();
+   double currentDailyLoss = FintokeiRules.GetDailyLossPercent();
+
+   // Hard stop at the limit - close everything immediately
+   if(currentTotalLoss >= InpMaxTotalLoss || currentDailyLoss >= InpMaxDailyLoss)
    {
-      Print("EMERGENCY: Fintokei limit approaching - closing all positions");
+      Print("!!! FINTOKEI LIMIT BREACHED !!! Total: ", currentTotalLoss, "% Daily: ", currentDailyLoss, "%");
+      Print("EMERGENCY CLOSE: Closing ALL positions immediately!");
       CloseAllPositions();
       return;
    }
 
-   //--- Additional Fintokei safety check
-   double currentLoss = FintokeiRules.GetTotalLossPercent();
-   if(currentLoss >= InpMaxTotalLoss * 0.9)  // 90% of limit
+   // Emergency close at 90% of limit
+   if(FintokeiRules.ShouldEmergencyClose())
    {
-      Print("WARNING: Approaching total loss limit (", currentLoss, "%) - blocking new trades");
+      Print("EMERGENCY: Approaching Fintokei limit (Total: ", currentTotalLoss, "%, Daily: ", currentDailyLoss, "%)");
+      Print("Closing all positions to protect account!");
+      CloseAllPositions();
+      return;
+   }
+
+   //--- Block new trades at 80% of limit (8% DD for 10% limit)
+   if(currentTotalLoss >= InpMaxTotalLoss * 0.80 || currentDailyLoss >= InpMaxDailyLoss * 0.80)
+   {
+      // Don't print every tick, just when we have positions or new bars
+      if(HasOpenPosition() || g_isNewBar)
+      {
+         Print("FINTOKEI WARNING: Approaching limit (Total: ", currentTotalLoss, "%) - new trades blocked");
+      }
       return;
    }
 
@@ -679,7 +705,7 @@ void DisplayChartInfo()
    int yStep = 15;
 
    //--- EA Info
-   CreateLabel(prefix + "Title", "=== Session Breakout EA v4.1 ===", x, y, clrGold, 10);
+   CreateLabel(prefix + "Title", "=== Session Breakout EA v4.2 ===", x, y, clrGold, 10);
    y += yStep + 5;
 
    //--- Symbol and time

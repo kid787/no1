@@ -72,8 +72,8 @@ public:
       m_maxTotalLossPercent = 10.0;
       m_maxPositionRiskPercent = 3.0;
 
-      m_warningThreshold = 0.80;
-      m_blockThreshold = 0.95;
+      m_warningThreshold = 0.60;       // 60% of limit = 6% DD triggers warning
+      m_blockThreshold = 0.80;         // 80% of limit = 8% DD blocks new trades
 
       m_status = FINTOKEI_OK;
       m_totalOpenRisk = 0;
@@ -277,6 +277,15 @@ public:
    bool IsTradingAllowed()
    {
       CheckRules();
+
+      // Hard stop: Absolutely no trading if at or above limit
+      if(m_violation.totalLossPercent >= m_maxTotalLossPercent ||
+         m_violation.dailyLossPercent >= m_maxDailyLossPercent)
+      {
+         Print("FINTOKEI HARD STOP: Loss limit reached - ALL trading blocked");
+         return false;
+      }
+
       return (m_status == FINTOKEI_OK || m_status == FINTOKEI_WARNING);
    }
 
@@ -367,7 +376,14 @@ public:
 
       lots = MathFloor(lots / lotStep) * lotStep;
 
-      if(lots < minLot) lots = minLot;
+      // CRITICAL: If calculated lot is less than minimum, return 0 to prevent trading
+      // This prevents the EA from taking trades that exceed the remaining risk allowance
+      if(lots < minLot)
+      {
+         Print("FINTOKEI: Calculated lot (", lots, ") < minimum (", minLot,
+               ") - trade blocked to protect remaining risk allowance");
+         return 0;
+      }
       if(lots > maxLot) lots = maxLot;
 
       return lots;
@@ -394,9 +410,10 @@ public:
    {
       CheckRules();
 
-      // Emergency close if at 98% of any limit
-      return (m_violation.dailyLossPercent >= m_maxDailyLossPercent * 0.98 ||
-              m_violation.totalLossPercent >= m_maxTotalLossPercent * 0.98);
+      // Emergency close if at 90% of any limit (more aggressive to prevent breach)
+      // This gives buffer for slippage and market gaps
+      return (m_violation.dailyLossPercent >= m_maxDailyLossPercent * 0.90 ||
+              m_violation.totalLossPercent >= m_maxTotalLossPercent * 0.90);
    }
 
    //+------------------------------------------------------------------+
