@@ -1,29 +1,26 @@
 //+------------------------------------------------------------------+
 //|                                              MLEMAScalpingEA.mq5 |
-//|                     Session Breakout EA for MT5                  |
-//|                           v4.2 - Fintokei DD Protection Fix      |
+//|                     MTF Trend Scalping EA for MT5 v5.0           |
 //|                                                                  |
 //|  Strategy:                                                       |
-//|  - Calculate Asian session high/low range (configurable in GMT) |
-//|  - Trade breakout during London session                          |
-//|  - BUY: Price breaks above Asian high + buffer                   |
-//|  - SELL: Price breaks below Asian low - buffer                   |
-//|  - One trade per direction per day                               |
-//|  - SL at opposite side of range                                  |
-//|  - Fintokei challenge rule compliance                            |
-//|  - GMT offset for easy broker time adjustment                    |
+//|  - H1 200 EMA determines trend direction (BULLISH/BEARISH)       |
+//|  - M5 20 EMA pullback for entry timing                           |
+//|  - Only trade in trend direction (no counter-trend)              |
+//|  - RSI confirmation for better entry quality                     |
+//|  - ADX filter for trend strength                                 |
 //|                                                                  |
-//|  v4.2 Changes:                                                   |
-//|  - Fixed: 10% DD limit now properly enforced                     |
-//|  - Added: Hard stop at 8% DD blocks new trades                   |
-//|  - Added: Emergency close at 9% DD closes all positions          |
-//|  - Fixed: Lot calculation returns 0 if below minimum to prevent  |
-//|           exceeding remaining risk allowance                     |
+//|  Entry Rules:                                                    |
+//|  - BUY: H1 trend bullish + M5 pullback to 20 EMA + bounce up     |
+//|  - SELL: H1 trend bearish + M5 pullback to 20 EMA + bounce down  |
+//|                                                                  |
+//|  Fintokei Compliance:                                            |
+//|  - 5% daily loss limit, 10% total loss limit                     |
+//|  - Emergency close at 9% DD, block trades at 8% DD               |
 //+------------------------------------------------------------------+
-#property copyright "Session Breakout EA v4.2"
+#property copyright "MTF Trend Scalping EA v5.0"
 #property link      ""
-#property version   "4.20"
-#property description "Asian Session Breakout EA with Fintokei compliance"
+#property version   "5.00"
+#property description "MTF Trend Scalping with H1 Trend + M5 Pullback Entry"
 #property strict
 
 //--- Include modules
@@ -43,59 +40,63 @@
 //+------------------------------------------------------------------+
 //--- General Settings
 input group "=== General Settings ==="
-input string   InpEAName           = "Session_Breakout"; // EA Name (for magic number)
-input bool     InpEnableTrading    = true;               // Enable Trading
-input bool     InpShowChartInfo    = true;               // Show Chart Information
+input string   InpEAName           = "MTF_Trend_Scalp";    // EA Name (for magic number)
+input bool     InpEnableTrading    = true;                 // Enable Trading
+input bool     InpShowChartInfo    = true;                 // Show Chart Information
 
 //--- Broker Time Settings
 input group "=== Broker Time Settings ==="
-input int      InpGMTOffset        = 2;                  // GMT Offset (Titan FX: Winter=2, Summer=3)
+input int      InpGMTOffset        = 2;                    // GMT Offset (Titan FX: Winter=2, Summer=3)
 
-//--- Session Breakout Settings (Times in GMT)
-input group "=== Session Times (GMT) ==="
-input int      InpAsianStartGMT    = 0;                  // Asian Start (GMT) - Tokyo 9:00 = GMT 0:00
-input int      InpAsianEndGMT      = 7;                  // Asian End (GMT) - Before London
-input int      InpLondonStartGMT   = 7;                  // London Start (GMT) - London open
-input int      InpLondonEndGMT     = 16;                 // London End (GMT) - London close
+//--- MTF Trend Settings
+input group "=== MTF Trend Filter (H1) ==="
+input ENUM_TIMEFRAMES InpTrendTF   = PERIOD_H1;            // Trend Timeframe
+input int      InpTrendEmaPeriod   = 200;                  // Trend EMA Period
+input double   InpADXMinStrength   = 20.0;                 // ADX Minimum Strength
 
-//--- Breakout Settings
-input group "=== Breakout Settings ==="
-input double   InpBreakoutBuffer   = 5.0;                // Breakout Buffer (Pips)
-input double   InpMinRangeSize     = 15.0;               // Minimum Range Size (Pips)
-input double   InpMaxRangeSize     = 80.0;               // Maximum Range Size (Pips)
+//--- Entry Settings (M5)
+input group "=== Entry Settings (M5) ==="
+input ENUM_TIMEFRAMES InpEntryTF   = PERIOD_M5;            // Entry Timeframe
+input int      InpEntryEmaPeriod   = 20;                   // Entry EMA Period
+input double   InpPullbackTolerance = 10.0;                // Pullback Tolerance (Pips)
+
+//--- RSI Filter
+input group "=== RSI Filter ==="
+input double   InpRSIOversold      = 30.0;                 // RSI Oversold Level
+input double   InpRSIOverbought    = 70.0;                 // RSI Overbought Level
+
+//--- Trading Hours (GMT)
+input group "=== Trading Hours (GMT) ==="
+input int      InpTradingStartGMT  = 7;                    // Trading Start (GMT) - London Open
+input int      InpTradingEndGMT    = 20;                   // Trading End (GMT) - NY Close
+input int      InpMaxTradesPerDay  = 3;                    // Max Trades Per Day
 
 //--- Risk Management
 input group "=== Risk Management ==="
-input double   InpRiskPercent      = 2.0;                // Risk Per Trade (%)
-input double   InpRRRatio          = 1.5;                // Risk:Reward Ratio
-input double   InpMaxDailyLoss     = 5.0;                // Max Daily Loss (%) - Fintokei
-input double   InpMaxTotalLoss     = 10.0;               // Max Total Loss (%) - Fintokei
-input double   InpMaxPositionRisk  = 3.0;                // Max Position Risk (%) - Fintokei
-input double   InpDrawdownThreshold = 5.0;              // DD Threshold for Lot Reduction (%)
+input double   InpRiskPercent      = 1.5;                  // Risk Per Trade (%)
+input double   InpRRRatio          = 2.0;                  // Risk:Reward Ratio
+input double   InpMaxDailyLoss     = 5.0;                  // Max Daily Loss (%) - Fintokei
+input double   InpMaxTotalLoss     = 10.0;                 // Max Total Loss (%) - Fintokei
+input double   InpMaxPositionRisk  = 3.0;                  // Max Position Risk (%) - Fintokei
+input double   InpDrawdownThreshold = 5.0;                 // DD Threshold for Lot Reduction (%)
 
 //--- Loss Cooldown Settings
 input group "=== Loss Cooldown ==="
-input bool     InpUseCooldown      = true;               // Use Loss Cooldown
-input int      InpMaxConsecLosses  = 3;                  // Max Consecutive Losses Before Cooldown
-input int      InpCooldownBars     = 12;                 // Cooldown Period (Bars)
-
-//--- ML Optimization (optional)
-input group "=== ML Optimization ==="
-input bool     InpEnableML         = false;              // Enable ML Time Filter
-input int      InpMLLearningDays   = 30;                 // ML Learning Period (Days)
-input double   InpMinExpectancy    = 0.0;                // Minimum Expectancy to Trade
+input bool     InpUseCooldown      = true;                 // Use Loss Cooldown
+input int      InpMaxConsecLosses  = 3;                    // Max Consecutive Losses Before Cooldown
+input int      InpCooldownBars     = 12;                   // Cooldown Period (Bars)
 
 //--- Advanced Settings
 input group "=== Advanced Settings ==="
-input int      InpSlippage         = 30;                 // Max Slippage (Points)
-input int      InpATRPeriod        = 14;                 // ATR Period
-input double   InpInitialBalance   = 0;                  // Initial Balance (0=Auto)
+input int      InpSlippage         = 30;                   // Max Slippage (Points)
+input int      InpATRPeriod        = 14;                   // ATR Period
+input double   InpInitialBalance   = 0;                    // Initial Balance (0=Auto)
 
 //+------------------------------------------------------------------+
 //| Global Objects                                                    |
 //+------------------------------------------------------------------+
 CSignalManager    SignalMgr;           // Signal generation
-CMLOptimizer      MLOptimizer;         // ML time optimization
+CMLOptimizer      MLOptimizer;         // ML time optimization (optional)
 CRiskManager      RiskMgr;             // Risk management
 CReportGenerator  ReportGen;           // Performance reporting
 CFintokeiRules    FintokeiRules;       // Fintokei compliance
@@ -122,8 +123,8 @@ bool              g_inCooldown;        // Currently in cooldown
 int OnInit()
 {
    Print("===========================================");
-   Print("Session Breakout EA v4.2 Initializing...");
-   Print("Fintokei DD Protection Fix");
+   Print("MTF Trend Scalping EA v5.0 Initializing...");
+   Print("Strategy: H1 Trend + M5 Pullback Entry");
    Print("===========================================");
 
    //--- Generate magic number from EA name
@@ -136,43 +137,27 @@ int OnInit()
    Trade.SetTypeFilling(ORDER_FILLING_IOC);
    Trade.SetAsyncMode(false);
 
-   //--- Initialize Signal Manager
-   if(!SignalMgr.Init(_Symbol, PERIOD_M5, 0, 0, InpATRPeriod))
+   //--- Initialize Signal Manager with MTF parameters
+   if(!SignalMgr.Init(_Symbol, InpEntryTF, InpTrendTF, InpTrendEmaPeriod, InpEntryEmaPeriod, InpATRPeriod))
    {
       Print("ERROR: Failed to initialize Signal Manager");
       return INIT_FAILED;
    }
 
-   // Set GMT offset first (important!)
+   // Configure Signal Manager
    SignalMgr.SetGMTOffset(InpGMTOffset);
+   SignalMgr.SetTradingHours(InpTradingStartGMT, InpTradingEndGMT);
+   SignalMgr.SetMaxTradesPerDay(InpMaxTradesPerDay);
+   SignalMgr.SetPullbackTolerance(InpPullbackTolerance);
+   SignalMgr.SetRSILevels(InpRSIOversold, InpRSIOverbought);
+   SignalMgr.SetADXMinStrength(InpADXMinStrength);
 
-   // Set session times in GMT
-   SignalMgr.SetSessionTimesGMT(InpAsianStartGMT, InpAsianEndGMT, InpLondonStartGMT, InpLondonEndGMT);
-
-   // Set breakout parameters
-   SignalMgr.SetBreakoutParams(InpBreakoutBuffer, InpMinRangeSize, InpMaxRangeSize);
-
-   Print("Signal Manager initialized");
-   Print("GMT Offset: +", InpGMTOffset);
-   Print("Asian Session (GMT): ", InpAsianStartGMT, ":00 - ", InpAsianEndGMT, ":00");
-   Print("Asian Session (Server): ", SignalMgr.GetAsianStartServer(), ":00 - ", SignalMgr.GetAsianEndServer(), ":00");
-   Print("London Trading (GMT): ", InpLondonStartGMT, ":00 - ", InpLondonEndGMT, ":00");
-   Print("London Trading (Server): ", SignalMgr.GetLondonStartServer(), ":00 - ", SignalMgr.GetLondonEndServer(), ":00");
-   Print("Breakout Buffer: ", InpBreakoutBuffer, " pips");
-   Print("Range Limits: ", InpMinRangeSize, " - ", InpMaxRangeSize, " pips");
-
-   //--- Initialize ML Optimizer (optional)
-   if(InpEnableML)
-   {
-      if(!MLOptimizer.Init(_Symbol, InpMLLearningDays, InpMinExpectancy))
-      {
-         Print("WARNING: ML Optimizer initialization failed - continuing without ML");
-      }
-      else
-      {
-         Print("ML Optimizer initialized");
-      }
-   }
+   Print("Signal Manager initialized for MTF Trend Scalping");
+   Print("Trend TF: ", EnumToString(InpTrendTF), " EMA(", InpTrendEmaPeriod, ")");
+   Print("Entry TF: ", EnumToString(InpEntryTF), " EMA(", InpEntryEmaPeriod, ")");
+   Print("ADX Min: ", InpADXMinStrength, " | Pullback Tolerance: ", InpPullbackTolerance, " pips");
+   Print("Trading Hours (GMT): ", InpTradingStartGMT, ":00 - ", InpTradingEndGMT, ":00");
+   Print("Max Trades/Day: ", InpMaxTradesPerDay);
 
    //--- Initialize Risk Manager
    double initialBal = (InpInitialBalance > 0) ? InpInitialBalance : AccountInfoDouble(ACCOUNT_BALANCE);
@@ -196,7 +181,7 @@ int OnInit()
    FintokeiRules.SetDailyLossLimit(InpMaxDailyLoss);
    FintokeiRules.SetTotalLossLimit(InpMaxTotalLoss);
    FintokeiRules.SetPositionRiskLimit(InpMaxPositionRisk);
-   Print("Fintokei Rules initialized");
+   Print("Fintokei Rules initialized (DD protection active)");
 
    //--- Initialize Report Generator
    if(!ReportGen.Init(_Symbol, InpEAName))
@@ -223,7 +208,7 @@ int OnInit()
    Print("===========================================");
    Print("EA Initialization Complete");
    Print("Symbol: ", _Symbol);
-   Print("Strategy: Asian Session Breakout");
+   Print("Strategy: MTF Trend Scalping");
    Print("Risk Per Trade: ", InpRiskPercent, "%");
    Print("Risk:Reward Ratio: 1:", InpRRRatio);
    Print("===========================================");
@@ -241,12 +226,6 @@ void OnDeinit(const int reason)
    //--- Save reports
    ReportGen.SaveAllReports();
    ReportGen.PrintStatistics();
-
-   //--- Print ML statistics
-   if(InpEnableML)
-   {
-      MLOptimizer.PrintStatisticsReport();
-   }
 
    //--- Print risk status
    RiskMgr.PrintStatus();
@@ -279,7 +258,7 @@ void OnTick()
       if(TimeCurrent() - lastInfoUpdate >= 1)
       {
          DisplayChartInfo();
-         FintokeiRules.DisplayOnChart(10, 250);
+         FintokeiRules.DisplayOnChart(10, 280);
          lastInfoUpdate = TimeCurrent();
       }
    }
@@ -352,7 +331,7 @@ bool IsInCooldown()
 void StartCooldown()
 {
    g_inCooldown = true;
-   g_cooldownEndTime = TimeCurrent() + (InpCooldownBars * PeriodSeconds(PERIOD_M5));
+   g_cooldownEndTime = TimeCurrent() + (InpCooldownBars * PeriodSeconds(InpEntryTF));
    Print("COOLDOWN STARTED: ", g_consecutiveLosses, " consecutive losses. Resuming at ", TimeToString(g_cooldownEndTime));
 }
 
@@ -379,19 +358,13 @@ void ProcessTradingLogic()
       return;
    }
 
-   //--- Check ML time filter (if enabled)
-   if(InpEnableML && !MLOptimizer.IsOptimalTime())
-   {
-      return;
-   }
-
    //--- Check if we already have a position
    if(HasOpenPosition())
    {
       return;
    }
 
-   //--- Get trading signal
+   //--- Get trading signal from MTF Trend Scalping logic
    ENUM_SIGNAL_TYPE signal = SignalMgr.GetSignal();
 
    if(signal == SIGNAL_NONE)
@@ -416,7 +389,7 @@ void ProcessTradingLogic()
 void ExecuteBuyTrade()
 {
    //--- Calculate SL/TP
-   double slPrice = SignalMgr.CalculateDynamicSL(SIGNAL_BUY);
+   double slPrice = SignalMgr.CalculateSL(SIGNAL_BUY);
    double entryPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
    double tpPrice = SignalMgr.CalculateTP(entryPrice, slPrice, SIGNAL_BUY, InpRRRatio);
 
@@ -446,9 +419,12 @@ void ExecuteBuyTrade()
 
    if(Trade.Buy(lots, _Symbol, entryPrice, slPrice, tpPrice, comment))
    {
-      Print("BUY order executed: ", lots, " lots at ", entryPrice);
-      Print("SL: ", slPrice, " (", slPips, " pips) | TP: ", tpPrice, " | RR: 1:", InpRRRatio);
-      Print("Asian Range - High: ", SignalMgr.GetAsianHigh(), " Low: ", SignalMgr.GetAsianLow());
+      Print("=== BUY ORDER EXECUTED ===");
+      Print("Lots: ", lots, " | Entry: ", entryPrice);
+      Print("SL: ", slPrice, " (", DoubleToString(slPips, 1), " pips)");
+      Print("TP: ", tpPrice, " | RR: 1:", InpRRRatio);
+      Print("Trend: ", SignalMgr.GetTrendString());
+      Print("H1 EMA(200): ", SignalMgr.GetTrendEMA(), " | M5 EMA(20): ", SignalMgr.GetEntryEMA());
       g_totalTrades++;
       g_lastTradeTime = TimeCurrent();
    }
@@ -464,7 +440,7 @@ void ExecuteBuyTrade()
 void ExecuteSellTrade()
 {
    //--- Calculate SL/TP
-   double slPrice = SignalMgr.CalculateDynamicSL(SIGNAL_SELL);
+   double slPrice = SignalMgr.CalculateSL(SIGNAL_SELL);
    double entryPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double tpPrice = SignalMgr.CalculateTP(entryPrice, slPrice, SIGNAL_SELL, InpRRRatio);
 
@@ -494,9 +470,12 @@ void ExecuteSellTrade()
 
    if(Trade.Sell(lots, _Symbol, entryPrice, slPrice, tpPrice, comment))
    {
-      Print("SELL order executed: ", lots, " lots at ", entryPrice);
-      Print("SL: ", slPrice, " (", slPips, " pips) | TP: ", tpPrice, " | RR: 1:", InpRRRatio);
-      Print("Asian Range - High: ", SignalMgr.GetAsianHigh(), " Low: ", SignalMgr.GetAsianLow());
+      Print("=== SELL ORDER EXECUTED ===");
+      Print("Lots: ", lots, " | Entry: ", entryPrice);
+      Print("SL: ", slPrice, " (", DoubleToString(slPips, 1), " pips)");
+      Print("TP: ", tpPrice, " | RR: 1:", InpRRRatio);
+      Print("Trend: ", SignalMgr.GetTrendString());
+      Print("H1 EMA(200): ", SignalMgr.GetTrendEMA(), " | M5 EMA(20): ", SignalMgr.GetEntryEMA());
       g_totalTrades++;
       g_lastTradeTime = TimeCurrent();
    }
@@ -554,19 +533,9 @@ void OnTrade()
                g_consecutiveLosses = 0;
             }
 
-            //--- Record in ML
-            if(InpEnableML)
-            {
-               datetime openTime = time - PeriodSeconds(PERIOD_M5);
-               double pipSize = GetPipSize(symbol);
-               double tickValue = SymbolInfoDouble(symbol, SYMBOL_TRADE_TICK_VALUE);
-               double profitPips = (tickValue > 0) ? profit / tickValue * pipSize : 0;
-               MLOptimizer.AddTradeRecord(openTime, time, netProfit, profitPips, false);
-            }
-
             //--- Record in Report Generator
             int posType = (type == DEAL_TYPE_BUY) ? 1 : 0;
-            datetime openTime = time - PeriodSeconds(PERIOD_M5);
+            datetime openTime = time - PeriodSeconds(InpEntryTF);
             ReportGen.AddTrade((long)ticket, openTime, time, symbol, posType,
                                volume, price, price, 0, 0, profit, commission, swap, "");
 
@@ -625,7 +594,7 @@ void CloseAllPositions()
 //+------------------------------------------------------------------+
 bool IsNewBar()
 {
-   datetime currentBarTime = iTime(_Symbol, PERIOD_M5, 0);
+   datetime currentBarTime = iTime(_Symbol, InpEntryTF, 0);
 
    if(g_lastBarTime != currentBarTime)
    {
@@ -664,23 +633,6 @@ double GetPipSize(string symbol)
 }
 
 //+------------------------------------------------------------------+
-//| Normalize lot size                                               |
-//+------------------------------------------------------------------+
-double NormalizeLotSize(string symbol, double lots)
-{
-   double minLot = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
-   double maxLot = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
-   double lotStep = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
-
-   lots = MathFloor(lots / lotStep) * lotStep;
-
-   if(lots < minLot) lots = minLot;
-   if(lots > maxLot) lots = maxLot;
-
-   return lots;
-}
-
-//+------------------------------------------------------------------+
 //| Calculate risk amount for given lots and SL                      |
 //+------------------------------------------------------------------+
 double CalculateRiskAmount(double lots, double slPips)
@@ -700,12 +652,12 @@ double CalculateRiskAmount(double lots, double slPips)
 //+------------------------------------------------------------------+
 void DisplayChartInfo()
 {
-   string prefix = "SB_";
+   string prefix = "MTF_";
    int x = 10, y = 20;
    int yStep = 15;
 
    //--- EA Info
-   CreateLabel(prefix + "Title", "=== Session Breakout EA v4.2 ===", x, y, clrGold, 10);
+   CreateLabel(prefix + "Title", "=== MTF Trend Scalping EA v5.0 ===", x, y, clrGold, 10);
    y += yStep + 5;
 
    //--- Symbol and time
@@ -714,68 +666,60 @@ void DisplayChartInfo()
    CreateLabel(prefix + "Symbol", StringFormat("Symbol: %s | Server: %02d:%02d (GMT+%d)", _Symbol, dt.hour, dt.min, InpGMTOffset), x, y, clrWhite, 9);
    y += yStep;
 
-   //--- Asian Range info
-   double asianHigh = SignalMgr.GetAsianHigh();
-   double asianLow = SignalMgr.GetAsianLow();
-   double rangeSize = SignalMgr.GetRangeSize();
-   bool rangeCalc = SignalMgr.IsRangeCalculated();
+   //--- Update indicators for display
+   SignalMgr.UpdateIndicators();
 
-   string rangeStatus = rangeCalc ? StringFormat("%.5f - %.5f (%.1f pips)", asianLow, asianHigh, rangeSize) : "Not calculated yet";
-   color rangeColor = rangeCalc ? clrLime : clrYellow;
-   CreateLabel(prefix + "Range", "Asian Range: " + rangeStatus, x, y, rangeColor, 9);
+   //--- Trend info
+   string trendStr = SignalMgr.GetTrendString();
+   color trendColor = clrYellow;
+   ENUM_TREND_STATE trend = SignalMgr.GetCurrentTrend();
+   if(trend == TREND_BULLISH) trendColor = clrLime;
+   else if(trend == TREND_BEARISH) trendColor = clrRed;
+
+   CreateLabel(prefix + "Trend", StringFormat("H1 Trend: %s", trendStr), x, y, trendColor, 9);
    y += yStep;
 
-   //--- Range validity
-   if(rangeCalc)
-   {
-      bool validRange = (rangeSize >= InpMinRangeSize && rangeSize <= InpMaxRangeSize);
-      string validStr = validRange ? "VALID" : "OUT OF BOUNDS";
-      color validColor = validRange ? clrLime : clrRed;
-      CreateLabel(prefix + "Valid", StringFormat("Range Status: %s (%.0f-%.0f pips)", validStr, InpMinRangeSize, InpMaxRangeSize), x, y, validColor, 9);
-      y += yStep;
-   }
+   //--- EMA values
+   CreateLabel(prefix + "TrendEMA", StringFormat("H1 EMA(%d): %.5f", InpTrendEmaPeriod, SignalMgr.GetTrendEMA()), x, y, clrSilver, 9);
+   y += yStep;
 
-   //--- Current price vs range
-   double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   string positionStr = "IN RANGE";
+   CreateLabel(prefix + "EntryEMA", StringFormat("M5 EMA(%d): %.5f", InpEntryEmaPeriod, SignalMgr.GetEntryEMA()), x, y, clrSilver, 9);
+   y += yStep;
+
+   //--- Current price vs EMAs
+   double price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double trendEma = SignalMgr.GetTrendEMA();
+   double entryEma = SignalMgr.GetEntryEMA();
+
+   string posStr = "NEUTRAL";
    color posColor = clrYellow;
+   if(price > trendEma && price > entryEma) { posStr = "ABOVE BOTH EMAs"; posColor = clrLime; }
+   else if(price < trendEma && price < entryEma) { posStr = "BELOW BOTH EMAs"; posColor = clrRed; }
+   else if(price > trendEma) { posStr = "Above H1, Near M5 EMA"; posColor = clrAqua; }
+   else if(price < trendEma) { posStr = "Below H1, Near M5 EMA"; posColor = clrOrange; }
 
-   if(rangeCalc && asianHigh > 0)
-   {
-      double buffer = InpBreakoutBuffer * GetPipSize(_Symbol);
-      if(currentPrice > asianHigh + buffer)
-      {
-         positionStr = "ABOVE RANGE (BUY ZONE)";
-         posColor = clrLime;
-      }
-      else if(currentPrice < asianLow - buffer)
-      {
-         positionStr = "BELOW RANGE (SELL ZONE)";
-         posColor = clrRed;
-      }
-   }
-   CreateLabel(prefix + "Position", "Price Position: " + positionStr, x, y, posColor, 9);
+   CreateLabel(prefix + "Position", "Price Position: " + posStr, x, y, posColor, 9);
+   y += yStep;
+
+   //--- Indicators
+   CreateLabel(prefix + "RSI", StringFormat("RSI(14): %.1f", SignalMgr.GetRSI()), x, y, clrSilver, 9);
+   y += yStep;
+
+   double adx = SignalMgr.GetADX();
+   color adxColor = (adx >= InpADXMinStrength) ? clrLime : clrGray;
+   CreateLabel(prefix + "ADX", StringFormat("ADX(14): %.1f (Min: %.0f)", adx, InpADXMinStrength), x, y, adxColor, 9);
    y += yStep;
 
    //--- Trading window
-   bool isLondonTime = SignalMgr.IsLondonTradingTime();
-   string windowStr = isLondonTime ? "OPEN" : "CLOSED";
-   color windowColor = isLondonTime ? clrLime : clrGray;
-   CreateLabel(prefix + "Window", StringFormat("Trading Window: %s (Server %02d:00-%02d:00)", windowStr,
-               SignalMgr.GetLondonStartServer(), SignalMgr.GetLondonEndServer()), x, y, windowColor, 9);
+   bool isTradingTime = SignalMgr.IsTradingTime();
+   string windowStr = isTradingTime ? "OPEN" : "CLOSED";
+   color windowColor = isTradingTime ? clrLime : clrGray;
+   CreateLabel(prefix + "Window", StringFormat("Trading Window: %s (GMT %02d:00-%02d:00)", windowStr,
+               InpTradingStartGMT, InpTradingEndGMT), x, y, windowColor, 9);
    y += yStep;
 
-   //--- Asian session info
-   CreateLabel(prefix + "AsianTime", StringFormat("Asian Range Time: Server %02d:00-%02d:00 (GMT %02d:00-%02d:00)",
-               SignalMgr.GetAsianStartServer(), SignalMgr.GetAsianEndServer(),
-               InpAsianStartGMT, InpAsianEndGMT), x, y, clrSilver, 9);
-   y += yStep;
-
-   //--- Trades taken today
-   bool buyTaken = SignalMgr.IsBuyTakenToday();
-   bool sellTaken = SignalMgr.IsSellTakenToday();
-   string takenStr = StringFormat("BUY: %s | SELL: %s", buyTaken ? "DONE" : "AVAILABLE", sellTaken ? "DONE" : "AVAILABLE");
-   CreateLabel(prefix + "Taken", "Today's Trades: " + takenStr, x, y, clrSilver, 9);
+   //--- Trades today
+   CreateLabel(prefix + "Trades", StringFormat("Trades Today: %d / %d", SignalMgr.GetTradesToday(), InpMaxTradesPerDay), x, y, clrSilver, 9);
    y += yStep;
 
    //--- Cooldown status
@@ -796,7 +740,7 @@ void DisplayChartInfo()
    y += yStep;
 
    //--- Trade stats
-   CreateLabel(prefix + "Trades", StringFormat("Total Trades: %d | Win Rate: %.1f%%",
+   CreateLabel(prefix + "Stats", StringFormat("Total Trades: %d | Win Rate: %.1f%%",
                ReportGen.GetTradeCount(), ReportGen.GetWinRate() * 100), x, y, clrSilver, 9);
    y += yStep;
 
@@ -826,7 +770,7 @@ void CreateLabel(string name, string text, int x, int y, color clr, int fontSize
 //+------------------------------------------------------------------+
 void RemoveChartInfo()
 {
-   string prefix = "SB_";
+   string prefix = "MTF_";
    ObjectsDeleteAll(0, prefix);
 }
 //+------------------------------------------------------------------+
