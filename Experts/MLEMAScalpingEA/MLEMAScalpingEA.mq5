@@ -1,26 +1,30 @@
 //+------------------------------------------------------------------+
 //|                                              MLEMAScalpingEA.mq5 |
-//|                     MTF Trend Scalping EA for MT5 v5.0           |
+//|         Granville's Law + Daily Pivot Strategy EA v6.0           |
 //|                                                                  |
 //|  Strategy:                                                       |
-//|  - H1 200 EMA determines trend direction (BULLISH/BEARISH)       |
-//|  - M5 20 EMA pullback for entry timing                           |
-//|  - Only trade in trend direction (no counter-trend)              |
-//|  - RSI confirmation for better entry quality                     |
-//|  - ADX filter for trend strength                                 |
+//|  - H1 75 EMA determines trend direction (with slope confirm)     |
+//|  - M5 20 EMA for Granville Buy3/Sell3 bounce entry              |
+//|  - Daily Pivot levels (R1/R2, S1/S2) for Take Profit            |
 //|                                                                  |
-//|  Entry Rules:                                                    |
-//|  - BUY: H1 trend bullish + M5 pullback to 20 EMA + bounce up     |
-//|  - SELL: H1 trend bearish + M5 pullback to 20 EMA + bounce down  |
+//|  Entry Rules (Granville's Law):                                  |
+//|  - BUY3: Uptrend, price approaches EMA but does NOT cross below  |
+//|          Bullish candle confirms bounce                          |
+//|  - SELL3: Downtrend, price approaches EMA but does NOT cross up  |
+//|           Bearish candle confirms bounce                         |
+//|                                                                  |
+//|  TP Logic:                                                       |
+//|  - BUY: Target R1 or R2 (whichever gives 1.5+ RR)               |
+//|  - SELL: Target S1 or S2 (whichever gives 1.5+ RR)              |
 //|                                                                  |
 //|  Fintokei Compliance:                                            |
 //|  - 5% daily loss limit, 10% total loss limit                     |
 //|  - Emergency close at 9% DD, block trades at 8% DD               |
 //+------------------------------------------------------------------+
-#property copyright "MTF Trend Scalping EA v5.0"
+#property copyright "Granville Pivot EA v6.0"
 #property link      ""
-#property version   "5.00"
-#property description "MTF Trend Scalping with H1 Trend + M5 Pullback Entry"
+#property version   "6.00"
+#property description "Granville's Law (Buy3/Sell3) + Daily Pivot TP Strategy"
 #property strict
 
 //--- Include modules
@@ -40,57 +44,56 @@
 //+------------------------------------------------------------------+
 //--- General Settings
 input group "=== General Settings ==="
-input string   InpEAName           = "MTF_Trend_Scalp";    // EA Name (for magic number)
-input bool     InpEnableTrading    = true;                 // Enable Trading
-input bool     InpShowChartInfo    = true;                 // Show Chart Information
+input string   InpEAName           = "Granville_Pivot";      // EA Name (for magic number)
+input bool     InpEnableTrading    = true;                   // Enable Trading
+input bool     InpShowChartInfo    = true;                   // Show Chart Information
 
 //--- Broker Time Settings
 input group "=== Broker Time Settings ==="
-input int      InpGMTOffset        = 2;                    // GMT Offset (Titan FX: Winter=2, Summer=3)
+input int      InpGMTOffset        = 2;                      // GMT Offset (Titan FX: Winter=2, Summer=3)
 
-//--- MTF Trend Settings
-input group "=== MTF Trend Filter (H1) ==="
-input ENUM_TIMEFRAMES InpTrendTF   = PERIOD_H1;            // Trend Timeframe
-input int      InpTrendEmaPeriod   = 200;                  // Trend EMA Period
-input double   InpADXMinStrength   = 20.0;                 // ADX Minimum Strength
+//--- Trend Settings (H1)
+input group "=== Trend Filter (H1) ==="
+input ENUM_TIMEFRAMES InpTrendTF   = PERIOD_H1;              // Trend Timeframe
+input int      InpTrendEmaPeriod   = 75;                     // Trend EMA Period (faster than 200)
 
-//--- Entry Settings (M5)
-input group "=== Entry Settings (M5) ==="
-input ENUM_TIMEFRAMES InpEntryTF   = PERIOD_M5;            // Entry Timeframe
-input int      InpEntryEmaPeriod   = 20;                   // Entry EMA Period
-input double   InpPullbackTolerance = 10.0;                // Pullback Tolerance (Pips)
+//--- Entry Settings (M5) - Granville Bounce
+input group "=== Granville Entry (M5) ==="
+input ENUM_TIMEFRAMES InpEntryTF   = PERIOD_M5;              // Entry Timeframe
+input int      InpEntryEmaPeriod   = 20;                     // Entry EMA Period
+input double   InpBounceZone       = 15.0;                   // Bounce Zone (Pips from EMA)
 
 //--- RSI Filter
 input group "=== RSI Filter ==="
-input double   InpRSIOversold      = 30.0;                 // RSI Oversold Level
-input double   InpRSIOverbought    = 70.0;                 // RSI Overbought Level
+input double   InpRSIOversold      = 35.0;                   // RSI Oversold Level
+input double   InpRSIOverbought    = 65.0;                   // RSI Overbought Level
 
 //--- Trading Hours (GMT)
 input group "=== Trading Hours (GMT) ==="
-input int      InpTradingStartGMT  = 7;                    // Trading Start (GMT) - London Open
-input int      InpTradingEndGMT    = 20;                   // Trading End (GMT) - NY Close
-input int      InpMaxTradesPerDay  = 3;                    // Max Trades Per Day
+input int      InpTradingStartGMT  = 7;                      // Trading Start (GMT) - London Open
+input int      InpTradingEndGMT    = 20;                     // Trading End (GMT) - NY Close
+input int      InpMaxTradesPerDay  = 3;                      // Max Trades Per Day
 
 //--- Risk Management
 input group "=== Risk Management ==="
-input double   InpRiskPercent      = 1.5;                  // Risk Per Trade (%)
-input double   InpRRRatio          = 2.0;                  // Risk:Reward Ratio
-input double   InpMaxDailyLoss     = 5.0;                  // Max Daily Loss (%) - Fintokei
-input double   InpMaxTotalLoss     = 10.0;                 // Max Total Loss (%) - Fintokei
-input double   InpMaxPositionRisk  = 3.0;                  // Max Position Risk (%) - Fintokei
-input double   InpDrawdownThreshold = 5.0;                 // DD Threshold for Lot Reduction (%)
+input double   InpRiskPercent      = 1.5;                    // Risk Per Trade (%)
+input double   InpRRRatio          = 2.0;                    // Risk:Reward Ratio (fallback)
+input double   InpMaxDailyLoss     = 5.0;                    // Max Daily Loss (%) - Fintokei
+input double   InpMaxTotalLoss     = 10.0;                   // Max Total Loss (%) - Fintokei
+input double   InpMaxPositionRisk  = 3.0;                    // Max Position Risk (%) - Fintokei
+input double   InpDrawdownThreshold = 5.0;                   // DD Threshold for Lot Reduction (%)
 
 //--- Loss Cooldown Settings
 input group "=== Loss Cooldown ==="
-input bool     InpUseCooldown      = true;                 // Use Loss Cooldown
-input int      InpMaxConsecLosses  = 3;                    // Max Consecutive Losses Before Cooldown
-input int      InpCooldownBars     = 12;                   // Cooldown Period (Bars)
+input bool     InpUseCooldown      = true;                   // Use Loss Cooldown
+input int      InpMaxConsecLosses  = 3;                      // Max Consecutive Losses Before Cooldown
+input int      InpCooldownBars     = 12;                     // Cooldown Period (Bars)
 
 //--- Advanced Settings
 input group "=== Advanced Settings ==="
-input int      InpSlippage         = 30;                   // Max Slippage (Points)
-input int      InpATRPeriod        = 14;                   // ATR Period
-input double   InpInitialBalance   = 0;                    // Initial Balance (0=Auto)
+input int      InpSlippage         = 30;                     // Max Slippage (Points)
+input int      InpATRPeriod        = 14;                     // ATR Period
+input double   InpInitialBalance   = 0;                      // Initial Balance (0=Auto)
 
 //+------------------------------------------------------------------+
 //| Global Objects                                                    |
@@ -123,8 +126,8 @@ bool              g_inCooldown;        // Currently in cooldown
 int OnInit()
 {
    Print("===========================================");
-   Print("MTF Trend Scalping EA v5.0 Initializing...");
-   Print("Strategy: H1 Trend + M5 Pullback Entry");
+   Print("Granville Pivot EA v6.0 Initializing...");
+   Print("Strategy: Granville Buy3/Sell3 + Daily Pivot TP");
    Print("===========================================");
 
    //--- Generate magic number from EA name
@@ -137,7 +140,7 @@ int OnInit()
    Trade.SetTypeFilling(ORDER_FILLING_IOC);
    Trade.SetAsyncMode(false);
 
-   //--- Initialize Signal Manager with MTF parameters
+   //--- Initialize Signal Manager with Granville parameters
    if(!SignalMgr.Init(_Symbol, InpEntryTF, InpTrendTF, InpTrendEmaPeriod, InpEntryEmaPeriod, InpATRPeriod))
    {
       Print("ERROR: Failed to initialize Signal Manager");
@@ -148,14 +151,13 @@ int OnInit()
    SignalMgr.SetGMTOffset(InpGMTOffset);
    SignalMgr.SetTradingHours(InpTradingStartGMT, InpTradingEndGMT);
    SignalMgr.SetMaxTradesPerDay(InpMaxTradesPerDay);
-   SignalMgr.SetPullbackTolerance(InpPullbackTolerance);
+   SignalMgr.SetBounceZone(InpBounceZone);
    SignalMgr.SetRSILevels(InpRSIOversold, InpRSIOverbought);
-   SignalMgr.SetADXMinStrength(InpADXMinStrength);
 
-   Print("Signal Manager initialized for MTF Trend Scalping");
+   Print("Signal Manager initialized for Granville's Law");
    Print("Trend TF: ", EnumToString(InpTrendTF), " EMA(", InpTrendEmaPeriod, ")");
    Print("Entry TF: ", EnumToString(InpEntryTF), " EMA(", InpEntryEmaPeriod, ")");
-   Print("ADX Min: ", InpADXMinStrength, " | Pullback Tolerance: ", InpPullbackTolerance, " pips");
+   Print("Bounce Zone: ", InpBounceZone, " pips | RSI: ", InpRSIOversold, "-", InpRSIOverbought);
    Print("Trading Hours (GMT): ", InpTradingStartGMT, ":00 - ", InpTradingEndGMT, ":00");
    Print("Max Trades/Day: ", InpMaxTradesPerDay);
 
@@ -208,9 +210,9 @@ int OnInit()
    Print("===========================================");
    Print("EA Initialization Complete");
    Print("Symbol: ", _Symbol);
-   Print("Strategy: MTF Trend Scalping");
+   Print("Strategy: Granville Buy3/Sell3 + Pivot TP");
    Print("Risk Per Trade: ", InpRiskPercent, "%");
-   Print("Risk:Reward Ratio: 1:", InpRRRatio);
+   Print("Risk:Reward Fallback: 1:", InpRRRatio);
    Print("===========================================");
 
    return INIT_SUCCEEDED;
@@ -258,7 +260,7 @@ void OnTick()
       if(TimeCurrent() - lastInfoUpdate >= 1)
       {
          DisplayChartInfo();
-         FintokeiRules.DisplayOnChart(10, 280);
+         FintokeiRules.DisplayOnChart(10, 320);
          lastInfoUpdate = TimeCurrent();
       }
    }
@@ -364,7 +366,7 @@ void ProcessTradingLogic()
       return;
    }
 
-   //--- Get trading signal from MTF Trend Scalping logic
+   //--- Get trading signal from Granville logic
    ENUM_SIGNAL_TYPE signal = SignalMgr.GetSignal();
 
    if(signal == SIGNAL_NONE)
@@ -414,17 +416,28 @@ void ExecuteBuyTrade()
       return;
    }
 
+   //--- Determine TP target type
+   string tpType = "RR";
+   double pivotR1 = SignalMgr.GetPivotR1();
+   double pivotR2 = SignalMgr.GetPivotR2();
+   if(MathAbs(tpPrice - pivotR1) < pipSize * 3)
+      tpType = "R1";
+   else if(MathAbs(tpPrice - pivotR2) < pipSize * 3)
+      tpType = "R2";
+
    //--- Execute trade
-   string comment = StringFormat("%s_BUY_%d", InpEAName, g_totalTrades + 1);
+   string comment = StringFormat("%s_BUY3_%d", InpEAName, g_totalTrades + 1);
 
    if(Trade.Buy(lots, _Symbol, entryPrice, slPrice, tpPrice, comment))
    {
-      Print("=== BUY ORDER EXECUTED ===");
+      Print("=== GRANVILLE BUY 3 ORDER EXECUTED ===");
       Print("Lots: ", lots, " | Entry: ", entryPrice);
       Print("SL: ", slPrice, " (", DoubleToString(slPips, 1), " pips)");
-      Print("TP: ", tpPrice, " | RR: 1:", InpRRRatio);
+      Print("TP: ", tpPrice, " (Target: ", tpType, ")");
       Print("Trend: ", SignalMgr.GetTrendString());
-      Print("H1 EMA(200): ", SignalMgr.GetTrendEMA(), " | M5 EMA(20): ", SignalMgr.GetEntryEMA());
+      Print("H1 EMA(", InpTrendEmaPeriod, "): ", SignalMgr.GetTrendEMA());
+      Print("M5 EMA(", InpEntryEmaPeriod, "): ", SignalMgr.GetEntryEMA());
+      Print("Pivot PP: ", SignalMgr.GetPivotPP(), " | R1: ", pivotR1, " | R2: ", pivotR2);
       g_totalTrades++;
       g_lastTradeTime = TimeCurrent();
    }
@@ -465,17 +478,28 @@ void ExecuteSellTrade()
       return;
    }
 
+   //--- Determine TP target type
+   string tpType = "RR";
+   double pivotS1 = SignalMgr.GetPivotS1();
+   double pivotS2 = SignalMgr.GetPivotS2();
+   if(MathAbs(tpPrice - pivotS1) < pipSize * 3)
+      tpType = "S1";
+   else if(MathAbs(tpPrice - pivotS2) < pipSize * 3)
+      tpType = "S2";
+
    //--- Execute trade
-   string comment = StringFormat("%s_SELL_%d", InpEAName, g_totalTrades + 1);
+   string comment = StringFormat("%s_SELL3_%d", InpEAName, g_totalTrades + 1);
 
    if(Trade.Sell(lots, _Symbol, entryPrice, slPrice, tpPrice, comment))
    {
-      Print("=== SELL ORDER EXECUTED ===");
+      Print("=== GRANVILLE SELL 3 ORDER EXECUTED ===");
       Print("Lots: ", lots, " | Entry: ", entryPrice);
       Print("SL: ", slPrice, " (", DoubleToString(slPips, 1), " pips)");
-      Print("TP: ", tpPrice, " | RR: 1:", InpRRRatio);
+      Print("TP: ", tpPrice, " (Target: ", tpType, ")");
       Print("Trend: ", SignalMgr.GetTrendString());
-      Print("H1 EMA(200): ", SignalMgr.GetTrendEMA(), " | M5 EMA(20): ", SignalMgr.GetEntryEMA());
+      Print("H1 EMA(", InpTrendEmaPeriod, "): ", SignalMgr.GetTrendEMA());
+      Print("M5 EMA(", InpEntryEmaPeriod, "): ", SignalMgr.GetEntryEMA());
+      Print("Pivot PP: ", SignalMgr.GetPivotPP(), " | S1: ", pivotS1, " | S2: ", pivotS2);
       g_totalTrades++;
       g_lastTradeTime = TimeCurrent();
    }
@@ -652,12 +676,12 @@ double CalculateRiskAmount(double lots, double slPips)
 //+------------------------------------------------------------------+
 void DisplayChartInfo()
 {
-   string prefix = "MTF_";
+   string prefix = "GRVL_";
    int x = 10, y = 20;
    int yStep = 15;
 
    //--- EA Info
-   CreateLabel(prefix + "Title", "=== MTF Trend Scalping EA v5.0 ===", x, y, clrGold, 10);
+   CreateLabel(prefix + "Title", "=== Granville Pivot EA v6.0 ===", x, y, clrGold, 10);
    y += yStep + 5;
 
    //--- Symbol and time
@@ -701,13 +725,29 @@ void DisplayChartInfo()
    CreateLabel(prefix + "Position", "Price Position: " + posStr, x, y, posColor, 9);
    y += yStep;
 
-   //--- Indicators
-   CreateLabel(prefix + "RSI", StringFormat("RSI(14): %.1f", SignalMgr.GetRSI()), x, y, clrSilver, 9);
+   //--- Daily Pivot Levels
+   y += 5;
+   CreateLabel(prefix + "PivotTitle", "=== Daily Pivot Levels ===", x, y, clrDodgerBlue, 9);
    y += yStep;
 
-   double adx = SignalMgr.GetADX();
-   color adxColor = (adx >= InpADXMinStrength) ? clrLime : clrGray;
-   CreateLabel(prefix + "ADX", StringFormat("ADX(14): %.1f (Min: %.0f)", adx, InpADXMinStrength), x, y, adxColor, 9);
+   double pp = SignalMgr.GetPivotPP();
+   double r1 = SignalMgr.GetPivotR1();
+   double r2 = SignalMgr.GetPivotR2();
+   double s1 = SignalMgr.GetPivotS1();
+   double s2 = SignalMgr.GetPivotS2();
+
+   CreateLabel(prefix + "PivotPP", StringFormat("PP: %.5f", pp), x, y, clrWhite, 9);
+   y += yStep;
+
+   CreateLabel(prefix + "PivotR", StringFormat("R1: %.5f | R2: %.5f", r1, r2), x, y, clrLime, 9);
+   y += yStep;
+
+   CreateLabel(prefix + "PivotS", StringFormat("S1: %.5f | S2: %.5f", s1, s2), x, y, clrRed, 9);
+   y += yStep;
+
+   //--- Indicators
+   y += 5;
+   CreateLabel(prefix + "RSI", StringFormat("RSI(14): %.1f", SignalMgr.GetRSI()), x, y, clrSilver, 9);
    y += yStep;
 
    //--- Trading window
@@ -770,7 +810,7 @@ void CreateLabel(string name, string text, int x, int y, color clr, int fontSize
 //+------------------------------------------------------------------+
 void RemoveChartInfo()
 {
-   string prefix = "MTF_";
+   string prefix = "GRVL_";
    ObjectsDeleteAll(0, prefix);
 }
 //+------------------------------------------------------------------+
