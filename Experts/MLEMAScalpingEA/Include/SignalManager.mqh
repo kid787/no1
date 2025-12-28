@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //|                                               SignalManager.mqh |
-//|                  Granville's Law + Daily Pivot Strategy v6.0    |
+//|                  Granville's Law + Daily Pivot Strategy v6.1    |
 //|                                                                  |
 //|  Strategy:                                                       |
 //|  - H1 75 EMA for trend direction (with slope confirmation)       |
@@ -128,7 +128,7 @@ public:
       m_rsiOverbought = 70;
       m_atrPeriod = 14;
 
-      m_bounceZonePips = 15.0;  // Within 15 pips of EMA
+      m_bounceZonePips = 20.0;  // Within 20 pips of EMA (v6.1: relaxed from 15)
       m_emaSlopeBars = 5;
 
       m_gmtOffset = 2;
@@ -320,8 +320,8 @@ public:
       // Check EMA slope (must be clearly trending)
       double slopePips = (m_trendEmaValue - m_trendEmaPrev) / pipSize;
 
-      // Minimum slope threshold (EMA must have moved at least 3 pips in 5 bars)
-      double minSlope = 3.0;
+      // Minimum slope threshold (v6.1: relaxed from 3 to 1.5 pips)
+      double minSlope = 1.5;
 
       // Bullish: Price above EMA AND EMA is rising
       if(price > m_trendEmaValue && slopePips > minSlope)
@@ -432,10 +432,10 @@ public:
       bool didNotCross = (low[1] >= emaValues[1] - pipSize * 5);  // Allow tiny wick below
       bool bullishCandle = (close[1] > open[1]);
       bool closeAboveEma = (close[1] > emaValues[1]);
-      bool goodCandleSize = (close[1] - open[1] > pipSize * 3);  // Meaningful bullish candle
+      bool goodCandleSize = (close[1] - open[1] > pipSize * 2);  // v6.1: relaxed from 3 to 2 pips
 
-      // RSI confirmation
-      bool rsiOk = (m_rsiValue > 40 && m_rsiValue < 65);  // Not overbought, recovered from low
+      // RSI confirmation (v6.1: relaxed from 40-65 to 30-70)
+      bool rsiOk = (m_rsiValue > 30 && m_rsiValue < 70);
 
       if(lowNearEma && didNotCross && bullishCandle && closeAboveEma && goodCandleSize && rsiOk)
       {
@@ -509,10 +509,10 @@ public:
       bool didNotCross = (high[1] <= emaValues[1] + pipSize * 5);  // Allow tiny wick above
       bool bearishCandle = (close[1] < open[1]);
       bool closeBelowEma = (close[1] < emaValues[1]);
-      bool goodCandleSize = (open[1] - close[1] > pipSize * 3);  // Meaningful bearish candle
+      bool goodCandleSize = (open[1] - close[1] > pipSize * 2);  // v6.1: relaxed from 3 to 2 pips
 
-      // RSI confirmation
-      bool rsiOk = (m_rsiValue < 60 && m_rsiValue > 35);  // Not oversold, coming from high
+      // RSI confirmation (v6.1: relaxed from 35-60 to 30-70)
+      bool rsiOk = (m_rsiValue > 30 && m_rsiValue < 70);
 
       if(highNearEma && didNotCross && bearishCandle && closeBelowEma && goodCandleSize && rsiOk)
       {

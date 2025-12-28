@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //|                                              MLEMAScalpingEA.mq5 |
-//|         Granville's Law + Daily Pivot Strategy EA v6.0           |
+//|         Granville's Law + Daily Pivot Strategy EA v6.1           |
 //|                                                                  |
 //|  Strategy:                                                       |
 //|  - H1 75 EMA determines trend direction (with slope confirm)     |
@@ -21,9 +21,9 @@
 //|  - 5% daily loss limit, 10% total loss limit                     |
 //|  - Emergency close at 9% DD, block trades at 8% DD               |
 //+------------------------------------------------------------------+
-#property copyright "Granville Pivot EA v6.0"
+#property copyright "Granville Pivot EA v6.1"
 #property link      ""
-#property version   "6.00"
+#property version   "6.10"
 #property description "Granville's Law (Buy3/Sell3) + Daily Pivot TP Strategy"
 #property strict
 
@@ -61,12 +61,12 @@ input int      InpTrendEmaPeriod   = 75;                     // Trend EMA Period
 input group "=== Granville Entry (M5) ==="
 input ENUM_TIMEFRAMES InpEntryTF   = PERIOD_M5;              // Entry Timeframe
 input int      InpEntryEmaPeriod   = 20;                     // Entry EMA Period
-input double   InpBounceZone       = 15.0;                   // Bounce Zone (Pips from EMA)
+input double   InpBounceZone       = 20.0;                   // Bounce Zone (Pips from EMA) v6.1: relaxed
 
-//--- RSI Filter
+//--- RSI Filter (v6.1: relaxed to 30-70)
 input group "=== RSI Filter ==="
-input double   InpRSIOversold      = 35.0;                   // RSI Oversold Level
-input double   InpRSIOverbought    = 65.0;                   // RSI Overbought Level
+input double   InpRSIOversold      = 30.0;                   // RSI Oversold Level (v6.1: relaxed)
+input double   InpRSIOverbought    = 70.0;                   // RSI Overbought Level (v6.1: relaxed)
 
 //--- Trading Hours (GMT)
 input group "=== Trading Hours (GMT) ==="
@@ -681,7 +681,7 @@ void DisplayChartInfo()
    int yStep = 15;
 
    //--- EA Info
-   CreateLabel(prefix + "Title", "=== Granville Pivot EA v6.0 ===", x, y, clrGold, 10);
+   CreateLabel(prefix + "Title", "=== Granville Pivot EA v6.1 ===", x, y, clrGold, 10);
    y += yStep + 5;
 
    //--- Symbol and time
