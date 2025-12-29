@@ -24,11 +24,11 @@ input int                InpSHAConfirmBars     = 3;               // SHA Consecu
 input group "=== Breakout Detection Settings ==="
 input int                InpLookbackPeriod     = 30;              // Lookback Period for Support/Resistance
 input int                InpBreakoutLookback   = 8;               // Bars to Check for Breakout
-input double             InpBreakoutPips       = 2.0;             // Breakout Buffer (Pips/Dollars)
+input double             InpBreakoutPips       = 200.0;           // Breakout Buffer (Pips) [Gold: 200=$2]
 
 input group "=== Pullback Detection Settings ==="
 input int                InpPullbackBars       = 12;              // Max Bars to Wait for Pullback
-input double             InpPullbackPips       = 5.0;             // Pullback Tolerance (Pips/Dollars)
+input double             InpPullbackPips       = 500.0;           // Pullback Tolerance (Pips) [Gold: 500=$5]
 input bool               InpRequireBounce      = true;            // Require Bounce Confirmation
 input int                InpBounceStrength     = 2;               // Bounce Strength (1=Weak, 2=Medium, 3=Strong)
 
@@ -37,8 +37,8 @@ input bool               InpUseATRFilter       = true;            // Use ATR Fil
 input int                InpATRPeriod          = 14;              // ATR Period
 input double             InpATRMultiplierSL    = 1.5;             // ATR Multiplier for SL
 input double             InpATRMultiplierTP    = 3.0;             // ATR Multiplier for TP
-input double             InpMinATRPips         = 3.0;             // Minimum ATR (Pips) - Skip low volatility
-input double             InpMaxATRPips         = 30.0;            // Maximum ATR (Pips) - Skip extreme volatility
+input double             InpMinATRPips         = 300.0;           // Min ATR (Pips) [Gold H1: 300=$3, skip low vol]
+input double             InpMaxATRPips         = 5000.0;          // Max ATR (Pips) [Gold H1: 5000=$50, skip extreme]
 
 input group "=== ADX Filter Settings ==="
 input bool               InpUseADXFilter       = true;            // Use ADX Filter
@@ -51,8 +51,8 @@ input double             InpRiskPercent        = 1.0;             // Risk Percen
 input double             InpFixedLot           = 0.1;             // Fixed Lot Size (if Risk% = 0)
 input double             InpRiskRewardRatio    = 2.0;             // Risk:Reward Ratio (Used if ATR TP disabled)
 input bool               InpUseATRForSLTP      = true;            // Use ATR for SL/TP Calculation
-input double             InpMinSLPips          = 3.0;             // Minimum SL Distance (Pips)
-input double             InpMaxSLPips          = 20.0;            // Maximum SL Distance (Pips)
+input double             InpMinSLPips          = 300.0;           // Min SL Distance (Pips) [Gold: 300=$3]
+input double             InpMaxSLPips          = 2000.0;          // Max SL Distance (Pips) [Gold: 2000=$20]
 
 input group "=== Trading Filters ==="
 input int                InpMaxSpreadPips      = 30;              // Maximum Spread (Pips, 0=Disable)
