@@ -760,52 +760,56 @@ void ProcessTradingLogic()
       return;
 
    // ==================== LONG SETUP ====================
+   bool longChecked = false;
+
    if(IsSHABullishConsecutive(InpSHAConfirmBars) && currentClose > shaMiddle)
    {
+      longChecked = true;
+
       // Check ADX for bullish trend
-      if(!CheckADXFilterLong())
-         goto CheckShort;
-
-      // Get resistance from older bars
-      double resistance = GetResistanceLevel(InpBreakoutLookback);
-
-      // Check for breakout above resistance
-      bool breakoutDetected = false;
-      for(int i = 1; i <= InpBreakoutLookback; i++)
+      if(CheckADXFilterLong())
       {
-         double barHigh = iHigh(_Symbol, tf, i);
-         if(barHigh > resistance + breakoutBuffer)
-         {
-            breakoutDetected = true;
-            break;
-         }
-      }
+         // Get resistance from older bars
+         double resistance = GetResistanceLevel(InpBreakoutLookback);
 
-      if(breakoutDetected)
-      {
-         // Check for pullback with improved detection
-         double pullbackBar;
-         if(DetectPullback(true, pullbackBar))
+         // Check for breakout above resistance
+         bool breakoutDetected = false;
+         for(int i = 1; i <= InpBreakoutLookback; i++)
          {
-            // Check for bounce confirmation
-            if(CheckBounce(true, 1))
+            double barHigh = iHigh(_Symbol, tf, i);
+            if(barHigh > resistance + breakoutBuffer)
             {
-               // Final confirmation: current bar is bullish
-               if(currentClose > currentOpen)
+               breakoutDetected = true;
+               break;
+            }
+         }
+
+         if(breakoutDetected)
+         {
+            // Check for pullback with improved detection
+            double pullbackBar;
+            if(DetectPullback(true, pullbackBar))
+            {
+               // Check for bounce confirmation
+               if(CheckBounce(true, 1))
                {
-                  double adx = GetADX(1);
-                  double atr = GetATR(1);
+                  // Final confirmation: current bar is bullish
+                  if(currentClose > currentOpen)
+                  {
+                     double adx = GetADX(1);
+                     double atr = GetATR(1);
 
-                  Print("=================================================");
-                  Print("LONG ENTRY CONDITIONS MET!");
-                  Print("SHA: Bullish x", InpSHAConfirmBars, " bars");
-                  Print("Resistance: ", resistance, " (Broken)");
-                  Print("Pullback detected, Bounce confirmed");
-                  Print("ADX: ", DoubleToString(adx, 2), " | ATR: ", DoubleToString(atr / pipValue, 2), " pips");
-                  Print("=================================================");
+                     Print("=================================================");
+                     Print("LONG ENTRY CONDITIONS MET!");
+                     Print("SHA: Bullish x", InpSHAConfirmBars, " bars");
+                     Print("Resistance: ", resistance, " (Broken)");
+                     Print("Pullback detected, Bounce confirmed");
+                     Print("ADX: ", DoubleToString(adx, 2), " | ATR: ", DoubleToString(atr / pipValue, 2), " pips");
+                     Print("=================================================");
 
-                  ExecuteLongEntry();
-                  return;
+                     ExecuteLongEntry();
+                     return;
+                  }
                }
             }
          }
@@ -813,8 +817,6 @@ void ProcessTradingLogic()
    }
 
    // ==================== SHORT SETUP ====================
-   CheckShort:
-
    if(IsSHABearishConsecutive(InpSHAConfirmBars) && currentClose < shaMiddle)
    {
       // Check ADX for bearish trend
