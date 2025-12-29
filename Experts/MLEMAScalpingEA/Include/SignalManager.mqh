@@ -1,19 +1,23 @@
 //+------------------------------------------------------------------+
 //|                                               SignalManager.mqh |
-//|                  Granville's Law + Daily Pivot Strategy v6.1    |
+//|            Asian Box Breakout + Improved Filters v7.0            |
 //|                                                                  |
 //|  Strategy:                                                       |
-//|  - H1 75 EMA for trend direction (with slope confirmation)       |
-//|  - M5 20 EMA for Granville Buy3/Sell3 bounce entry              |
-//|  - Daily Pivot levels for Take Profit                            |
-//|  - RSI confirmation for entry quality                            |
+//|  - Asian Session: Form range during 23:00-06:00 GMT              |
+//|  - Entry Window: 07:00-10:00 GMT (London Open)                   |
+//|  - Breakout: Price closes outside Asian range + buffer           |
 //|                                                                  |
-//|  Granville Buy 3: In uptrend, price approaches EMA from above   |
-//|                   but does NOT cross below, then bounces up      |
-//|  Granville Sell 3: In downtrend, price approaches EMA from below|
-//|                    but does NOT cross above, then bounces down   |
+//|  Filters (False Breakout Prevention):                            |
+//|  - ATR Filter: ATR(14) > SMA(ATR, 20)                           |
+//|  - Retest Logic: Wait for pullback to broken level               |
+//|  - H1 EMA Trend Alignment                                        |
+//|  - Range Size: 30-80 pips (skip too small or too large)          |
+//|                                                                  |
+//|  Exit:                                                           |
+//|  - TP: Pivot R1/S1 or 2:1 RR                                    |
+//|  - SL: Opposite side of range + buffer                           |
 //+------------------------------------------------------------------+
-#property copyright "Granville Pivot EA v6.0"
+#property copyright "Asian Box Breakout EA v7.0"
 #property strict
 
 //+------------------------------------------------------------------+
@@ -37,56 +41,86 @@ enum ENUM_TREND_STATE
 };
 
 //+------------------------------------------------------------------+
+//| Breakout State Enumeration                                       |
+//+------------------------------------------------------------------+
+enum ENUM_BREAKOUT_STATE
+{
+   BREAKOUT_NONE = 0,
+   BREAKOUT_PENDING_UP = 1,      // Broke up, waiting for retest
+   BREAKOUT_PENDING_DOWN = -1,   // Broke down, waiting for retest
+   BREAKOUT_CONFIRMED_UP = 2,    // Retest complete, ready to buy
+   BREAKOUT_CONFIRMED_DOWN = -2  // Retest complete, ready to sell
+};
+
+//+------------------------------------------------------------------+
 //| Pivot Levels Structure                                           |
 //+------------------------------------------------------------------+
 struct SPivotLevels
 {
-   double PP;      // Pivot Point
-   double R1, R2, R3;  // Resistance levels
-   double S1, S2, S3;  // Support levels
-   datetime calcDate;  // Date calculated
+   double PP;
+   double R1, R2, R3;
+   double S1, S2, S3;
+   datetime calcDate;
 };
 
 //+------------------------------------------------------------------+
-//| Signal Manager Class                                             |
-//| Granville Buy3/Sell3 with Daily Pivot TP                         |
+//| Asian Range Structure                                            |
+//+------------------------------------------------------------------+
+struct SAsianRange
+{
+   double high;
+   double low;
+   datetime rangeStart;
+   datetime rangeEnd;
+   bool isValid;
+   bool breakoutUp;
+   bool breakoutDown;
+   datetime breakoutTime;
+   double breakoutPrice;
+   bool retestComplete;
+};
+
+//+------------------------------------------------------------------+
+//| Signal Manager Class - Asian Box Breakout v7.0                   |
 //+------------------------------------------------------------------+
 class CSignalManager
 {
 private:
    string            m_symbol;
    ENUM_TIMEFRAMES   m_entryTimeframe;     // M5 for entry
-   ENUM_TIMEFRAMES   m_trendTimeframe;     // H1 for trend
+   ENUM_TIMEFRAMES   m_trendTimeframe;     // H1 for trend filter
 
    // Indicator handles
-   int               m_trendEmaHandle;     // 75 EMA on H1
-   int               m_entryEmaHandle;     // 20 EMA on M5
-   int               m_rsiHandle;          // RSI on M5
-   int               m_atrHandle;          // ATR for SL
+   int               m_trendEmaHandle;     // EMA on H1 for trend
+   int               m_atrHandle;          // ATR for volatility filter
+   int               m_atrSmaHandle;       // SMA of ATR
+   int               m_rsiHandle;          // RSI
 
    // EMA settings
-   int               m_trendEmaPeriod;     // 75 (faster than 200 for trend)
-   int               m_entryEmaPeriod;     // 20
-
-   // RSI settings
-   int               m_rsiPeriod;
-   double            m_rsiOversold;
-   double            m_rsiOverbought;
+   int               m_trendEmaPeriod;
 
    // ATR settings
    int               m_atrPeriod;
 
-   // Granville settings
-   double            m_bounceZonePips;     // Pips from EMA considered "near"
-   int               m_emaSlopeBars;       // Bars to check for EMA slope
+   // Asian Session settings (GMT hours)
+   int               m_asianStartGMT;      // 23:00 GMT
+   int               m_asianEndGMT;        // 06:00 GMT
+   int               m_entryStartGMT;      // 07:00 GMT
+   int               m_entryEndGMT;        // 10:00 GMT
 
-   // Session filter (GMT times)
+   // Range filter settings
+   double            m_minRangePips;       // Minimum 30 pips
+   double            m_maxRangePips;       // Maximum 80 pips
+   double            m_breakoutBuffer;     // Buffer pips for entry
+   double            m_retestBuffer;       // Buffer for retest zone
+
+   // Broker time offset
    int               m_gmtOffset;
-   int               m_tradingStartGMT;
-   int               m_tradingEndGMT;
 
    // Current state
+   SAsianRange       m_asianRange;
    ENUM_TREND_STATE  m_currentTrend;
+   ENUM_BREAKOUT_STATE m_breakoutState;
    SPivotLevels      m_pivotLevels;
 
    // Trade management
@@ -96,11 +130,9 @@ private:
 
    // Cached values
    double            m_trendEmaValue;
-   double            m_trendEmaPrev;       // Previous EMA for slope
-   double            m_entryEmaValue;
-   double            m_entryEmaPrev;
-   double            m_rsiValue;
    double            m_atrValue;
+   double            m_atrSmaValue;
+   double            m_rsiValue;
    double            m_lastSL;
    double            m_lastTP;
 
@@ -117,25 +149,30 @@ public:
       m_trendTimeframe = PERIOD_H1;
 
       m_trendEmaHandle = INVALID_HANDLE;
-      m_entryEmaHandle = INVALID_HANDLE;
-      m_rsiHandle = INVALID_HANDLE;
       m_atrHandle = INVALID_HANDLE;
+      m_atrSmaHandle = INVALID_HANDLE;
+      m_rsiHandle = INVALID_HANDLE;
 
-      m_trendEmaPeriod = 75;
-      m_entryEmaPeriod = 20;
-      m_rsiPeriod = 14;
-      m_rsiOversold = 30;
-      m_rsiOverbought = 70;
+      m_trendEmaPeriod = 50;
       m_atrPeriod = 14;
 
-      m_bounceZonePips = 20.0;  // Within 20 pips of EMA (v6.1: relaxed from 15)
-      m_emaSlopeBars = 5;
+      // Asian session: 23:00-06:00 GMT (7 hours)
+      m_asianStartGMT = 23;
+      m_asianEndGMT = 6;
+      // Entry window: 07:00-10:00 GMT (London open)
+      m_entryStartGMT = 7;
+      m_entryEndGMT = 10;
+
+      m_minRangePips = 30.0;
+      m_maxRangePips = 80.0;
+      m_breakoutBuffer = 5.0;
+      m_retestBuffer = 10.0;
 
       m_gmtOffset = 2;
-      m_tradingStartGMT = 7;
-      m_tradingEndGMT = 20;
 
+      ResetAsianRange();
       m_currentTrend = TREND_NONE;
+      m_breakoutState = BREAKOUT_NONE;
       ZeroMemory(m_pivotLevels);
 
       m_lastTradeDate = 0;
@@ -143,11 +180,9 @@ public:
       m_maxTradesPerDay = 3;
 
       m_trendEmaValue = 0;
-      m_trendEmaPrev = 0;
-      m_entryEmaValue = 0;
-      m_entryEmaPrev = 0;
-      m_rsiValue = 50;
       m_atrValue = 0;
+      m_atrSmaValue = 0;
+      m_rsiValue = 50;
       m_lastSL = 0;
       m_lastTP = 0;
 
@@ -163,6 +198,23 @@ public:
    }
 
    //+------------------------------------------------------------------+
+   //| Reset Asian Range                                                |
+   //+------------------------------------------------------------------+
+   void ResetAsianRange()
+   {
+      m_asianRange.high = 0;
+      m_asianRange.low = DBL_MAX;
+      m_asianRange.rangeStart = 0;
+      m_asianRange.rangeEnd = 0;
+      m_asianRange.isValid = false;
+      m_asianRange.breakoutUp = false;
+      m_asianRange.breakoutDown = false;
+      m_asianRange.breakoutTime = 0;
+      m_asianRange.breakoutPrice = 0;
+      m_asianRange.retestComplete = false;
+   }
+
+   //+------------------------------------------------------------------+
    //| Initialize                                                       |
    //+------------------------------------------------------------------+
    bool Init(string symbol, ENUM_TIMEFRAMES entryTF, ENUM_TIMEFRAMES trendTF,
@@ -172,10 +224,9 @@ public:
       m_entryTimeframe = entryTF;
       m_trendTimeframe = trendTF;
       m_trendEmaPeriod = trendEmaPeriod;
-      m_entryEmaPeriod = entryEmaPeriod;
       m_atrPeriod = atrPeriod;
 
-      // Create trend EMA indicator (75 EMA on H1)
+      // Create trend EMA indicator (H1)
       m_trendEmaHandle = iMA(m_symbol, m_trendTimeframe, m_trendEmaPeriod, 0, MODE_EMA, PRICE_CLOSE);
       if(m_trendEmaHandle == INVALID_HANDLE)
       {
@@ -183,23 +234,7 @@ public:
          return false;
       }
 
-      // Create entry EMA indicator (20 EMA on M5)
-      m_entryEmaHandle = iMA(m_symbol, m_entryTimeframe, m_entryEmaPeriod, 0, MODE_EMA, PRICE_CLOSE);
-      if(m_entryEmaHandle == INVALID_HANDLE)
-      {
-         Print("ERROR: Failed to create entry EMA indicator");
-         return false;
-      }
-
-      // Create RSI indicator
-      m_rsiHandle = iRSI(m_symbol, m_entryTimeframe, m_rsiPeriod, PRICE_CLOSE);
-      if(m_rsiHandle == INVALID_HANDLE)
-      {
-         Print("ERROR: Failed to create RSI indicator");
-         return false;
-      }
-
-      // Create ATR indicator
+      // Create ATR indicator (M5)
       m_atrHandle = iATR(m_symbol, m_entryTimeframe, m_atrPeriod);
       if(m_atrHandle == INVALID_HANDLE)
       {
@@ -207,11 +242,20 @@ public:
          return false;
       }
 
+      // Create RSI indicator
+      m_rsiHandle = iRSI(m_symbol, m_entryTimeframe, 14, PRICE_CLOSE);
+      if(m_rsiHandle == INVALID_HANDLE)
+      {
+         Print("ERROR: Failed to create RSI indicator");
+         return false;
+      }
+
       m_isInitialized = true;
-      Print("=== Granville Pivot Signal Manager v6.0 ===");
-      Print("Trend TF: ", EnumToString(m_trendTimeframe), " EMA(", m_trendEmaPeriod, ")");
-      Print("Entry TF: ", EnumToString(m_entryTimeframe), " EMA(", m_entryEmaPeriod, ")");
-      Print("Bounce Zone: ", m_bounceZonePips, " pips");
+      Print("=== Asian Box Breakout v7.0 ===");
+      Print("Asian Session: ", m_asianStartGMT, ":00 - ", m_asianEndGMT, ":00 GMT");
+      Print("Entry Window: ", m_entryStartGMT, ":00 - ", m_entryEndGMT, ":00 GMT");
+      Print("Range Filter: ", m_minRangePips, " - ", m_maxRangePips, " pips");
+      Print("Trend EMA: ", m_trendEmaPeriod, " on ", EnumToString(m_trendTimeframe));
 
       return true;
    }
@@ -222,9 +266,8 @@ public:
    void Deinit()
    {
       if(m_trendEmaHandle != INVALID_HANDLE) { IndicatorRelease(m_trendEmaHandle); m_trendEmaHandle = INVALID_HANDLE; }
-      if(m_entryEmaHandle != INVALID_HANDLE) { IndicatorRelease(m_entryEmaHandle); m_entryEmaHandle = INVALID_HANDLE; }
-      if(m_rsiHandle != INVALID_HANDLE) { IndicatorRelease(m_rsiHandle); m_rsiHandle = INVALID_HANDLE; }
       if(m_atrHandle != INVALID_HANDLE) { IndicatorRelease(m_atrHandle); m_atrHandle = INVALID_HANDLE; }
+      if(m_rsiHandle != INVALID_HANDLE) { IndicatorRelease(m_rsiHandle); m_rsiHandle = INVALID_HANDLE; }
       m_isInitialized = false;
    }
 
@@ -235,29 +278,28 @@ public:
    {
       if(!m_isInitialized) return false;
 
-      double trendEma[], entryEma[], rsi[], atr[];
+      double trendEma[], atr[], rsi[];
       ArraySetAsSeries(trendEma, true);
-      ArraySetAsSeries(entryEma, true);
-      ArraySetAsSeries(rsi, true);
       ArraySetAsSeries(atr, true);
+      ArraySetAsSeries(rsi, true);
 
-      // Get trend EMA (need more bars for slope calculation)
-      if(CopyBuffer(m_trendEmaHandle, 0, 0, m_emaSlopeBars + 1, trendEma) < m_emaSlopeBars + 1) return false;
+      // Get trend EMA
+      if(CopyBuffer(m_trendEmaHandle, 0, 0, 25, trendEma) < 25) return false;
       m_trendEmaValue = trendEma[0];
-      m_trendEmaPrev = trendEma[m_emaSlopeBars];
 
-      // Get entry EMA
-      if(CopyBuffer(m_entryEmaHandle, 0, 0, 5, entryEma) < 5) return false;
-      m_entryEmaValue = entryEma[0];
-      m_entryEmaPrev = entryEma[3];
+      // Get ATR (need 25 bars for SMA calculation)
+      if(CopyBuffer(m_atrHandle, 0, 0, 25, atr) < 25) return false;
+      m_atrValue = atr[0];
+
+      // Calculate ATR SMA(20) manually
+      double atrSum = 0;
+      for(int i = 0; i < 20; i++)
+         atrSum += atr[i];
+      m_atrSmaValue = atrSum / 20.0;
 
       // Get RSI
       if(CopyBuffer(m_rsiHandle, 0, 0, 3, rsi) < 3) return false;
       m_rsiValue = rsi[0];
-
-      // Get ATR
-      if(CopyBuffer(m_atrHandle, 0, 0, 3, atr) < 3) return false;
-      m_atrValue = atr[0];
 
       // Update pivot levels daily
       UpdatePivotLevels();
@@ -274,10 +316,8 @@ public:
       TimeToStruct(TimeCurrent(), dt);
       datetime today = StringToTime(StringFormat("%04d.%02d.%02d", dt.year, dt.mon, dt.day));
 
-      // Only recalculate if new day
       if(m_pivotLevels.calcDate == today) return;
 
-      // Get yesterday's OHLC from D1
       double high[], low[], close[];
       ArraySetAsSeries(high, true);
       ArraySetAsSeries(low, true);
@@ -291,7 +331,6 @@ public:
       double l = low[0];
       double c = close[0];
 
-      // Standard Pivot calculation
       m_pivotLevels.PP = (h + l + c) / 3;
       m_pivotLevels.R1 = 2 * m_pivotLevels.PP - l;
       m_pivotLevels.S1 = 2 * m_pivotLevels.PP - h;
@@ -301,302 +340,339 @@ public:
       m_pivotLevels.S3 = l - 2 * (h - m_pivotLevels.PP);
       m_pivotLevels.calcDate = today;
 
-      Print("=== Daily Pivot Levels Updated ===");
+      Print("=== Daily Pivot Updated ===");
       Print("PP: ", DoubleToString(m_pivotLevels.PP, 5));
       Print("R1: ", DoubleToString(m_pivotLevels.R1, 5), " | S1: ", DoubleToString(m_pivotLevels.S1, 5));
-      Print("R2: ", DoubleToString(m_pivotLevels.R2, 5), " | S2: ", DoubleToString(m_pivotLevels.S2, 5));
    }
 
    //+------------------------------------------------------------------+
-   //| Determine trend from higher timeframe with slope                 |
+   //| Get current GMT hour from server time                            |
+   //+------------------------------------------------------------------+
+   int GetGMTHour()
+   {
+      MqlDateTime dt;
+      TimeToStruct(TimeCurrent(), dt);
+      int gmtHour = dt.hour - m_gmtOffset;
+      if(gmtHour < 0) gmtHour += 24;
+      if(gmtHour >= 24) gmtHour -= 24;
+      return gmtHour;
+   }
+
+   //+------------------------------------------------------------------+
+   //| Check if in Asian session                                        |
+   //+------------------------------------------------------------------+
+   bool IsAsianSession()
+   {
+      int gmtHour = GetGMTHour();
+      // Asian: 23:00-06:00 (crosses midnight)
+      return (gmtHour >= m_asianStartGMT || gmtHour < m_asianEndGMT);
+   }
+
+   //+------------------------------------------------------------------+
+   //| Check if in entry window                                         |
+   //+------------------------------------------------------------------+
+   bool IsEntryWindow()
+   {
+      int gmtHour = GetGMTHour();
+      return (gmtHour >= m_entryStartGMT && gmtHour < m_entryEndGMT);
+   }
+
+   //+------------------------------------------------------------------+
+   //| Update Asian Range during session                                |
+   //+------------------------------------------------------------------+
+   void UpdateAsianRange()
+   {
+      if(!IsAsianSession()) return;
+
+      int gmtHour = GetGMTHour();
+
+      // Reset at start of Asian session (23:00 GMT)
+      if(gmtHour == m_asianStartGMT && m_asianRange.rangeStart == 0)
+      {
+         ResetAsianRange();
+         m_asianRange.rangeStart = TimeCurrent();
+         m_breakoutState = BREAKOUT_NONE;
+         Print("=== Asian Session Started - Forming Range ===");
+      }
+
+      // Update high/low during session
+      double high[], low[];
+      ArraySetAsSeries(high, true);
+      ArraySetAsSeries(low, true);
+
+      if(CopyHigh(m_symbol, m_entryTimeframe, 0, 1, high) < 1) return;
+      if(CopyLow(m_symbol, m_entryTimeframe, 0, 1, low) < 1) return;
+
+      if(high[0] > m_asianRange.high)
+         m_asianRange.high = high[0];
+      if(low[0] < m_asianRange.low)
+         m_asianRange.low = low[0];
+   }
+
+   //+------------------------------------------------------------------+
+   //| Finalize Asian Range at session end                              |
+   //+------------------------------------------------------------------+
+   void FinalizeAsianRange()
+   {
+      int gmtHour = GetGMTHour();
+
+      // Finalize at 06:00 GMT
+      if(gmtHour == m_asianEndGMT && !m_asianRange.isValid && m_asianRange.rangeStart > 0)
+      {
+         m_asianRange.rangeEnd = TimeCurrent();
+
+         double pipSize = GetPipSize();
+         double rangePips = (m_asianRange.high - m_asianRange.low) / pipSize;
+
+         // Validate range size
+         if(rangePips >= m_minRangePips && rangePips <= m_maxRangePips)
+         {
+            m_asianRange.isValid = true;
+            Print("=== Asian Range VALID ===");
+            Print("High: ", DoubleToString(m_asianRange.high, 5));
+            Print("Low: ", DoubleToString(m_asianRange.low, 5));
+            Print("Range: ", DoubleToString(rangePips, 1), " pips");
+         }
+         else
+         {
+            Print("Asian Range INVALID - Size: ", DoubleToString(rangePips, 1), " pips (Need ", m_minRangePips, "-", m_maxRangePips, ")");
+            m_asianRange.isValid = false;
+         }
+      }
+   }
+
+   //+------------------------------------------------------------------+
+   //| Get trend from H1 EMA                                            |
    //+------------------------------------------------------------------+
    ENUM_TREND_STATE GetTrend()
    {
       if(!UpdateIndicators()) return TREND_NONE;
 
       double price = SymbolInfoDouble(m_symbol, SYMBOL_BID);
-      double pipSize = GetPipSize();
 
-      // Check EMA slope (must be clearly trending)
-      double slopePips = (m_trendEmaValue - m_trendEmaPrev) / pipSize;
-
-      // Minimum slope threshold (v6.1: relaxed from 3 to 1.5 pips)
-      double minSlope = 1.5;
-
-      // Bullish: Price above EMA AND EMA is rising
-      if(price > m_trendEmaValue && slopePips > minSlope)
-      {
+      // Simple trend: price vs EMA
+      if(price > m_trendEmaValue)
          m_currentTrend = TREND_BULLISH;
-      }
-      // Bearish: Price below EMA AND EMA is falling
-      else if(price < m_trendEmaValue && slopePips < -minSlope)
-      {
+      else if(price < m_trendEmaValue)
          m_currentTrend = TREND_BEARISH;
-      }
       else
-      {
          m_currentTrend = TREND_NONE;
-      }
 
       return m_currentTrend;
    }
 
    //+------------------------------------------------------------------+
-   //| Check for Granville signal                                       |
+   //| Check ATR volatility filter                                      |
+   //+------------------------------------------------------------------+
+   bool IsVolatilityOK()
+   {
+      // ATR must be above its 20-period average (expanding volatility)
+      return (m_atrValue > m_atrSmaValue);
+   }
+
+   //+------------------------------------------------------------------+
+   //| Check for breakout                                               |
+   //+------------------------------------------------------------------+
+   void CheckBreakout()
+   {
+      if(!m_asianRange.isValid) return;
+      if(!IsEntryWindow()) return;
+      if(m_asianRange.breakoutUp || m_asianRange.breakoutDown) return;
+
+      double pipSize = GetPipSize();
+      double buffer = m_breakoutBuffer * pipSize;
+
+      double close[];
+      ArraySetAsSeries(close, true);
+      if(CopyClose(m_symbol, m_entryTimeframe, 0, 2, close) < 2) return;
+
+      // Breakout UP: Close above Asian high + buffer
+      if(close[1] > m_asianRange.high + buffer)
+      {
+         m_asianRange.breakoutUp = true;
+         m_asianRange.breakoutTime = TimeCurrent();
+         m_asianRange.breakoutPrice = close[1];
+         m_breakoutState = BREAKOUT_PENDING_UP;
+         Print("=== BREAKOUT UP Detected ===");
+         Print("Price: ", close[1], " > Asian High: ", m_asianRange.high);
+      }
+      // Breakout DOWN: Close below Asian low - buffer
+      else if(close[1] < m_asianRange.low - buffer)
+      {
+         m_asianRange.breakoutDown = true;
+         m_asianRange.breakoutTime = TimeCurrent();
+         m_asianRange.breakoutPrice = close[1];
+         m_breakoutState = BREAKOUT_PENDING_DOWN;
+         Print("=== BREAKOUT DOWN Detected ===");
+         Print("Price: ", close[1], " < Asian Low: ", m_asianRange.low);
+      }
+   }
+
+   //+------------------------------------------------------------------+
+   //| Check for retest confirmation                                    |
+   //+------------------------------------------------------------------+
+   void CheckRetest()
+   {
+      if(m_breakoutState != BREAKOUT_PENDING_UP && m_breakoutState != BREAKOUT_PENDING_DOWN)
+         return;
+
+      double pipSize = GetPipSize();
+      double retestZone = m_retestBuffer * pipSize;
+
+      double low[], high[], close[];
+      ArraySetAsSeries(low, true);
+      ArraySetAsSeries(high, true);
+      ArraySetAsSeries(close, true);
+
+      if(CopyLow(m_symbol, m_entryTimeframe, 0, 3, low) < 3) return;
+      if(CopyHigh(m_symbol, m_entryTimeframe, 0, 3, high) < 3) return;
+      if(CopyClose(m_symbol, m_entryTimeframe, 0, 3, close) < 3) return;
+
+      // Retest for UP breakout: price pulls back toward Asian high
+      if(m_breakoutState == BREAKOUT_PENDING_UP)
+      {
+         // Check if price retested (came back near Asian high)
+         if(low[1] <= m_asianRange.high + retestZone)
+         {
+            // And bounced (current close above retest low)
+            if(close[1] > low[1] && close[1] > m_asianRange.high)
+            {
+               m_breakoutState = BREAKOUT_CONFIRMED_UP;
+               m_asianRange.retestComplete = true;
+               Print("=== RETEST COMPLETE - BUY Confirmed ===");
+            }
+         }
+         // Alternative: Skip retest if strong momentum (2+ candles above)
+         else if(close[1] > m_asianRange.high + retestZone * 2 && close[2] > m_asianRange.high)
+         {
+            m_breakoutState = BREAKOUT_CONFIRMED_UP;
+            m_asianRange.retestComplete = true;
+            Print("=== STRONG MOMENTUM - BUY Confirmed (no retest needed) ===");
+         }
+      }
+      // Retest for DOWN breakout: price pulls back toward Asian low
+      else if(m_breakoutState == BREAKOUT_PENDING_DOWN)
+      {
+         // Check if price retested (came back near Asian low)
+         if(high[1] >= m_asianRange.low - retestZone)
+         {
+            // And bounced down (current close below retest high)
+            if(close[1] < high[1] && close[1] < m_asianRange.low)
+            {
+               m_breakoutState = BREAKOUT_CONFIRMED_DOWN;
+               m_asianRange.retestComplete = true;
+               Print("=== RETEST COMPLETE - SELL Confirmed ===");
+            }
+         }
+         // Alternative: Skip retest if strong momentum
+         else if(close[1] < m_asianRange.low - retestZone * 2 && close[2] < m_asianRange.low)
+         {
+            m_breakoutState = BREAKOUT_CONFIRMED_DOWN;
+            m_asianRange.retestComplete = true;
+            Print("=== STRONG MOMENTUM - SELL Confirmed (no retest needed) ===");
+         }
+      }
+   }
+
+   //+------------------------------------------------------------------+
+   //| Main signal function                                             |
    //+------------------------------------------------------------------+
    ENUM_SIGNAL_TYPE GetSignal()
    {
       if(!m_isInitialized) return SIGNAL_NONE;
 
-      // Check trading time
-      if(!IsTradingTime()) return SIGNAL_NONE;
-
-      // Check daily trade limit
-      CheckDailyReset();
-      if(m_tradesToday >= m_maxTradesPerDay) return SIGNAL_NONE;
-
       // Update indicators
       if(!UpdateIndicators()) return SIGNAL_NONE;
 
-      // Get trend direction
+      // Daily trade limit
+      CheckDailyReset();
+      if(m_tradesToday >= m_maxTradesPerDay) return SIGNAL_NONE;
+
+      // Phase 1: Form Asian range during session
+      UpdateAsianRange();
+
+      // Phase 2: Finalize range at session end
+      FinalizeAsianRange();
+
+      // Phase 3: Check for breakout during entry window
+      CheckBreakout();
+
+      // Phase 4: Check for retest confirmation
+      CheckRetest();
+
+      // Phase 5: Generate signal if confirmed
+      if(!IsEntryWindow()) return SIGNAL_NONE;
+      if(!m_asianRange.isValid) return SIGNAL_NONE;
+
+      // Get trend for filter
       ENUM_TREND_STATE trend = GetTrend();
-      if(trend == TREND_NONE) return SIGNAL_NONE;
 
-      // Check for Granville bounce signals
-      if(trend == TREND_BULLISH)
+      // ATR volatility filter
+      if(!IsVolatilityOK())
       {
-         return CheckGranvilleBuy3();
-      }
-      else if(trend == TREND_BEARISH)
-      {
-         return CheckGranvilleSell3();
+         // Print("ATR Filter: Volatility too low (ATR: ", m_atrValue, " < SMA: ", m_atrSmaValue, ")");
+         return SIGNAL_NONE;
       }
 
-      return SIGNAL_NONE;
-   }
-
-   //+------------------------------------------------------------------+
-   //| Granville Buy 3: Bounce off rising EMA without crossing          |
-   //| - Price is above rising 20 EMA                                   |
-   //| - Price pulls back TOWARD EMA but does NOT cross below           |
-   //| - Bullish candle confirms bounce                                 |
-   //+------------------------------------------------------------------+
-   ENUM_SIGNAL_TYPE CheckGranvilleBuy3()
-   {
-      double ema = m_entryEmaValue;
-      double pipSize = GetPipSize();
-      double bounceZone = m_bounceZonePips * pipSize;
-
-      // Get recent price data
-      double high[], low[], close[], open[];
-      ArraySetAsSeries(high, true);
-      ArraySetAsSeries(low, true);
-      ArraySetAsSeries(close, true);
-      ArraySetAsSeries(open, true);
-
-      if(CopyHigh(m_symbol, m_entryTimeframe, 0, 6, high) < 6) return SIGNAL_NONE;
-      if(CopyLow(m_symbol, m_entryTimeframe, 0, 6, low) < 6) return SIGNAL_NONE;
-      if(CopyClose(m_symbol, m_entryTimeframe, 0, 6, close) < 6) return SIGNAL_NONE;
-      if(CopyOpen(m_symbol, m_entryTimeframe, 0, 6, open) < 6) return SIGNAL_NONE;
-
-      // Get EMA values for each bar
-      double emaValues[];
-      ArraySetAsSeries(emaValues, true);
-      if(CopyBuffer(m_entryEmaHandle, 0, 0, 6, emaValues) < 6) return SIGNAL_NONE;
-
-      // Check EMA is rising (entry EMA slope)
-      bool emaRising = (emaValues[0] > emaValues[3]);
-      if(!emaRising) return SIGNAL_NONE;
-
-      // GRANVILLE BUY 3 CONDITIONS:
-      // 1. Bar[2] or Bar[3]: Price came close to EMA (pullback)
-      // 2. Bar[1]: Low approached but DID NOT cross below EMA
-      // 3. Bar[1]: Bullish candle (close > open) with close above EMA
-      // 4. RSI is not overbought and shows recovery
-
-      bool hadPullback = false;
-      for(int i = 2; i <= 4; i++)
+      // BUY Signal: Breakout up confirmed + bullish trend
+      if(m_breakoutState == BREAKOUT_CONFIRMED_UP)
       {
-         // Check if any recent bar came close to EMA (within bounce zone)
-         if(low[i] <= emaValues[i] + bounceZone && low[i] >= emaValues[i] - pipSize * 3)
+         if(trend == TREND_BULLISH)
          {
-            hadPullback = true;
-            break;
+            Print("=== BUY SIGNAL GENERATED ===");
+            Print("Asian High: ", m_asianRange.high, " | Trend: BULLISH");
+            Print("ATR: ", DoubleToString(m_atrValue * 100000, 1), " > SMA: ", DoubleToString(m_atrSmaValue * 100000, 1));
+            return SIGNAL_BUY;
+         }
+         else
+         {
+            Print("BUY blocked - Trend not bullish");
          }
       }
 
-      if(!hadPullback) return SIGNAL_NONE;
-
-      // Bar[1] conditions (confirmed candle)
-      bool lowNearEma = (low[1] <= emaValues[1] + bounceZone);
-      bool didNotCross = (low[1] >= emaValues[1] - pipSize * 5);  // Allow tiny wick below
-      bool bullishCandle = (close[1] > open[1]);
-      bool closeAboveEma = (close[1] > emaValues[1]);
-      bool goodCandleSize = (close[1] - open[1] > pipSize * 2);  // v6.1: relaxed from 3 to 2 pips
-
-      // RSI confirmation (v6.1: relaxed from 40-65 to 30-70)
-      bool rsiOk = (m_rsiValue > 30 && m_rsiValue < 70);
-
-      if(lowNearEma && didNotCross && bullishCandle && closeAboveEma && goodCandleSize && rsiOk)
+      // SELL Signal: Breakout down confirmed + bearish trend
+      if(m_breakoutState == BREAKOUT_CONFIRMED_DOWN)
       {
-         Print("=== GRANVILLE BUY 3 Signal ===");
-         Print("H1 Trend: BULLISH | EMA Slope: RISING");
-         Print("M5 EMA(20): ", DoubleToString(ema, 5));
-         Print("Bar[1] Low: ", DoubleToString(low[1], 5), " (did not cross below)");
-         Print("Bar[1] Close: ", DoubleToString(close[1], 5), " (above EMA)");
-         Print("RSI: ", DoubleToString(m_rsiValue, 1));
-         Print("Target R1: ", DoubleToString(m_pivotLevels.R1, 5));
-         return SIGNAL_BUY;
-      }
-
-      return SIGNAL_NONE;
-   }
-
-   //+------------------------------------------------------------------+
-   //| Granville Sell 3: Bounce off falling EMA without crossing        |
-   //| - Price is below falling 20 EMA                                  |
-   //| - Price pulls back TOWARD EMA but does NOT cross above           |
-   //| - Bearish candle confirms bounce                                 |
-   //+------------------------------------------------------------------+
-   ENUM_SIGNAL_TYPE CheckGranvilleSell3()
-   {
-      double ema = m_entryEmaValue;
-      double pipSize = GetPipSize();
-      double bounceZone = m_bounceZonePips * pipSize;
-
-      // Get recent price data
-      double high[], low[], close[], open[];
-      ArraySetAsSeries(high, true);
-      ArraySetAsSeries(low, true);
-      ArraySetAsSeries(close, true);
-      ArraySetAsSeries(open, true);
-
-      if(CopyHigh(m_symbol, m_entryTimeframe, 0, 6, high) < 6) return SIGNAL_NONE;
-      if(CopyLow(m_symbol, m_entryTimeframe, 0, 6, low) < 6) return SIGNAL_NONE;
-      if(CopyClose(m_symbol, m_entryTimeframe, 0, 6, close) < 6) return SIGNAL_NONE;
-      if(CopyOpen(m_symbol, m_entryTimeframe, 0, 6, open) < 6) return SIGNAL_NONE;
-
-      // Get EMA values for each bar
-      double emaValues[];
-      ArraySetAsSeries(emaValues, true);
-      if(CopyBuffer(m_entryEmaHandle, 0, 0, 6, emaValues) < 6) return SIGNAL_NONE;
-
-      // Check EMA is falling (entry EMA slope)
-      bool emaFalling = (emaValues[0] < emaValues[3]);
-      if(!emaFalling) return SIGNAL_NONE;
-
-      // GRANVILLE SELL 3 CONDITIONS:
-      // 1. Bar[2] or Bar[3]: Price came close to EMA (pullback)
-      // 2. Bar[1]: High approached but DID NOT cross above EMA
-      // 3. Bar[1]: Bearish candle (close < open) with close below EMA
-      // 4. RSI is not oversold and shows decline
-
-      bool hadPullback = false;
-      for(int i = 2; i <= 4; i++)
-      {
-         // Check if any recent bar came close to EMA (within bounce zone)
-         if(high[i] >= emaValues[i] - bounceZone && high[i] <= emaValues[i] + pipSize * 3)
+         if(trend == TREND_BEARISH)
          {
-            hadPullback = true;
-            break;
+            Print("=== SELL SIGNAL GENERATED ===");
+            Print("Asian Low: ", m_asianRange.low, " | Trend: BEARISH");
+            Print("ATR: ", DoubleToString(m_atrValue * 100000, 1), " > SMA: ", DoubleToString(m_atrSmaValue * 100000, 1));
+            return SIGNAL_SELL;
+         }
+         else
+         {
+            Print("SELL blocked - Trend not bearish");
          }
       }
 
-      if(!hadPullback) return SIGNAL_NONE;
-
-      // Bar[1] conditions (confirmed candle)
-      bool highNearEma = (high[1] >= emaValues[1] - bounceZone);
-      bool didNotCross = (high[1] <= emaValues[1] + pipSize * 5);  // Allow tiny wick above
-      bool bearishCandle = (close[1] < open[1]);
-      bool closeBelowEma = (close[1] < emaValues[1]);
-      bool goodCandleSize = (open[1] - close[1] > pipSize * 2);  // v6.1: relaxed from 3 to 2 pips
-
-      // RSI confirmation (v6.1: relaxed from 35-60 to 30-70)
-      bool rsiOk = (m_rsiValue > 30 && m_rsiValue < 70);
-
-      if(highNearEma && didNotCross && bearishCandle && closeBelowEma && goodCandleSize && rsiOk)
-      {
-         Print("=== GRANVILLE SELL 3 Signal ===");
-         Print("H1 Trend: BEARISH | EMA Slope: FALLING");
-         Print("M5 EMA(20): ", DoubleToString(ema, 5));
-         Print("Bar[1] High: ", DoubleToString(high[1], 5), " (did not cross above)");
-         Print("Bar[1] Close: ", DoubleToString(close[1], 5), " (below EMA)");
-         Print("RSI: ", DoubleToString(m_rsiValue, 1));
-         Print("Target S1: ", DoubleToString(m_pivotLevels.S1, 5));
-         return SIGNAL_SELL;
-      }
-
       return SIGNAL_NONE;
    }
 
    //+------------------------------------------------------------------+
-   //| Calculate SL based on swing and ATR                              |
+   //| Calculate SL - opposite side of Asian range                      |
    //+------------------------------------------------------------------+
    double CalculateSL(ENUM_SIGNAL_TYPE signal)
    {
-      double price = (signal == SIGNAL_BUY) ?
-                     SymbolInfoDouble(m_symbol, SYMBOL_ASK) :
-                     SymbolInfoDouble(m_symbol, SYMBOL_BID);
-
       double pipSize = GetPipSize();
-
-      // SL below/above recent swing + ATR buffer
-      double swingSL = GetSwingSL(signal);
-      double atrSL = m_atrValue * 1.5;
-
-      double slDistance = MathMax(swingSL, atrSL);
-
-      // Minimum 15 pips, maximum 40 pips
-      double minSL = 15 * pipSize;
-      double maxSL = 40 * pipSize;
-      slDistance = MathMax(minSL, MathMin(maxSL, slDistance));
+      double buffer = 5 * pipSize;  // 5 pips buffer
 
       if(signal == SIGNAL_BUY)
-         m_lastSL = price - slDistance;
+      {
+         // SL below Asian low
+         m_lastSL = m_asianRange.low - buffer;
+      }
       else
-         m_lastSL = price + slDistance;
+      {
+         // SL above Asian high
+         m_lastSL = m_asianRange.high + buffer;
+      }
 
       return m_lastSL;
    }
 
    //+------------------------------------------------------------------+
-   //| Get swing SL distance                                            |
-   //+------------------------------------------------------------------+
-   double GetSwingSL(ENUM_SIGNAL_TYPE signal)
-   {
-      double price = SymbolInfoDouble(m_symbol, SYMBOL_BID);
-      double pipSize = GetPipSize();
-
-      if(signal == SIGNAL_BUY)
-      {
-         double low[];
-         ArraySetAsSeries(low, true);
-         if(CopyLow(m_symbol, m_entryTimeframe, 0, 15, low) < 15)
-            return m_atrValue * 1.5;
-
-         double swingLow = low[0];
-         for(int i = 1; i < 15; i++)
-            if(low[i] < swingLow) swingLow = low[i];
-
-         return price - swingLow + (3 * pipSize);
-      }
-      else
-      {
-         double high[];
-         ArraySetAsSeries(high, true);
-         if(CopyHigh(m_symbol, m_entryTimeframe, 0, 15, high) < 15)
-            return m_atrValue * 1.5;
-
-         double swingHigh = high[0];
-         for(int i = 1; i < 15; i++)
-            if(high[i] > swingHigh) swingHigh = high[i];
-
-         return swingHigh - price + (3 * pipSize);
-      }
-   }
-
-   //+------------------------------------------------------------------+
-   //| Calculate TP using Daily Pivot levels                            |
+   //| Calculate TP using Pivot or RR                                   |
    //+------------------------------------------------------------------+
    double CalculateTP(double entryPrice, double slPrice, ENUM_SIGNAL_TYPE signal, double rrRatio)
    {
@@ -605,69 +681,32 @@ public:
 
       if(signal == SIGNAL_BUY)
       {
-         // For BUY: Target R1 or R2 depending on distance
-         double targetR1 = m_pivotLevels.R1;
-         double targetR2 = m_pivotLevels.R2;
-
-         // Use R1 if it gives at least 1.5 RR, otherwise use R2
-         double distToR1 = targetR1 - entryPrice;
-         double distToR2 = targetR2 - entryPrice;
-
+         // Target R1 if it gives good RR, else use fixed RR
+         double distToR1 = m_pivotLevels.R1 - entryPrice;
          if(distToR1 > slDistance * 1.5 && distToR1 > 0)
          {
-            m_lastTP = targetR1;
-         }
-         else if(distToR2 > slDistance * 1.5 && distToR2 > 0)
-         {
-            m_lastTP = targetR2;
+            m_lastTP = m_pivotLevels.R1;
          }
          else
          {
-            // Fallback to fixed RR
             m_lastTP = entryPrice + slDistance * rrRatio;
          }
       }
       else
       {
-         // For SELL: Target S1 or S2 depending on distance
-         double targetS1 = m_pivotLevels.S1;
-         double targetS2 = m_pivotLevels.S2;
-
-         double distToS1 = entryPrice - targetS1;
-         double distToS2 = entryPrice - targetS2;
-
+         // Target S1 if it gives good RR, else use fixed RR
+         double distToS1 = entryPrice - m_pivotLevels.S1;
          if(distToS1 > slDistance * 1.5 && distToS1 > 0)
          {
-            m_lastTP = targetS1;
-         }
-         else if(distToS2 > slDistance * 1.5 && distToS2 > 0)
-         {
-            m_lastTP = targetS2;
+            m_lastTP = m_pivotLevels.S1;
          }
          else
          {
-            // Fallback to fixed RR
             m_lastTP = entryPrice - slDistance * rrRatio;
          }
       }
 
       return m_lastTP;
-   }
-
-   //+------------------------------------------------------------------+
-   //| Check if current time is within trading hours                    |
-   //+------------------------------------------------------------------+
-   bool IsTradingTime()
-   {
-      MqlDateTime dt;
-      TimeToStruct(TimeCurrent(), dt);
-
-      int serverHour = dt.hour;
-      int gmtHour = serverHour - m_gmtOffset;
-      if(gmtHour < 0) gmtHour += 24;
-      if(gmtHour >= 24) gmtHour -= 24;
-
-      return (gmtHour >= m_tradingStartGMT && gmtHour < m_tradingEndGMT);
    }
 
    //+------------------------------------------------------------------+
@@ -683,6 +722,9 @@ public:
       {
          m_tradesToday = 0;
          m_lastTradeDate = today;
+         // Reset Asian range for new day
+         ResetAsianRange();
+         m_breakoutState = BREAKOUT_NONE;
       }
    }
 
@@ -692,6 +734,8 @@ public:
    void MarkTradeTaken(ENUM_SIGNAL_TYPE signal = SIGNAL_NONE)
    {
       m_tradesToday++;
+      // Reset breakout state after trade
+      m_breakoutState = BREAKOUT_NONE;
    }
 
    //+------------------------------------------------------------------+
@@ -708,20 +752,22 @@ public:
    //| Setters                                                          |
    //+------------------------------------------------------------------+
    void SetGMTOffset(int offset) { m_gmtOffset = offset; }
-   void SetTradingHours(int startGMT, int endGMT) { m_tradingStartGMT = startGMT; m_tradingEndGMT = endGMT; }
+   void SetTradingHours(int startGMT, int endGMT) { m_entryStartGMT = startGMT; m_entryEndGMT = endGMT; }
    void SetMaxTradesPerDay(int max) { m_maxTradesPerDay = max; }
-   void SetBounceZone(double pips) { m_bounceZonePips = pips; }
-   void SetRSILevels(double oversold, double overbought) { m_rsiOversold = oversold; m_rsiOverbought = overbought; }
-   void SetPullbackTolerance(double pips) { m_bounceZonePips = pips; }
-   void SetADXMinStrength(double strength) { }  // Not used in v6.0
+   void SetBounceZone(double pips) { m_breakoutBuffer = pips; }
+   void SetRSILevels(double oversold, double overbought) { }
+   void SetPullbackTolerance(double pips) { m_retestBuffer = pips; }
+   void SetADXMinStrength(double strength) { }
+   void SetMinRangePips(double pips) { m_minRangePips = pips; }
+   void SetMaxRangePips(double pips) { m_maxRangePips = pips; }
 
    //+------------------------------------------------------------------+
    //| Getters                                                          |
    //+------------------------------------------------------------------+
    double GetTrendEMA() { return m_trendEmaValue; }
-   double GetEntryEMA() { return m_entryEmaValue; }
+   double GetEntryEMA() { return m_trendEmaValue; }
    double GetRSI() { return m_rsiValue; }
-   double GetADX() { return 0; }  // Not used
+   double GetADX() { return 0; }
    double GetATR() { return m_atrValue; }
    ENUM_TREND_STATE GetCurrentTrend() { return m_currentTrend; }
    int GetTradesToday() { return m_tradesToday; }
@@ -729,12 +775,12 @@ public:
    double GetLastSL() { return m_lastSL; }
    double GetLastTP() { return m_lastTP; }
    bool IsInitialized() { return m_isInitialized; }
-   int GetTradingStartGMT() { return m_tradingStartGMT; }
-   int GetTradingEndGMT() { return m_tradingEndGMT; }
+   int GetTradingStartGMT() { return m_entryStartGMT; }
+   int GetTradingEndGMT() { return m_entryEndGMT; }
    ENUM_TIMEFRAMES GetTrendTimeframe() { return m_trendTimeframe; }
    ENUM_TIMEFRAMES GetEntryTimeframe() { return m_entryTimeframe; }
    int GetTrendEmaPeriod() { return m_trendEmaPeriod; }
-   int GetEntryEmaPeriod() { return m_entryEmaPeriod; }
+   int GetEntryEmaPeriod() { return m_trendEmaPeriod; }
 
    // Pivot getters
    double GetPivotPP() { return m_pivotLevels.PP; }
@@ -743,6 +789,12 @@ public:
    double GetPivotS1() { return m_pivotLevels.S1; }
    double GetPivotS2() { return m_pivotLevels.S2; }
 
+   // Asian range getters
+   double GetAsianHigh() { return m_asianRange.high; }
+   double GetAsianLow() { return m_asianRange.low; }
+   bool IsAsianRangeValid() { return m_asianRange.isValid; }
+   ENUM_BREAKOUT_STATE GetBreakoutState() { return m_breakoutState; }
+
    //+------------------------------------------------------------------+
    //| Get trend as string for display                                  |
    //+------------------------------------------------------------------+
@@ -750,10 +802,33 @@ public:
    {
       switch(m_currentTrend)
       {
-         case TREND_BULLISH: return "BULLISH - Buy3 Only";
-         case TREND_BEARISH: return "BEARISH - Sell3 Only";
+         case TREND_BULLISH: return "BULLISH";
+         case TREND_BEARISH: return "BEARISH";
          default: return "NO TREND";
       }
+   }
+
+   //+------------------------------------------------------------------+
+   //| Get breakout state string                                        |
+   //+------------------------------------------------------------------+
+   string GetBreakoutStateString()
+   {
+      switch(m_breakoutState)
+      {
+         case BREAKOUT_PENDING_UP: return "PENDING UP (wait retest)";
+         case BREAKOUT_PENDING_DOWN: return "PENDING DOWN (wait retest)";
+         case BREAKOUT_CONFIRMED_UP: return "CONFIRMED UP - READY";
+         case BREAKOUT_CONFIRMED_DOWN: return "CONFIRMED DOWN - READY";
+         default: return "NONE";
+      }
+   }
+
+   //+------------------------------------------------------------------+
+   //| Check if trading time                                            |
+   //+------------------------------------------------------------------+
+   bool IsTradingTime()
+   {
+      return IsEntryWindow();
    }
 
    //+------------------------------------------------------------------+
