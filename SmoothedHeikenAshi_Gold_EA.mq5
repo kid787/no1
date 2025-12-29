@@ -43,8 +43,14 @@ input double             InpMaxATRPips         = 5000.0;          // Max ATR (Pi
 input group "=== ADX Filter Settings ==="
 input bool               InpUseADXFilter       = true;            // Use ADX Filter
 input int                InpADXPeriod          = 14;              // ADX Period
-input double             InpMinADX             = 20.0;            // Minimum ADX for Entry (Trend Strength)
+input double             InpMinADX             = 20.0;            // Minimum ADX for Long Entry
+input double             InpMinADXShort        = 25.0;            // Minimum ADX for Short Entry (Higher = Stricter)
 input double             InpMaxADX             = 50.0;            // Maximum ADX (Avoid Overextended)
+
+input group "=== Short Trade Settings ==="
+input bool               InpEnableShort        = true;            // Enable Short Trades
+input int                InpShortConfirmBars   = 4;               // SHA Bearish Bars for Short (More = Stricter)
+input int                InpShortBounceStrength = 3;              // Short Bounce Strength (1-3, Higher = Stricter)
 
 input group "=== Money Management ==="
 input double             InpRiskPercent        = 1.0;             // Risk Percent of Balance (0 = Fixed Lot)
@@ -511,10 +517,11 @@ bool CheckADXFilterShort()
    double plusDI = GetPlusDI(1);
    double minusDI = GetMinusDI(1);
 
-   if(adx < InpMinADX)
+   // Use stricter ADX minimum for Short trades
+   if(adx < InpMinADXShort)
    {
       if(InpDebugMode)
-         Print("ADX too low for Short: ", DoubleToString(adx, 2), " < ", InpMinADX, " (Weak trend)");
+         Print("ADX too low for Short: ", DoubleToString(adx, 2), " < ", InpMinADXShort, " (Weak trend)");
       return false;
    }
 
@@ -530,6 +537,15 @@ bool CheckADXFilterShort()
    {
       if(InpDebugMode)
          Print("DI not bearish: +DI=", DoubleToString(plusDI, 2), " -DI=", DoubleToString(minusDI, 2));
+      return false;
+   }
+
+   // Additional check: -DI should be significantly stronger
+   double diDiff = minusDI - plusDI;
+   if(diDiff < 5.0)
+   {
+      if(InpDebugMode)
+         Print("DI difference too small for Short: ", DoubleToString(diDiff, 2), " < 5.0");
       return false;
    }
 
@@ -676,6 +692,68 @@ bool CheckBounce(bool isLong, int barShift)
 }
 
 //+------------------------------------------------------------------+
+//| Check for Valid Bounce with explicit strength (for Short)         |
+//+------------------------------------------------------------------+
+bool CheckBounceStrict(bool isLong, int barShift, int strength)
+{
+   ENUM_TIMEFRAMES tf = InpTimeframe == PERIOD_CURRENT ? Period() : InpTimeframe;
+
+   double open1 = iOpen(_Symbol, tf, barShift);
+   double close1 = iClose(_Symbol, tf, barShift);
+   double high1 = iHigh(_Symbol, tf, barShift);
+   double low1 = iLow(_Symbol, tf, barShift);
+   double range1 = high1 - low1;
+
+   if(range1 == 0) return false;
+
+   double open2 = iOpen(_Symbol, tf, barShift + 1);
+   double close2 = iClose(_Symbol, tf, barShift + 1);
+   double high2 = iHigh(_Symbol, tf, barShift + 1);
+   double low2 = iLow(_Symbol, tf, barShift + 1);
+
+   double shaMiddle = GetSHAMiddle(barShift);
+
+   // For Short: Check bearish bounce from SHA with specified strength
+   bool isBearishBar = close1 < open1;
+   double upperWick = high1 - MathMax(open1, close1);
+   double lowerWick = MathMin(open1, close1) - low1;
+   double body = MathAbs(close1 - open1);
+
+   bool strongBounce = false;
+
+   switch(strength)
+   {
+      case 1:
+         strongBounce = isBearishBar;
+         break;
+
+      case 2:
+         strongBounce = isBearishBar &&
+                       (high1 >= shaMiddle - InpPullbackPips * pipValue) &&
+                       (upperWick >= body * 0.3);
+         break;
+
+      case 3:
+         // Strictest: Strong bearish engulfing or pin bar
+         strongBounce = isBearishBar &&
+                       (high1 >= shaMiddle - InpPullbackPips * pipValue) &&
+                       (upperWick >= body * 0.5) &&
+                       (close1 < low2 || body > MathAbs(close2 - open2) * 1.2);
+         break;
+   }
+
+   if(InpDebugMode && !strongBounce)
+   {
+      Print("Strict Bounce check failed (Short): Bearish=", isBearishBar,
+            " | UpperWick=", DoubleToString(upperWick, 2),
+            " | Body=", DoubleToString(body, 2),
+            " | Strength=", strength);
+   }
+
+   return strongBounce;
+}
+
+//+------------------------------------------------------------------+
 //| Detect Pullback to SHA (Improved Logic)                           |
 //+------------------------------------------------------------------+
 bool DetectPullback(bool isLong, double &pullbackBar)
@@ -817,9 +895,14 @@ void ProcessTradingLogic()
    }
 
    // ==================== SHORT SETUP ====================
-   if(IsSHABearishConsecutive(InpSHAConfirmBars) && currentClose < shaMiddle)
+   // Check if Short trades are enabled
+   if(!InpEnableShort)
+      return;
+
+   // Use stricter confirmation for Short (InpShortConfirmBars)
+   if(IsSHABearishConsecutive(InpShortConfirmBars) && currentClose < shaMiddle)
    {
-      // Check ADX for bearish trend
+      // Check ADX for bearish trend (stricter for Short)
       if(!CheckADXFilterShort())
          return;
 
@@ -843,7 +926,8 @@ void ProcessTradingLogic()
          double pullbackBar;
          if(DetectPullback(false, pullbackBar))
          {
-            if(CheckBounce(false, 1))
+            // Use stricter bounce check for Short
+            if(CheckBounceStrict(false, 1, InpShortBounceStrength))
             {
                if(currentClose < currentOpen)
                {
@@ -852,9 +936,9 @@ void ProcessTradingLogic()
 
                   Print("=================================================");
                   Print("SHORT ENTRY CONDITIONS MET!");
-                  Print("SHA: Bearish x", InpSHAConfirmBars, " bars");
+                  Print("SHA: Bearish x", InpShortConfirmBars, " bars (Strict)");
                   Print("Support: ", support, " (Broken)");
-                  Print("Pullback detected, Bounce confirmed");
+                  Print("Pullback detected, Strong Bounce confirmed");
                   Print("ADX: ", DoubleToString(adx, 2), " | ATR: ", DoubleToString(atr / pipValue, 2), " pips");
                   Print("=================================================");
 
