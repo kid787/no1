@@ -3,11 +3,12 @@
 //|                                  Smoothed Heiken Ashi Strategy EA |
 //|                                       For XAUUSD (Gold) Trading   |
 //|                                    Fintokei Challenge Compliant   |
-//|                                                        v3.00      |
+//|                              Multi-Timeframe Edition (M1/H1/H4)   |
+//|                                                        v3.10      |
 //+------------------------------------------------------------------+
-#property copyright "Smoothed Heiken Ashi Gold EA v3.0 - Fintokei Edition"
+#property copyright "Smoothed Heiken Ashi Gold EA v3.10 - MTF Fintokei Edition"
 #property link      ""
-#property version   "3.00"
+#property version   "3.10"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -17,6 +18,13 @@
 //+------------------------------------------------------------------+
 //| Input Parameters                                                  |
 //+------------------------------------------------------------------+
+input group "=== Multi-Timeframe Settings (NEW) ==="
+input ENUM_TIMEFRAMES    InpEntryTimeframe     = PERIOD_M1;        // Entry Timeframe (M1 for precision)
+input ENUM_TIMEFRAMES    InpTrendTF1           = PERIOD_H1;        // Trend Timeframe 1 (H1)
+input ENUM_TIMEFRAMES    InpTrendTF2           = PERIOD_H4;        // Trend Timeframe 2 (H4)
+input int                InpTrendConfirmBars   = 2;                // Trend Confirm Bars (Higher TF)
+input bool               InpRequireBothTFAlign = true;             // Require Both TF Trend Alignment
+
 input group "=== Fintokei Risk Management (CRITICAL) ==="
 input double             InpInitialCapital     = 2000000.0;        // Initial Capital (JPY) - Set Your Plan Size
 input double             InpDailyLossLimit     = 5.0;              // Daily Loss Limit (%) - Fintokei: 5%
@@ -32,66 +40,57 @@ input double             InpTightSLMultiplier  = 0.6;              // Tight SL M
 input double             InpMinSLPipsOptimized = 150.0;            // Min SL for Optimized Entry [Gold: 150=$1.5]
 
 input group "=== Smoothed Heiken Ashi Settings ==="
-input int                InpSmoothingLength    = 15;              // Smoothing Length
-input ENUM_TIMEFRAMES    InpTimeframe          = PERIOD_H1;       // Timeframe (H1 Recommended)
-input int                InpSHAConfirmBars     = 3;               // SHA Consecutive Bars for Trend Confirmation
+input int                InpSmoothingLength    = 15;               // Smoothing Length
+input int                InpSHAConfirmBars     = 2;                // SHA Consecutive Bars for Entry (M1)
 
-input group "=== Breakout Detection Settings ==="
-input int                InpLookbackPeriod     = 30;              // Lookback Period for Support/Resistance
-input int                InpBreakoutLookback   = 8;               // Bars to Check for Breakout
-input double             InpBreakoutPips       = 200.0;           // Breakout Buffer (Pips) [Gold: 200=$2]
-
-input group "=== Pullback Detection Settings ==="
-input int                InpPullbackBars       = 12;              // Max Bars to Wait for Pullback
-input double             InpPullbackPips       = 500.0;           // Pullback Tolerance (Pips) [Gold: 500=$5]
-input bool               InpRequireBounce      = true;            // Require Bounce Confirmation
-input int                InpBounceStrength     = 2;               // Bounce Strength (1=Weak, 2=Medium, 3=Strong)
+input group "=== Entry Conditions (M1) ==="
+input double             InpPullbackPips       = 100.0;            // Pullback Tolerance (Pips) [Gold: 100=$1]
+input bool               InpRequireBounce      = true;             // Require Bounce Confirmation
+input int                InpBounceStrength     = 1;                // Bounce Strength (1=Weak, 2=Medium, 3=Strong)
+input int                InpPullbackBars       = 10;               // Max Bars to Wait for Pullback
 
 input group "=== ATR Filter Settings ==="
-input bool               InpUseATRFilter       = true;            // Use ATR Filter
-input int                InpATRPeriod          = 14;              // ATR Period
-input double             InpATRMultiplierSL    = 1.5;             // ATR Multiplier for SL
-input double             InpATRMultiplierTP    = 3.0;             // ATR Multiplier for TP
-input double             InpMinATRPips         = 300.0;           // Min ATR (Pips) [Gold H1: 300=$3, skip low vol]
-input double             InpMaxATRPips         = 5000.0;          // Max ATR (Pips) [Gold H1: 5000=$50, skip extreme]
+input bool               InpUseATRFilter       = true;             // Use ATR Filter
+input int                InpATRPeriod          = 14;               // ATR Period
+input double             InpATRMultiplierSL    = 1.0;              // ATR Multiplier for SL (M1)
+input double             InpATRMultiplierTP    = 2.0;              // ATR Multiplier for TP
+input double             InpMinATRPips         = 50.0;             // Min ATR (Pips) [M1: 50=$0.5]
+input double             InpMaxATRPips         = 500.0;            // Max ATR (Pips) [M1: 500=$5]
 
 input group "=== ADX Filter Settings ==="
-input bool               InpUseADXFilter       = true;            // Use ADX Filter
-input int                InpADXPeriod          = 14;              // ADX Period
-input double             InpMinADX             = 20.0;            // Minimum ADX for Long Entry
-input double             InpMinADXShort        = 25.0;            // Minimum ADX for Short Entry (Higher = Stricter)
-input double             InpMaxADX             = 50.0;            // Maximum ADX (Avoid Overextended)
+input bool               InpUseADXFilter       = true;             // Use ADX Filter (on Trend TF)
+input int                InpADXPeriod          = 14;               // ADX Period
+input double             InpMinADX             = 20.0;             // Minimum ADX for Entry
+input double             InpMaxADX             = 50.0;             // Maximum ADX (Avoid Overextended)
 
 input group "=== Short Trade Settings ==="
-input bool               InpEnableShort        = true;            // Enable Short Trades
-input int                InpShortConfirmBars   = 4;               // SHA Bearish Bars for Short (More = Stricter)
-input int                InpShortBounceStrength = 3;              // Short Bounce Strength (1-3, Higher = Stricter)
+input bool               InpEnableShort        = true;             // Enable Short Trades
 
 input group "=== Money Management ==="
-input double             InpRiskPercent        = 3.0;             // Risk Percent of Balance (0 = Fixed Lot)
-input double             InpFixedLot           = 0.1;             // Fixed Lot Size (if Risk% = 0)
-input double             InpRiskRewardRatio    = 2.0;             // Risk:Reward Ratio (Used if ATR TP disabled)
-input bool               InpUseATRForSLTP      = true;            // Use ATR for SL/TP Calculation
-input double             InpMinSLPips          = 300.0;           // Min SL Distance (Pips) [Gold: 300=$3]
-input double             InpMaxSLPips          = 2000.0;          // Max SL Distance (Pips) [Gold: 2000=$20]
+input double             InpRiskPercent        = 2.0;              // Risk Percent of Balance (0 = Fixed Lot)
+input double             InpFixedLot           = 0.1;              // Fixed Lot Size (if Risk% = 0)
+input double             InpRiskRewardRatio    = 2.0;              // Risk:Reward Ratio
+input double             InpMinSLPips          = 100.0;            // Min SL Distance (Pips) [M1: 100=$1]
+input double             InpMaxSLPips          = 500.0;            // Max SL Distance (Pips) [M1: 500=$5]
 
 input group "=== Trading Filters ==="
-input int                InpMaxSpreadPips      = 30;              // Maximum Spread (Pips, 0=Disable)
-input int                InpSlippage           = 50;              // Slippage (Points)
-input int                InpMaxDailyTrades     = 3;               // Max Trades Per Day (0=Unlimited)
+input int                InpMaxSpreadPips      = 30;               // Maximum Spread (Pips, 0=Disable)
+input int                InpSlippage           = 50;               // Slippage (Points)
+input int                InpMaxDailyTrades     = 5;                // Max Trades Per Day (0=Unlimited)
+input int                InpMinBarsBetweenTrades = 30;             // Min Bars Between Trades (M1)
 
 input group "=== Time Filter ==="
-input bool               InpUseTimeFilter      = true;            // Use Time Filter
-input int                InpStartHour          = 8;               // Start Hour (Server Time)
-input int                InpStartMinute        = 0;               // Start Minute
-input int                InpEndHour            = 20;              // End Hour (Server Time)
-input int                InpEndMinute          = 0;               // End Minute
-input bool               InpAvoidFriday        = true;            // Avoid Trading on Friday After 18:00
+input bool               InpUseTimeFilter      = true;             // Use Time Filter
+input int                InpStartHour          = 9;                // Start Hour (Server Time)
+input int                InpStartMinute        = 0;                // Start Minute
+input int                InpEndHour            = 21;               // End Hour (Server Time)
+input int                InpEndMinute          = 0;                // End Minute
+input bool               InpAvoidFriday        = true;             // Avoid Trading on Friday After 18:00
 
 input group "=== General Settings ==="
-input ulong              InpMagicNumber        = 202412003;       // Magic Number
-input string             InpTradeComment       = "SHA_Gold_v3";   // Trade Comment
-input bool               InpDebugMode          = true;            // Debug Mode
+input ulong              InpMagicNumber        = 202412004;        // Magic Number
+input string             InpTradeComment       = "SHA_MTF_v3.1";   // Trade Comment
+input bool               InpDebugMode          = true;             // Debug Mode
 
 //+------------------------------------------------------------------+
 //| Global Variables                                                  |
@@ -100,16 +99,15 @@ CTrade         trade;
 CPositionInfo  positionInfo;
 CSymbolInfo    symbolInfo;
 
-// Smoothed Heiken Ashi Buffers
-double shaOpen[];
-double shaHigh[];
-double shaLow[];
-double shaClose[];
-double shaColor[];  // 0 = White (Bullish), 1 = Pink (Bearish)
+// Smoothed Heiken Ashi Buffers (for each timeframe)
+double shaOpenM1[], shaHighM1[], shaLowM1[], shaCloseM1[], shaColorM1[];
+double shaOpenH1[], shaHighH1[], shaLowH1[], shaCloseH1[], shaColorH1[];
+double shaOpenH4[], shaHighH4[], shaLowH4[], shaCloseH4[], shaColorH4[];
 
 // Indicator Handles
-int atrHandle = INVALID_HANDLE;
-int adxHandle = INVALID_HANDLE;
+int atrHandleM1 = INVALID_HANDLE;
+int atrHandleH1 = INVALID_HANDLE;
+int adxHandleH1 = INVALID_HANDLE;
 
 // Pip value for normalization
 double pipValue = 0.01;
@@ -117,30 +115,32 @@ double pipValue = 0.01;
 // Daily trade counter
 int dailyTradeCount = 0;
 datetime lastTradeDate = 0;
+datetime lastTradeBarTime = 0;
 
 // ===== Fintokei Risk Management Variables =====
-double g_initialCapital = 0;           // Initial capital (set once)
-double g_dailyStartEquity = 0;         // Equity at UTC 0:00
-datetime g_lastDailyReset = 0;         // Last UTC day reset
-double g_dailyLossLimit = 0;           // Today's loss limit (absolute)
-double g_overallLossLimit = 0;         // Overall loss limit (absolute)
-double g_currentDrawdown = 0;          // Current drawdown from start equity
-double g_maxDrawdownToday = 0;         // Max drawdown today
-bool g_tradingAllowed = true;          // Trading permission flag
+double g_initialCapital = 0;
+double g_dailyStartEquity = 0;
+datetime g_lastDailyReset = 0;
+double g_dailyLossLimit = 0;
+double g_overallLossLimit = 0;
+double g_maxDrawdownToday = 0;
+bool g_tradingAllowed = true;
+
+// Trend direction cache
+int g_trendH1 = 0;  // 1=Bullish, -1=Bearish, 0=Neutral
+int g_trendH4 = 0;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   // Validate symbol
    if(!symbolInfo.Name(_Symbol))
    {
       Print("Failed to get symbol info!");
       return INIT_FAILED;
    }
 
-   // Determine pip value based on symbol
    int digits = symbolInfo.Digits();
    if(digits == 2)
       pipValue = 0.01;
@@ -153,78 +153,74 @@ int OnInit()
    else
       pipValue = symbolInfo.Point();
 
-   // Check if trading on XAUUSD
    if(StringFind(_Symbol, "XAU") < 0 && StringFind(_Symbol, "GOLD") < 0)
    {
       Print("Warning: This EA is optimized for XAUUSD (Gold). Current symbol: ", _Symbol);
    }
 
-   // Initialize trade object
    trade.SetExpertMagicNumber(InpMagicNumber);
    trade.SetDeviationInPoints(InpSlippage);
    trade.SetTypeFilling(ORDER_FILLING_IOC);
    trade.SetMarginMode();
 
-   // Allocate arrays
-   ArraySetAsSeries(shaOpen, true);
-   ArraySetAsSeries(shaHigh, true);
-   ArraySetAsSeries(shaLow, true);
-   ArraySetAsSeries(shaClose, true);
-   ArraySetAsSeries(shaColor, true);
+   // Set arrays as series
+   ArraySetAsSeries(shaOpenM1, true); ArraySetAsSeries(shaHighM1, true);
+   ArraySetAsSeries(shaLowM1, true); ArraySetAsSeries(shaCloseM1, true);
+   ArraySetAsSeries(shaColorM1, true);
 
-   // Create indicator handles
-   ENUM_TIMEFRAMES tf = InpTimeframe == PERIOD_CURRENT ? Period() : InpTimeframe;
+   ArraySetAsSeries(shaOpenH1, true); ArraySetAsSeries(shaHighH1, true);
+   ArraySetAsSeries(shaLowH1, true); ArraySetAsSeries(shaCloseH1, true);
+   ArraySetAsSeries(shaColorH1, true);
 
-   if(InpUseATRFilter || InpUseATRForSLTP)
+   ArraySetAsSeries(shaOpenH4, true); ArraySetAsSeries(shaHighH4, true);
+   ArraySetAsSeries(shaLowH4, true); ArraySetAsSeries(shaCloseH4, true);
+   ArraySetAsSeries(shaColorH4, true);
+
+   // Create indicator handles for M1
+   atrHandleM1 = iATR(_Symbol, InpEntryTimeframe, InpATRPeriod);
+   if(atrHandleM1 == INVALID_HANDLE)
    {
-      atrHandle = iATR(_Symbol, tf, InpATRPeriod);
-      if(atrHandle == INVALID_HANDLE)
-      {
-         Print("Failed to create ATR handle!");
-         return INIT_FAILED;
-      }
+      Print("Failed to create ATR handle for M1!");
+      return INIT_FAILED;
+   }
+
+   // Create ATR handle for H1 (for SL/TP calculation)
+   atrHandleH1 = iATR(_Symbol, InpTrendTF1, InpATRPeriod);
+   if(atrHandleH1 == INVALID_HANDLE)
+   {
+      Print("Failed to create ATR handle for H1!");
+      return INIT_FAILED;
    }
 
    if(InpUseADXFilter)
    {
-      adxHandle = iADX(_Symbol, tf, InpADXPeriod);
-      if(adxHandle == INVALID_HANDLE)
+      adxHandleH1 = iADX(_Symbol, InpTrendTF1, InpADXPeriod);
+      if(adxHandleH1 == INVALID_HANDLE)
       {
          Print("Failed to create ADX handle!");
          return INIT_FAILED;
       }
    }
 
-   // ===== Initialize Fintokei Risk Management =====
    InitializeFintokeiRiskManagement();
 
    Print("==============================================");
-   Print("SmoothedHeikenAshi Gold EA v3.00 - FINTOKEI EDITION");
+   Print("SmoothedHeikenAshi Gold EA v3.10 - MTF EDITION");
    Print("==============================================");
    Print("Symbol: ", _Symbol, " | Digits: ", digits);
-   Print("Timeframe: ", EnumToString(tf), " (H1 Recommended)");
-   Print("Pip Value: ", pipValue);
+   Print("----------------------------------------------");
+   Print("MULTI-TIMEFRAME SETTINGS:");
+   Print("  Entry TF: ", EnumToString(InpEntryTimeframe), " (M1)");
+   Print("  Trend TF1: ", EnumToString(InpTrendTF1), " (H1)");
+   Print("  Trend TF2: ", EnumToString(InpTrendTF2), " (H4)");
+   Print("  Require Both TF Align: ", InpRequireBothTFAlign ? "YES" : "NO");
    Print("----------------------------------------------");
    Print("FINTOKEI RISK SETTINGS:");
    Print("  Initial Capital: ", DoubleToString(g_initialCapital, 0), " JPY");
-   Print("  Daily Loss Limit: ", InpDailyLossLimit, "% (", DoubleToString(g_dailyLossLimit, 0), " JPY)");
-   Print("  Overall Loss Limit: ", InpOverallLossLimit, "% (", DoubleToString(g_overallLossLimit, 0), " JPY)");
+   Print("  Daily Loss Limit: ", InpDailyLossLimit, "%");
+   Print("  Overall Loss Limit: ", InpOverallLossLimit, "%");
    Print("  Max Risk Per Trade: ", InpMaxRiskPerTrade, "%");
-   Print("  Safety Buffer: ", InpSafetyBuffer, "%");
-   Print("  Auto-Close on Risk: ", InpAutoCloseOnRisk ? "ON" : "OFF");
    Print("----------------------------------------------");
-   Print("HIGH LOT OPTIMIZATION: ", InpUseTightSL ? "ON" : "OFF");
-   if(InpUseTightSL)
-      Print("  Tight SL Multiplier: ", InpTightSLMultiplier);
-   Print("----------------------------------------------");
-   Print("SHA Smoothing: ", InpSmoothingLength, " | Confirm Bars: ", InpSHAConfirmBars);
-   Print("Breakout: ", InpBreakoutPips, " pips | Pullback: ", InpPullbackPips, " pips");
-   Print("----------------------------------------------");
-   Print("ATR Filter: ", InpUseATRFilter ? "ON" : "OFF", " | Period: ", InpATRPeriod);
-   Print("ADX Filter: ", InpUseADXFilter ? "ON" : "OFF", " | Min: ", InpMinADX, " Max: ", InpMaxADX);
-   Print("----------------------------------------------");
-   Print("Max Spread: ", InpMaxSpreadPips, " pips");
-   Print("Time Filter: ", InpUseTimeFilter ? "ON" : "OFF");
    Print("Debug Mode: ", InpDebugMode ? "ON" : "OFF");
    Print("==============================================");
 
@@ -236,40 +232,29 @@ int OnInit()
 //+------------------------------------------------------------------+
 void InitializeFintokeiRiskManagement()
 {
-   // Set initial capital from input or current balance
    if(InpInitialCapital > 0)
       g_initialCapital = InpInitialCapital;
    else
       g_initialCapital = AccountInfoDouble(ACCOUNT_BALANCE);
 
-   // Calculate overall loss limit (10% of initial capital - never changes)
    g_overallLossLimit = g_initialCapital * (InpOverallLossLimit / 100.0);
-
-   // Initialize daily values
    ResetDailyRiskTracking();
 }
 
 //+------------------------------------------------------------------+
-//| Reset Daily Risk Tracking (Called at UTC 0:00)                    |
+//| Reset Daily Risk Tracking                                         |
 //+------------------------------------------------------------------+
 void ResetDailyRiskTracking()
 {
-   // Get current equity for daily tracking
    g_dailyStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-
-   // Calculate today's daily loss limit (5% of start equity)
    g_dailyLossLimit = g_dailyStartEquity * (InpDailyLossLimit / 100.0);
-
-   // Reset daily tracking
    g_maxDrawdownToday = 0;
    g_lastDailyReset = GetUTCDate();
    g_tradingAllowed = true;
 
-   Print("=== DAILY RISK RESET (UTC 0:00) ===");
-   Print("Start Equity: ", DoubleToString(g_dailyStartEquity, 2), " JPY");
-   Print("Daily Loss Limit: ", DoubleToString(g_dailyLossLimit, 2), " JPY");
-   Print("Fail Line (Equity): ", DoubleToString(g_dailyStartEquity - g_dailyLossLimit, 2), " JPY");
-   Print("===================================");
+   Print("=== DAILY RISK RESET ===");
+   Print("Start Equity: ", DoubleToString(g_dailyStartEquity, 0), " JPY");
+   Print("Daily Loss Limit: ", DoubleToString(g_dailyLossLimit, 0), " JPY");
 }
 
 //+------------------------------------------------------------------+
@@ -278,9 +263,7 @@ void ResetDailyRiskTracking()
 datetime GetUTCDate()
 {
    datetime serverTime = TimeCurrent();
-   // Adjust for server UTC offset
    datetime utcTime = serverTime - InpServerUTCOffset * 3600;
-
    MqlDateTime dt;
    TimeToStruct(utcTime, dt);
    return StringToTime(StringFormat("%04d.%02d.%02d", dt.year, dt.mon, dt.day));
@@ -291,25 +274,20 @@ datetime GetUTCDate()
 //+------------------------------------------------------------------+
 bool IsNewUTCDay()
 {
-   datetime currentUTCDate = GetUTCDate();
-   return (currentUTCDate != g_lastDailyReset);
+   return (GetUTCDate() != g_lastDailyReset);
 }
 
 //+------------------------------------------------------------------+
-//| Monitor Fintokei Risk Limits (Called Every Tick)                  |
+//| Monitor Fintokei Risk Limits                                      |
 //+------------------------------------------------------------------+
 bool MonitorFintokeiRiskLimits()
 {
    double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-   double currentBalance = AccountInfoDouble(ACCOUNT_BALANCE);
 
-   // Check for new UTC day
    if(IsNewUTCDay())
-   {
       ResetDailyRiskTracking();
-   }
 
-   // ===== Check Overall Loss Limit (10% Rule) =====
+   // Check Overall Loss Limit (10%)
    double overallDrawdown = g_initialCapital - currentEquity;
    double overallFailLine = g_initialCapital - g_overallLossLimit;
    double safetyMargin = g_initialCapital * (InpSafetyBuffer / 100.0);
@@ -317,63 +295,27 @@ bool MonitorFintokeiRiskLimits()
    if(currentEquity <= overallFailLine + safetyMargin)
    {
       Print("!!! CRITICAL: Approaching Overall Loss Limit !!!");
-      Print("Current Equity: ", DoubleToString(currentEquity, 2));
-      Print("Overall Fail Line: ", DoubleToString(overallFailLine, 2));
-
       if(InpAutoCloseOnRisk && HasOpenPosition())
-      {
-         Print("AUTO-CLOSING all positions to protect account!");
          CloseAllPositions();
-      }
-
       g_tradingAllowed = false;
       return false;
    }
 
-   // ===== Check Daily Loss Limit (5% Rule) =====
+   // Check Daily Loss Limit (5%)
    double dailyDrawdown = g_dailyStartEquity - currentEquity;
    double dailyFailLine = g_dailyStartEquity - g_dailyLossLimit;
    double dailySafetyMargin = g_dailyStartEquity * (InpSafetyBuffer / 100.0);
 
-   // Update max drawdown
    if(dailyDrawdown > g_maxDrawdownToday)
       g_maxDrawdownToday = dailyDrawdown;
 
    if(currentEquity <= dailyFailLine + dailySafetyMargin)
    {
       Print("!!! WARNING: Approaching Daily Loss Limit !!!");
-      Print("Daily Start Equity: ", DoubleToString(g_dailyStartEquity, 2));
-      Print("Current Equity: ", DoubleToString(currentEquity, 2));
-      Print("Daily Fail Line: ", DoubleToString(dailyFailLine, 2));
-      Print("Today's Drawdown: ", DoubleToString(dailyDrawdown, 2), " (",
-            DoubleToString((dailyDrawdown / g_dailyStartEquity) * 100, 2), "%)");
-
       if(InpAutoCloseOnRisk && HasOpenPosition())
-      {
-         Print("AUTO-CLOSING all positions to protect daily limit!");
          CloseAllPositions();
-      }
-
       g_tradingAllowed = false;
       return false;
-   }
-
-   // Calculate remaining risk capacity
-   double dailyRemainingRisk = g_dailyLossLimit - dailyDrawdown - dailySafetyMargin;
-   double overallRemainingRisk = g_overallLossLimit - overallDrawdown - safetyMargin;
-
-   if(InpDebugMode)
-   {
-      static datetime lastLogTime = 0;
-      if(TimeCurrent() - lastLogTime >= 300) // Log every 5 minutes
-      {
-         Print("--- Fintokei Risk Status ---");
-         Print("Daily: ", DoubleToString((dailyDrawdown / g_dailyStartEquity) * 100, 2),
-               "% used | Remaining: ", DoubleToString(dailyRemainingRisk, 0), " JPY");
-         Print("Overall: ", DoubleToString((overallDrawdown / g_initialCapital) * 100, 2),
-               "% used | Remaining: ", DoubleToString(overallRemainingRisk, 0), " JPY");
-         lastLogTime = TimeCurrent();
-      }
    }
 
    g_tradingAllowed = true;
@@ -381,13 +323,12 @@ bool MonitorFintokeiRiskLimits()
 }
 
 //+------------------------------------------------------------------+
-//| Calculate Maximum Allowed Risk for New Position                   |
+//| Get Maximum Allowed Risk                                          |
 //+------------------------------------------------------------------+
 double GetMaxAllowedRisk()
 {
    double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
 
-   // Calculate remaining capacity for both limits
    double dailyDrawdown = g_dailyStartEquity - currentEquity;
    double dailyRemaining = g_dailyLossLimit - dailyDrawdown;
    double dailySafetyMargin = g_dailyStartEquity * (InpSafetyBuffer / 100.0);
@@ -396,17 +337,13 @@ double GetMaxAllowedRisk()
    double overallRemaining = g_overallLossLimit - overallDrawdown;
    double overallSafetyMargin = g_initialCapital * (InpSafetyBuffer / 100.0);
 
-   // Use the more restrictive limit
    double maxRiskAmount = MathMin(dailyRemaining - dailySafetyMargin,
                                    overallRemaining - overallSafetyMargin);
 
-   // Also apply per-trade risk limit
    double perTradeLimit = currentEquity * (InpMaxRiskPerTrade / 100.0);
    maxRiskAmount = MathMin(maxRiskAmount, perTradeLimit);
 
-   // Ensure non-negative
    if(maxRiskAmount < 0) maxRiskAmount = 0;
-
    return maxRiskAmount;
 }
 
@@ -421,110 +358,11 @@ void CloseAllPositions()
       {
          if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == InpMagicNumber)
          {
-            ulong ticket = positionInfo.Ticket();
-            trade.PositionClose(ticket);
-            Print("Emergency closed position #", ticket);
+            trade.PositionClose(positionInfo.Ticket());
+            Print("Emergency closed position #", positionInfo.Ticket());
          }
       }
    }
-}
-
-//+------------------------------------------------------------------+
-//| Calculate Loss Per Lot for Given SL Distance                      |
-//+------------------------------------------------------------------+
-double CalculateLossPerLot(double slDistance)
-{
-   double tickSize = symbolInfo.TickSize();
-   double tickValue = symbolInfo.TickValue();
-
-   if(tickSize == 0) return 0;
-
-   double numTicks = slDistance / tickSize;
-   return numTicks * tickValue;
-}
-
-//+------------------------------------------------------------------+
-//| Calculate Optimized Lot Size (Fintokei Compliant)                 |
-//+------------------------------------------------------------------+
-double CalculateFintokeiLotSize(double slDistance)
-{
-   // Get maximum allowed risk
-   double maxRiskAmount = GetMaxAllowedRisk();
-
-   if(maxRiskAmount <= 0)
-   {
-      Print("No risk capacity available!");
-      return 0;
-   }
-
-   // Use the configured risk percent or the max allowed, whichever is lower
-   double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
-   double desiredRisk = currentEquity * (InpRiskPercent / 100.0);
-   double riskAmount = MathMin(desiredRisk, maxRiskAmount);
-
-   // Calculate lot size
-   double lossPerLot = CalculateLossPerLot(slDistance);
-
-   if(lossPerLot <= 0)
-   {
-      Print("Cannot calculate loss per lot!");
-      return InpFixedLot;
-   }
-
-   double lotSize = riskAmount / lossPerLot;
-
-   // Normalize lot size
-   double minLot = symbolInfo.LotsMin();
-   double maxLot = symbolInfo.LotsMax();
-   double lotStep = symbolInfo.LotsStep();
-
-   lotSize = MathFloor(lotSize / lotStep) * lotStep;
-   lotSize = MathMax(minLot, MathMin(maxLot, lotSize));
-
-   if(InpDebugMode)
-   {
-      Print("--- Lot Size Calculation ---");
-      Print("Max Allowed Risk: ", DoubleToString(maxRiskAmount, 0), " JPY");
-      Print("Desired Risk: ", DoubleToString(desiredRisk, 0), " JPY");
-      Print("Used Risk: ", DoubleToString(riskAmount, 0), " JPY");
-      Print("SL Distance: $", DoubleToString(slDistance, 2));
-      Print("Loss Per Lot: ", DoubleToString(lossPerLot, 0), " JPY");
-      Print("Calculated Lot: ", DoubleToString(lotSize, 2));
-   }
-
-   return NormalizeDouble(lotSize, 2);
-}
-
-//+------------------------------------------------------------------+
-//| Get Optimized SL for Higher Lot Size                              |
-//+------------------------------------------------------------------+
-double GetOptimizedSL(double baseSL, double entryPrice, bool isLong)
-{
-   if(!InpUseTightSL)
-      return baseSL;
-
-   double baseDistance = isLong ? (entryPrice - baseSL) : (baseSL - entryPrice);
-   double optimizedDistance = baseDistance * InpTightSLMultiplier;
-
-   // Ensure minimum SL distance
-   double minDistance = InpMinSLPipsOptimized * pipValue;
-   if(optimizedDistance < minDistance)
-      optimizedDistance = minDistance;
-
-   double optimizedSL;
-   if(isLong)
-      optimizedSL = entryPrice - optimizedDistance;
-   else
-      optimizedSL = entryPrice + optimizedDistance;
-
-   if(InpDebugMode)
-   {
-      Print("SL Optimization: Base=", DoubleToString(baseDistance, 2),
-            " -> Optimized=", DoubleToString(optimizedDistance, 2),
-            " (", DoubleToString(InpTightSLMultiplier * 100, 0), "%)");
-   }
-
-   return NormalizeDouble(optimizedSL, symbolInfo.Digits());
 }
 
 //+------------------------------------------------------------------+
@@ -532,18 +370,13 @@ double GetOptimizedSL(double baseSL, double entryPrice, bool isLong)
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   if(atrHandle != INVALID_HANDLE)
-      IndicatorRelease(atrHandle);
-   if(adxHandle != INVALID_HANDLE)
-      IndicatorRelease(adxHandle);
+   if(atrHandleM1 != INVALID_HANDLE) IndicatorRelease(atrHandleM1);
+   if(atrHandleH1 != INVALID_HANDLE) IndicatorRelease(atrHandleH1);
+   if(adxHandleH1 != INVALID_HANDLE) IndicatorRelease(adxHandleH1);
 
-   Print("=== Final Fintokei Risk Report ===");
-   Print("Max Drawdown Today: ", DoubleToString(g_maxDrawdownToday, 2), " JPY (",
-         DoubleToString((g_maxDrawdownToday / g_dailyStartEquity) * 100, 2), "%)");
-   Print("Final Equity: ", DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2), " JPY");
-   Print("==================================");
-
-   Print("SmoothedHeikenAshi Gold EA v3.0 deinitialized. Reason: ", reason);
+   Print("=== Final Report ===");
+   Print("Max Drawdown Today: ", DoubleToString(g_maxDrawdownToday, 0), " JPY");
+   Print("Final Equity: ", DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 0), " JPY");
 }
 
 //+------------------------------------------------------------------+
@@ -551,24 +384,20 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // ===== FINTOKEI RISK MONITORING (EVERY TICK) =====
+   // Fintokei risk monitoring
    if(!MonitorFintokeiRiskLimits())
-   {
-      // Risk limit reached - no trading allowed
       return;
-   }
 
-   // Check for new bar
+   // Check for new M1 bar
    static datetime lastBarTime = 0;
-   ENUM_TIMEFRAMES tf = InpTimeframe == PERIOD_CURRENT ? Period() : InpTimeframe;
-   datetime currentBarTime = iTime(_Symbol, tf, 0);
+   datetime currentBarTime = iTime(_Symbol, InpEntryTimeframe, 0);
 
    if(lastBarTime == currentBarTime)
       return;
 
    lastBarTime = currentBarTime;
 
-   // Reset daily trade counter
+   // Reset daily counter
    MqlDateTime dt;
    TimeToStruct(TimeCurrent(), dt);
    datetime currentDate = StringToTime(StringFormat("%04d.%02d.%02d", dt.year, dt.mon, dt.day));
@@ -579,60 +408,72 @@ void OnTick()
       lastTradeDate = currentDate;
    }
 
-   // Update symbol info
    if(!symbolInfo.RefreshRates())
       return;
 
    // Check spread
    double currentSpreadPips = symbolInfo.Spread() * symbolInfo.Point() / pipValue;
    if(InpMaxSpreadPips > 0 && currentSpreadPips > InpMaxSpreadPips)
-   {
-      if(InpDebugMode)
-         Print("Spread too high: ", DoubleToString(currentSpreadPips, 1), " pips");
       return;
-   }
 
-   // Check time filter
+   // Time filter
    if(InpUseTimeFilter && !IsWithinTradingHours())
       return;
 
-   // Check Friday filter
    if(InpAvoidFriday && IsFridayEvening())
       return;
 
-   // Check daily trade limit
+   // Trade limit
    if(InpMaxDailyTrades > 0 && dailyTradeCount >= InpMaxDailyTrades)
-   {
-      if(InpDebugMode)
-         Print("Daily trade limit reached: ", dailyTradeCount);
       return;
+
+   // Min bars between trades
+   if(lastTradeBarTime > 0)
+   {
+      int barsSinceTrade = iBarShift(_Symbol, InpEntryTimeframe, lastTradeBarTime);
+      if(barsSinceTrade < InpMinBarsBetweenTrades)
+         return;
    }
 
-   // Calculate Smoothed Heiken Ashi
-   if(!CalculateSmoothedHeikenAshi())
-   {
-      Print("Failed to calculate Smoothed Heiken Ashi!");
-      return;
-   }
-
-   // Check if we have an open position
+   // Check if position exists
    if(HasOpenPosition())
-   {
-      ManageOpenPosition();
       return;
-   }
+
+   // Calculate SHA for all timeframes
+   if(!CalculateAllSHA())
+      return;
+
+   // Determine higher TF trends
+   UpdateTrendDirections();
 
    // Execute trading logic
    ProcessTradingLogic();
 }
 
 //+------------------------------------------------------------------+
-//| Calculate Smoothed Heiken Ashi                                    |
+//| Calculate Smoothed Heiken Ashi for All Timeframes                 |
 //+------------------------------------------------------------------+
-bool CalculateSmoothedHeikenAshi()
+bool CalculateAllSHA()
 {
-   ENUM_TIMEFRAMES tf = InpTimeframe == PERIOD_CURRENT ? Period() : InpTimeframe;
-   int barsNeeded = InpLookbackPeriod + InpSmoothingLength + InpPullbackBars + 30;
+   if(!CalculateSHA(InpEntryTimeframe, shaOpenM1, shaHighM1, shaLowM1, shaCloseM1, shaColorM1))
+      return false;
+
+   if(!CalculateSHA(InpTrendTF1, shaOpenH1, shaHighH1, shaLowH1, shaCloseH1, shaColorH1))
+      return false;
+
+   if(!CalculateSHA(InpTrendTF2, shaOpenH4, shaHighH4, shaLowH4, shaCloseH4, shaColorH4))
+      return false;
+
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Smoothed Heiken Ashi for Specific Timeframe             |
+//+------------------------------------------------------------------+
+bool CalculateSHA(ENUM_TIMEFRAMES tf, double &shaOpen[], double &shaHigh[],
+                  double &shaLow[], double &shaClose[], double &shaColor[])
+{
+   int barsNeeded = 50;
 
    ArrayResize(shaOpen, barsNeeded);
    ArrayResize(shaHigh, barsNeeded);
@@ -690,105 +531,130 @@ bool CalculateSmoothedHeikenAshi()
       shaOpen[i] = (shaOpen[i + 1] + shaClose[i + 1]) / 2.0;
       shaHigh[i] = MathMax(smoothedHigh[i], MathMax(shaOpen[i], shaClose[i]));
       shaLow[i] = MathMin(smoothedLow[i], MathMin(shaOpen[i], shaClose[i]));
-      shaColor[i] = (shaClose[i] >= shaOpen[i]) ? 0.0 : 1.0;
+      shaColor[i] = (shaClose[i] >= shaOpen[i]) ? 0.0 : 1.0;  // 0=Bullish, 1=Bearish
    }
 
    return true;
 }
 
 //+------------------------------------------------------------------+
-//| Get SHA Middle Line                                               |
+//| Update Trend Directions from Higher Timeframes                    |
 //+------------------------------------------------------------------+
-double GetSHAMiddle(int shift)
+void UpdateTrendDirections()
 {
-   if(shift < 0 || shift >= ArraySize(shaOpen)) return 0;
-   return (shaOpen[shift] + shaClose[shift]) / 2.0;
-}
+   // Check H1 trend
+   g_trendH1 = GetTrendDirection(shaColorH1, InpTrendConfirmBars);
 
-//+------------------------------------------------------------------+
-//| Check if SHA is Bullish for N consecutive bars                    |
-//+------------------------------------------------------------------+
-bool IsSHABullishConsecutive(int bars)
-{
-   for(int i = 1; i <= bars; i++)
+   // Check H4 trend
+   g_trendH4 = GetTrendDirection(shaColorH4, InpTrendConfirmBars);
+
+   if(InpDebugMode)
    {
-      if(i >= ArraySize(shaColor)) return false;
-      if(shaColor[i] != 0.0) return false;
+      static datetime lastLogTime = 0;
+      if(TimeCurrent() - lastLogTime >= 300)
+      {
+         string h1Trend = (g_trendH1 == 1) ? "BULLISH" : (g_trendH1 == -1) ? "BEARISH" : "NEUTRAL";
+         string h4Trend = (g_trendH4 == 1) ? "BULLISH" : (g_trendH4 == -1) ? "BEARISH" : "NEUTRAL";
+         Print("Trend Status - H1: ", h1Trend, " | H4: ", h4Trend);
+         lastLogTime = TimeCurrent();
+      }
    }
-   return true;
 }
 
 //+------------------------------------------------------------------+
-//| Check if SHA is Bearish for N consecutive bars                    |
+//| Get Trend Direction from SHA Color                                |
 //+------------------------------------------------------------------+
-bool IsSHABearishConsecutive(int bars)
+int GetTrendDirection(double &shaColor[], int confirmBars)
 {
-   for(int i = 1; i <= bars; i++)
+   // Check for bullish (all bars = 0)
+   bool allBullish = true;
+   bool allBearish = true;
+
+   for(int i = 1; i <= confirmBars; i++)
    {
-      if(i >= ArraySize(shaColor)) return false;
-      if(shaColor[i] != 1.0) return false;
+      if(i >= ArraySize(shaColor)) return 0;
+
+      if(shaColor[i] != 0.0) allBullish = false;
+      if(shaColor[i] != 1.0) allBearish = false;
    }
-   return true;
+
+   if(allBullish) return 1;   // Bullish
+   if(allBearish) return -1;  // Bearish
+   return 0;  // Neutral/Mixed
+}
+
+//+------------------------------------------------------------------+
+//| Check if Both Timeframes Align                                    |
+//+------------------------------------------------------------------+
+bool AreTrendsAligned(int requiredDirection)
+{
+   if(InpRequireBothTFAlign)
+   {
+      return (g_trendH1 == requiredDirection && g_trendH4 == requiredDirection);
+   }
+   else
+   {
+      // At least one must match
+      return (g_trendH1 == requiredDirection || g_trendH4 == requiredDirection);
+   }
 }
 
 //+------------------------------------------------------------------+
 //| Get ATR Value                                                     |
 //+------------------------------------------------------------------+
-double GetATR(int shift = 1)
+double GetATR(int handle, int shift = 1)
 {
-   if(atrHandle == INVALID_HANDLE) return 0;
+   if(handle == INVALID_HANDLE) return 0;
 
    double atr[];
    ArraySetAsSeries(atr, true);
-
-   if(CopyBuffer(atrHandle, 0, shift, 1, atr) <= 0) return 0;
-
+   if(CopyBuffer(handle, 0, shift, 1, atr) <= 0) return 0;
    return atr[0];
 }
 
 //+------------------------------------------------------------------+
-//| Get ADX Value                                                     |
+//| Get ADX Values                                                    |
 //+------------------------------------------------------------------+
-double GetADX(int shift = 1)
+bool GetADXValues(double &adx, double &plusDI, double &minusDI, int shift = 1)
 {
-   if(adxHandle == INVALID_HANDLE) return 0;
+   if(adxHandleH1 == INVALID_HANDLE) return false;
 
-   double adx[];
-   ArraySetAsSeries(adx, true);
+   double adxBuf[], plusBuf[], minusBuf[];
+   ArraySetAsSeries(adxBuf, true);
+   ArraySetAsSeries(plusBuf, true);
+   ArraySetAsSeries(minusBuf, true);
 
-   if(CopyBuffer(adxHandle, 0, shift, 1, adx) <= 0) return 0;
+   if(CopyBuffer(adxHandleH1, 0, shift, 1, adxBuf) <= 0) return false;
+   if(CopyBuffer(adxHandleH1, 1, shift, 1, plusBuf) <= 0) return false;
+   if(CopyBuffer(adxHandleH1, 2, shift, 1, minusBuf) <= 0) return false;
 
-   return adx[0];
+   adx = adxBuf[0];
+   plusDI = plusBuf[0];
+   minusDI = minusBuf[0];
+   return true;
 }
 
 //+------------------------------------------------------------------+
-//| Get +DI Value                                                     |
+//| Check ADX Filter                                                  |
 //+------------------------------------------------------------------+
-double GetPlusDI(int shift = 1)
+bool CheckADXFilter(bool isLong)
 {
-   if(adxHandle == INVALID_HANDLE) return 0;
+   if(!InpUseADXFilter) return true;
 
-   double plusDI[];
-   ArraySetAsSeries(plusDI, true);
+   double adx, plusDI, minusDI;
+   if(!GetADXValues(adx, plusDI, minusDI))
+      return true;
 
-   if(CopyBuffer(adxHandle, 1, shift, 1, plusDI) <= 0) return 0;
+   if(adx < InpMinADX || adx > InpMaxADX)
+      return false;
 
-   return plusDI[0];
-}
+   if(isLong && plusDI <= minusDI)
+      return false;
 
-//+------------------------------------------------------------------+
-//| Get -DI Value                                                     |
-//+------------------------------------------------------------------+
-double GetMinusDI(int shift = 1)
-{
-   if(adxHandle == INVALID_HANDLE) return 0;
+   if(!isLong && minusDI <= plusDI)
+      return false;
 
-   double minusDI[];
-   ArraySetAsSeries(minusDI, true);
-
-   if(CopyBuffer(adxHandle, 2, shift, 1, minusDI) <= 0) return 0;
-
-   return minusDI[0];
+   return true;
 }
 
 //+------------------------------------------------------------------+
@@ -798,20 +664,13 @@ bool CheckATRFilter()
 {
    if(!InpUseATRFilter) return true;
 
-   double atr = GetATR(1);
+   double atr = GetATR(atrHandleM1, 1);
    double atrPips = atr / pipValue;
 
-   if(atrPips < InpMinATRPips)
+   if(atrPips < InpMinATRPips || atrPips > InpMaxATRPips)
    {
       if(InpDebugMode)
-         Print("ATR too low: ", DoubleToString(atrPips, 2), " < ", InpMinATRPips, " pips (Low volatility)");
-      return false;
-   }
-
-   if(atrPips > InpMaxATRPips)
-   {
-      if(InpDebugMode)
-         Print("ATR too high: ", DoubleToString(atrPips, 2), " > ", InpMaxATRPips, " pips (Extreme volatility)");
+         Print("ATR out of range: ", DoubleToString(atrPips, 1), " pips");
       return false;
    }
 
@@ -819,299 +678,120 @@ bool CheckATRFilter()
 }
 
 //+------------------------------------------------------------------+
-//| Check ADX Filter for Long                                         |
+//| Get SHA Middle (M1)                                               |
 //+------------------------------------------------------------------+
-bool CheckADXFilterLong()
+double GetSHAMiddleM1(int shift)
 {
-   if(!InpUseADXFilter) return true;
+   if(shift < 0 || shift >= ArraySize(shaOpenM1)) return 0;
+   return (shaOpenM1[shift] + shaCloseM1[shift]) / 2.0;
+}
 
-   double adx = GetADX(1);
-   double plusDI = GetPlusDI(1);
-   double minusDI = GetMinusDI(1);
-
-   if(adx < InpMinADX)
+//+------------------------------------------------------------------+
+//| Check M1 Entry Signal                                             |
+//+------------------------------------------------------------------+
+bool CheckM1EntrySignal(bool isLong)
+{
+   // Check M1 SHA confirms direction
+   for(int i = 1; i <= InpSHAConfirmBars; i++)
    {
-      if(InpDebugMode)
-         Print("ADX too low for Long: ", DoubleToString(adx, 2), " < ", InpMinADX, " (Weak trend)");
-      return false;
+      if(i >= ArraySize(shaColorM1)) return false;
+
+      if(isLong && shaColorM1[i] != 0.0) return false;  // Need bullish
+      if(!isLong && shaColorM1[i] != 1.0) return false; // Need bearish
    }
 
-   if(adx > InpMaxADX)
-   {
-      if(InpDebugMode)
-         Print("ADX too high for Long: ", DoubleToString(adx, 2), " > ", InpMaxADX, " (Overextended)");
-      return false;
-   }
+   // Check price is on correct side of SHA
+   double currentClose = iClose(_Symbol, InpEntryTimeframe, 1);
+   double shaMiddle = GetSHAMiddleM1(1);
 
-   if(plusDI <= minusDI)
-   {
-      if(InpDebugMode)
-         Print("DI not bullish: +DI=", DoubleToString(plusDI, 2), " -DI=", DoubleToString(minusDI, 2));
+   if(isLong && currentClose <= shaMiddle) return false;
+   if(!isLong && currentClose >= shaMiddle) return false;
+
+   // Check for pullback
+   if(!DetectPullbackM1(isLong))
       return false;
-   }
+
+   // Check bounce if required
+   if(InpRequireBounce && !CheckBounceM1(isLong))
+      return false;
 
    return true;
 }
 
 //+------------------------------------------------------------------+
-//| Check ADX Filter for Short                                        |
+//| Detect Pullback on M1                                             |
 //+------------------------------------------------------------------+
-bool CheckADXFilterShort()
+bool DetectPullbackM1(bool isLong)
 {
-   if(!InpUseADXFilter) return true;
-
-   double adx = GetADX(1);
-   double plusDI = GetPlusDI(1);
-   double minusDI = GetMinusDI(1);
-
-   if(adx < InpMinADXShort)
-   {
-      if(InpDebugMode)
-         Print("ADX too low for Short: ", DoubleToString(adx, 2), " < ", InpMinADXShort, " (Weak trend)");
-      return false;
-   }
-
-   if(adx > InpMaxADX)
-   {
-      if(InpDebugMode)
-         Print("ADX too high for Short: ", DoubleToString(adx, 2), " > ", InpMaxADX, " (Overextended)");
-      return false;
-   }
-
-   if(minusDI <= plusDI)
-   {
-      if(InpDebugMode)
-         Print("DI not bearish: +DI=", DoubleToString(plusDI, 2), " -DI=", DoubleToString(minusDI, 2));
-      return false;
-   }
-
-   double diDiff = minusDI - plusDI;
-   if(diDiff < 5.0)
-   {
-      if(InpDebugMode)
-         Print("DI difference too small for Short: ", DoubleToString(diDiff, 2), " < 5.0");
-      return false;
-   }
-
-   return true;
-}
-
-//+------------------------------------------------------------------+
-//| Get Resistance Level                                              |
-//+------------------------------------------------------------------+
-double GetResistanceLevel(int skipBars)
-{
-   ENUM_TIMEFRAMES tf = InpTimeframe == PERIOD_CURRENT ? Period() : InpTimeframe;
-   double highest = 0;
-
-   for(int i = skipBars + 1; i <= skipBars + InpLookbackPeriod; i++)
-   {
-      double h = iHigh(_Symbol, tf, i);
-      if(h > highest) highest = h;
-   }
-
-   return highest;
-}
-
-//+------------------------------------------------------------------+
-//| Get Support Level                                                 |
-//+------------------------------------------------------------------+
-double GetSupportLevel(int skipBars)
-{
-   ENUM_TIMEFRAMES tf = InpTimeframe == PERIOD_CURRENT ? Period() : InpTimeframe;
-   double lowest = DBL_MAX;
-
-   for(int i = skipBars + 1; i <= skipBars + InpLookbackPeriod; i++)
-   {
-      double l = iLow(_Symbol, tf, i);
-      if(l < lowest) lowest = l;
-   }
-
-   return lowest;
-}
-
-//+------------------------------------------------------------------+
-//| Check for Valid Bounce                                            |
-//+------------------------------------------------------------------+
-bool CheckBounce(bool isLong, int barShift)
-{
-   if(!InpRequireBounce) return true;
-
-   ENUM_TIMEFRAMES tf = InpTimeframe == PERIOD_CURRENT ? Period() : InpTimeframe;
-
-   double open1 = iOpen(_Symbol, tf, barShift);
-   double close1 = iClose(_Symbol, tf, barShift);
-   double high1 = iHigh(_Symbol, tf, barShift);
-   double low1 = iLow(_Symbol, tf, barShift);
-   double range1 = high1 - low1;
-
-   if(range1 == 0) return false;
-
-   double open2 = iOpen(_Symbol, tf, barShift + 1);
-   double close2 = iClose(_Symbol, tf, barShift + 1);
-   double high2 = iHigh(_Symbol, tf, barShift + 1);
-   double low2 = iLow(_Symbol, tf, barShift + 1);
-
-   double shaMiddle = GetSHAMiddle(barShift);
-
-   if(isLong)
-   {
-      bool isBullishBar = close1 > open1;
-      double lowerWick = MathMin(open1, close1) - low1;
-      double upperWick = high1 - MathMax(open1, close1);
-      double body = MathAbs(close1 - open1);
-
-      bool strongBounce = false;
-
-      switch(InpBounceStrength)
-      {
-         case 1:
-            strongBounce = isBullishBar;
-            break;
-
-         case 2:
-            strongBounce = isBullishBar &&
-                          (low1 <= shaMiddle + InpPullbackPips * pipValue) &&
-                          (lowerWick >= body * 0.3);
-            break;
-
-         case 3:
-            strongBounce = isBullishBar &&
-                          (low1 <= shaMiddle + InpPullbackPips * pipValue) &&
-                          (lowerWick >= body * 0.5) &&
-                          (close1 > high2 || body > MathAbs(close2 - open2));
-            break;
-      }
-
-      return strongBounce;
-   }
-   else
-   {
-      bool isBearishBar = close1 < open1;
-      double upperWick = high1 - MathMax(open1, close1);
-      double lowerWick = MathMin(open1, close1) - low1;
-      double body = MathAbs(close1 - open1);
-
-      bool strongBounce = false;
-
-      switch(InpBounceStrength)
-      {
-         case 1:
-            strongBounce = isBearishBar;
-            break;
-
-         case 2:
-            strongBounce = isBearishBar &&
-                          (high1 >= shaMiddle - InpPullbackPips * pipValue) &&
-                          (upperWick >= body * 0.3);
-            break;
-
-         case 3:
-            strongBounce = isBearishBar &&
-                          (high1 >= shaMiddle - InpPullbackPips * pipValue) &&
-                          (upperWick >= body * 0.5) &&
-                          (close1 < low2 || body > MathAbs(close2 - open2));
-            break;
-      }
-
-      return strongBounce;
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Check for Valid Bounce with explicit strength (for Short)         |
-//+------------------------------------------------------------------+
-bool CheckBounceStrict(bool isLong, int barShift, int strength)
-{
-   ENUM_TIMEFRAMES tf = InpTimeframe == PERIOD_CURRENT ? Period() : InpTimeframe;
-
-   double open1 = iOpen(_Symbol, tf, barShift);
-   double close1 = iClose(_Symbol, tf, barShift);
-   double high1 = iHigh(_Symbol, tf, barShift);
-   double low1 = iLow(_Symbol, tf, barShift);
-   double range1 = high1 - low1;
-
-   if(range1 == 0) return false;
-
-   double open2 = iOpen(_Symbol, tf, barShift + 1);
-   double close2 = iClose(_Symbol, tf, barShift + 1);
-   double high2 = iHigh(_Symbol, tf, barShift + 1);
-   double low2 = iLow(_Symbol, tf, barShift + 1);
-
-   double shaMiddle = GetSHAMiddle(barShift);
-
-   bool isBearishBar = close1 < open1;
-   double upperWick = high1 - MathMax(open1, close1);
-   double lowerWick = MathMin(open1, close1) - low1;
-   double body = MathAbs(close1 - open1);
-
-   bool strongBounce = false;
-
-   switch(strength)
-   {
-      case 1:
-         strongBounce = isBearishBar;
-         break;
-
-      case 2:
-         strongBounce = isBearishBar &&
-                       (high1 >= shaMiddle - InpPullbackPips * pipValue) &&
-                       (upperWick >= body * 0.3);
-         break;
-
-      case 3:
-         strongBounce = isBearishBar &&
-                       (high1 >= shaMiddle - InpPullbackPips * pipValue) &&
-                       (upperWick >= body * 0.5) &&
-                       (close1 < low2 || body > MathAbs(close2 - open2) * 1.2);
-         break;
-   }
-
-   return strongBounce;
-}
-
-//+------------------------------------------------------------------+
-//| Detect Pullback to SHA                                            |
-//+------------------------------------------------------------------+
-bool DetectPullback(bool isLong, double &pullbackBar)
-{
-   ENUM_TIMEFRAMES tf = InpTimeframe == PERIOD_CURRENT ? Period() : InpTimeframe;
    double tolerance = InpPullbackPips * pipValue;
-
-   pullbackBar = -1;
 
    for(int i = 1; i <= InpPullbackBars; i++)
    {
-      double shaMiddle = GetSHAMiddle(i);
-      double barHigh = iHigh(_Symbol, tf, i);
-      double barLow = iLow(_Symbol, tf, i);
-      double barClose = iClose(_Symbol, tf, i);
+      double shaMiddle = GetSHAMiddleM1(i);
+      double barHigh = iHigh(_Symbol, InpEntryTimeframe, i);
+      double barLow = iLow(_Symbol, InpEntryTimeframe, i);
+      double barClose = iClose(_Symbol, InpEntryTimeframe, i);
 
       if(isLong)
       {
          double distanceToSHA = barLow - shaMiddle;
-
          if(distanceToSHA <= tolerance && distanceToSHA >= -tolerance * 0.5)
          {
             if(barClose > shaMiddle)
-            {
-               pullbackBar = i;
                return true;
-            }
          }
       }
       else
       {
          double distanceToSHA = shaMiddle - barHigh;
-
          if(distanceToSHA <= tolerance && distanceToSHA >= -tolerance * 0.5)
          {
             if(barClose < shaMiddle)
-            {
-               pullbackBar = i;
                return true;
-            }
          }
+      }
+   }
+
+   return false;
+}
+
+//+------------------------------------------------------------------+
+//| Check Bounce on M1                                                |
+//+------------------------------------------------------------------+
+bool CheckBounceM1(bool isLong)
+{
+   double open1 = iOpen(_Symbol, InpEntryTimeframe, 1);
+   double close1 = iClose(_Symbol, InpEntryTimeframe, 1);
+   double high1 = iHigh(_Symbol, InpEntryTimeframe, 1);
+   double low1 = iLow(_Symbol, InpEntryTimeframe, 1);
+
+   if(high1 == low1) return false;
+
+   double body = MathAbs(close1 - open1);
+   double shaMiddle = GetSHAMiddleM1(1);
+
+   if(isLong)
+   {
+      bool isBullish = close1 > open1;
+      double lowerWick = MathMin(open1, close1) - low1;
+
+      switch(InpBounceStrength)
+      {
+         case 1: return isBullish;
+         case 2: return isBullish && (lowerWick >= body * 0.3);
+         case 3: return isBullish && (lowerWick >= body * 0.5);
+      }
+   }
+   else
+   {
+      bool isBearish = close1 < open1;
+      double upperWick = high1 - MathMax(open1, close1);
+
+      switch(InpBounceStrength)
+      {
+         case 1: return isBearish;
+         case 2: return isBearish && (upperWick >= body * 0.3);
+         case 3: return isBearish && (upperWick >= body * 0.5);
       }
    }
 
@@ -1123,146 +803,121 @@ bool DetectPullback(bool isLong, double &pullbackBar)
 //+------------------------------------------------------------------+
 void ProcessTradingLogic()
 {
-   // Check if trading is allowed by Fintokei risk management
    if(!g_tradingAllowed)
-   {
-      if(InpDebugMode)
-         Print("Trading suspended due to risk limits");
       return;
-   }
-
-   ENUM_TIMEFRAMES tf = InpTimeframe == PERIOD_CURRENT ? Period() : InpTimeframe;
-
-   double currentClose = iClose(_Symbol, tf, 1);
-   double currentOpen = iOpen(_Symbol, tf, 1);
-   double shaMiddle = GetSHAMiddle(1);
-   double breakoutBuffer = InpBreakoutPips * pipValue;
 
    if(!CheckATRFilter())
       return;
 
-   // ==================== LONG SETUP ====================
-   if(IsSHABullishConsecutive(InpSHAConfirmBars) && currentClose > shaMiddle)
+   // ===== LONG SETUP =====
+   // Check if H1 and H4 are both bullish
+   if(AreTrendsAligned(1))  // 1 = Bullish
    {
-      if(CheckADXFilterLong())
+      if(CheckADXFilter(true))
       {
-         double resistance = GetResistanceLevel(InpBreakoutLookback);
-
-         bool breakoutDetected = false;
-         for(int i = 1; i <= InpBreakoutLookback; i++)
+         if(CheckM1EntrySignal(true))
          {
-            double barHigh = iHigh(_Symbol, tf, i);
-            if(barHigh > resistance + breakoutBuffer)
-            {
-               breakoutDetected = true;
-               break;
-            }
-         }
-
-         if(breakoutDetected)
-         {
-            double pullbackBar;
-            if(DetectPullback(true, pullbackBar))
-            {
-               if(CheckBounce(true, 1))
-               {
-                  if(currentClose > currentOpen)
-                  {
-                     double adx = GetADX(1);
-                     double atr = GetATR(1);
-
-                     Print("=================================================");
-                     Print("LONG ENTRY CONDITIONS MET! (Fintokei Compliant)");
-                     Print("SHA: Bullish x", InpSHAConfirmBars, " bars");
-                     Print("Resistance: ", resistance, " (Broken)");
-                     Print("ADX: ", DoubleToString(adx, 2), " | ATR: ", DoubleToString(atr / pipValue, 2), " pips");
-                     Print("=================================================");
-
-                     ExecuteLongEntry();
-                     return;
-                  }
-               }
-            }
+            Print("=================================================");
+            Print("LONG ENTRY - MTF Aligned (H4+H1 Bullish, M1 Entry)");
+            Print("=================================================");
+            ExecuteLongEntry();
+            return;
          }
       }
    }
 
-   // ==================== SHORT SETUP ====================
+   // ===== SHORT SETUP =====
    if(!InpEnableShort)
       return;
 
-   if(IsSHABearishConsecutive(InpShortConfirmBars) && currentClose < shaMiddle)
+   // Check if H1 and H4 are both bearish
+   if(AreTrendsAligned(-1))  // -1 = Bearish
    {
-      if(!CheckADXFilterShort())
-         return;
-
-      double support = GetSupportLevel(InpBreakoutLookback);
-
-      bool breakoutDetected = false;
-      for(int i = 1; i <= InpBreakoutLookback; i++)
+      if(CheckADXFilter(false))
       {
-         double barLow = iLow(_Symbol, tf, i);
-         if(barLow < support - breakoutBuffer)
+         if(CheckM1EntrySignal(false))
          {
-            breakoutDetected = true;
-            break;
-         }
-      }
-
-      if(breakoutDetected)
-      {
-         double pullbackBar;
-         if(DetectPullback(false, pullbackBar))
-         {
-            if(CheckBounceStrict(false, 1, InpShortBounceStrength))
-            {
-               if(currentClose < currentOpen)
-               {
-                  double adx = GetADX(1);
-                  double atr = GetATR(1);
-
-                  Print("=================================================");
-                  Print("SHORT ENTRY CONDITIONS MET! (Fintokei Compliant)");
-                  Print("SHA: Bearish x", InpShortConfirmBars, " bars");
-                  Print("Support: ", support, " (Broken)");
-                  Print("ADX: ", DoubleToString(adx, 2), " | ATR: ", DoubleToString(atr / pipValue, 2), " pips");
-                  Print("=================================================");
-
-                  ExecuteShortEntry();
-                  return;
-               }
-            }
+            Print("=================================================");
+            Print("SHORT ENTRY - MTF Aligned (H4+H1 Bearish, M1 Entry)");
+            Print("=================================================");
+            ExecuteShortEntry();
+            return;
          }
       }
    }
 }
 
 //+------------------------------------------------------------------+
-//| Execute Long Entry (Fintokei Compliant)                           |
+//| Calculate Loss Per Lot                                            |
+//+------------------------------------------------------------------+
+double CalculateLossPerLot(double slDistance)
+{
+   double tickSize = symbolInfo.TickSize();
+   double tickValue = symbolInfo.TickValue();
+   if(tickSize == 0) return 0;
+   return (slDistance / tickSize) * tickValue;
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Fintokei Lot Size                                       |
+//+------------------------------------------------------------------+
+double CalculateFintokeiLotSize(double slDistance)
+{
+   double maxRiskAmount = GetMaxAllowedRisk();
+   if(maxRiskAmount <= 0) return 0;
+
+   double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double desiredRisk = currentEquity * (InpRiskPercent / 100.0);
+   double riskAmount = MathMin(desiredRisk, maxRiskAmount);
+
+   double lossPerLot = CalculateLossPerLot(slDistance);
+   if(lossPerLot <= 0) return InpFixedLot;
+
+   double lotSize = riskAmount / lossPerLot;
+
+   double minLot = symbolInfo.LotsMin();
+   double maxLot = symbolInfo.LotsMax();
+   double lotStep = symbolInfo.LotsStep();
+
+   lotSize = MathFloor(lotSize / lotStep) * lotStep;
+   lotSize = MathMax(minLot, MathMin(maxLot, lotSize));
+
+   return NormalizeDouble(lotSize, 2);
+}
+
+//+------------------------------------------------------------------+
+//| Get Optimized SL                                                  |
+//+------------------------------------------------------------------+
+double GetOptimizedSL(double baseSL, double entryPrice, bool isLong)
+{
+   if(!InpUseTightSL)
+      return baseSL;
+
+   double baseDistance = isLong ? (entryPrice - baseSL) : (baseSL - entryPrice);
+   double optimizedDistance = baseDistance * InpTightSLMultiplier;
+
+   double minDistance = InpMinSLPipsOptimized * pipValue;
+   if(optimizedDistance < minDistance)
+      optimizedDistance = minDistance;
+
+   return isLong ? (entryPrice - optimizedDistance) : (entryPrice + optimizedDistance);
+}
+
+//+------------------------------------------------------------------+
+//| Execute Long Entry                                                |
 //+------------------------------------------------------------------+
 void ExecuteLongEntry()
 {
    double ask = symbolInfo.Ask();
-   double shaMiddle = GetSHAMiddle(1);
-   double atr = GetATR(1);
+   double atrM1 = GetATR(atrHandleM1, 1);
+   double atrH1 = GetATR(atrHandleH1, 1);
 
-   // Calculate base SL
-   double baseSL;
-   if(InpUseATRForSLTP && atr > 0)
-   {
-      baseSL = ask - atr * InpATRMultiplierSL;
-   }
-   else
-   {
-      baseSL = shaMiddle - InpMinSLPips * pipValue;
-   }
-
-   // Apply tight SL optimization for higher lot
+   // Use M1 ATR for tighter SL
+   double baseSL = ask - atrM1 * InpATRMultiplierSL;
    double sl = GetOptimizedSL(baseSL, ask, true);
 
-   // Calculate SL distance
    double slDistance = ask - sl;
-   double minSL = (InpUseTightSL ? InpMinSLPipsOptimized : InpMinSLPips) * pipValue;
+   double minSL = InpMinSLPips * pipValue;
    double maxSL = InpMaxSLPips * pipValue;
 
    if(slDistance < minSL)
@@ -1276,55 +931,41 @@ void ExecuteLongEntry()
       slDistance = maxSL;
    }
 
-   // Calculate TP
-   double tp;
-   if(InpUseATRForSLTP && atr > 0)
-   {
-      tp = ask + atr * InpATRMultiplierTP;
-   }
-   else
-   {
+   // Use H1 ATR for TP (bigger moves)
+   double tp = ask + atrH1 * InpATRMultiplierTP;
+   if(atrH1 == 0)
       tp = ask + slDistance * InpRiskRewardRatio;
-   }
 
-   // Normalize prices
    int digits = symbolInfo.Digits();
    sl = NormalizeDouble(sl, digits);
    tp = NormalizeDouble(tp, digits);
 
-   // Calculate Fintokei-compliant lot size
    double lotSize = CalculateFintokeiLotSize(slDistance);
    if(lotSize <= 0)
    {
-      Print("Cannot open trade: No risk capacity or invalid lot size!");
+      Print("Cannot open trade: No risk capacity!");
       return;
    }
 
-   // Verify trade risk is within limits
    double tradeRisk = CalculateLossPerLot(slDistance) * lotSize;
    double maxAllowed = GetMaxAllowedRisk();
 
    if(tradeRisk > maxAllowed)
    {
-      Print("Trade risk (", DoubleToString(tradeRisk, 0), " JPY) exceeds max allowed (",
-            DoubleToString(maxAllowed, 0), " JPY)");
+      Print("Trade risk exceeds limit!");
       return;
    }
 
-   // Execute trade
    if(trade.Buy(lotSize, _Symbol, ask, sl, tp, InpTradeComment))
    {
       dailyTradeCount++;
+      lastTradeBarTime = iTime(_Symbol, InpEntryTimeframe, 0);
 
       Print("========================================");
-      Print("LONG POSITION OPENED! (Fintokei Compliant)");
+      Print("LONG OPENED (MTF Strategy)");
       Print("Entry: ", ask, " | SL: ", sl, " | TP: ", tp);
-      Print("Lot: ", lotSize, " | SL: $", DoubleToString(slDistance, 2),
-            " | TP: $", DoubleToString(tp - ask, 2));
-      Print("Trade Risk: ", DoubleToString(tradeRisk, 0), " JPY (",
-            DoubleToString((tradeRisk / AccountInfoDouble(ACCOUNT_EQUITY)) * 100, 2), "%)");
-      Print("RR: 1:", DoubleToString((tp - ask) / slDistance, 2));
-      Print("Daily Trades: ", dailyTradeCount);
+      Print("Lot: ", lotSize, " | Risk: ", DoubleToString(tradeRisk, 0), " JPY");
+      Print("H1 Trend: BULLISH | H4 Trend: BULLISH");
       Print("========================================");
    }
    else
@@ -1334,31 +975,19 @@ void ExecuteLongEntry()
 }
 
 //+------------------------------------------------------------------+
-//| Execute Short Entry (Fintokei Compliant)                          |
+//| Execute Short Entry                                               |
 //+------------------------------------------------------------------+
 void ExecuteShortEntry()
 {
    double bid = symbolInfo.Bid();
-   double shaMiddle = GetSHAMiddle(1);
-   double atr = GetATR(1);
+   double atrM1 = GetATR(atrHandleM1, 1);
+   double atrH1 = GetATR(atrHandleH1, 1);
 
-   // Calculate base SL
-   double baseSL;
-   if(InpUseATRForSLTP && atr > 0)
-   {
-      baseSL = bid + atr * InpATRMultiplierSL;
-   }
-   else
-   {
-      baseSL = shaMiddle + InpMinSLPips * pipValue;
-   }
-
-   // Apply tight SL optimization for higher lot
+   double baseSL = bid + atrM1 * InpATRMultiplierSL;
    double sl = GetOptimizedSL(baseSL, bid, false);
 
-   // Calculate SL distance
    double slDistance = sl - bid;
-   double minSL = (InpUseTightSL ? InpMinSLPipsOptimized : InpMinSLPips) * pipValue;
+   double minSL = InpMinSLPips * pipValue;
    double maxSL = InpMaxSLPips * pipValue;
 
    if(slDistance < minSL)
@@ -1372,55 +1001,40 @@ void ExecuteShortEntry()
       slDistance = maxSL;
    }
 
-   // Calculate TP
-   double tp;
-   if(InpUseATRForSLTP && atr > 0)
-   {
-      tp = bid - atr * InpATRMultiplierTP;
-   }
-   else
-   {
+   double tp = bid - atrH1 * InpATRMultiplierTP;
+   if(atrH1 == 0)
       tp = bid - slDistance * InpRiskRewardRatio;
-   }
 
-   // Normalize prices
    int digits = symbolInfo.Digits();
    sl = NormalizeDouble(sl, digits);
    tp = NormalizeDouble(tp, digits);
 
-   // Calculate Fintokei-compliant lot size
    double lotSize = CalculateFintokeiLotSize(slDistance);
    if(lotSize <= 0)
    {
-      Print("Cannot open trade: No risk capacity or invalid lot size!");
+      Print("Cannot open trade: No risk capacity!");
       return;
    }
 
-   // Verify trade risk is within limits
    double tradeRisk = CalculateLossPerLot(slDistance) * lotSize;
    double maxAllowed = GetMaxAllowedRisk();
 
    if(tradeRisk > maxAllowed)
    {
-      Print("Trade risk (", DoubleToString(tradeRisk, 0), " JPY) exceeds max allowed (",
-            DoubleToString(maxAllowed, 0), " JPY)");
+      Print("Trade risk exceeds limit!");
       return;
    }
 
-   // Execute trade
    if(trade.Sell(lotSize, _Symbol, bid, sl, tp, InpTradeComment))
    {
       dailyTradeCount++;
+      lastTradeBarTime = iTime(_Symbol, InpEntryTimeframe, 0);
 
       Print("========================================");
-      Print("SHORT POSITION OPENED! (Fintokei Compliant)");
+      Print("SHORT OPENED (MTF Strategy)");
       Print("Entry: ", bid, " | SL: ", sl, " | TP: ", tp);
-      Print("Lot: ", lotSize, " | SL: $", DoubleToString(slDistance, 2),
-            " | TP: $", DoubleToString(bid - tp, 2));
-      Print("Trade Risk: ", DoubleToString(tradeRisk, 0), " JPY (",
-            DoubleToString((tradeRisk / AccountInfoDouble(ACCOUNT_EQUITY)) * 100, 2), "%)");
-      Print("RR: 1:", DoubleToString((bid - tp) / slDistance, 2));
-      Print("Daily Trades: ", dailyTradeCount);
+      Print("Lot: ", lotSize, " | Risk: ", DoubleToString(tradeRisk, 0), " JPY");
+      Print("H1 Trend: BEARISH | H4 Trend: BEARISH");
       Print("========================================");
    }
    else
@@ -1438,27 +1052,15 @@ bool HasOpenPosition()
    {
       if(positionInfo.SelectByIndex(i))
       {
-         if(positionInfo.Symbol() == _Symbol &&
-            positionInfo.Magic() == InpMagicNumber)
-         {
+         if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == InpMagicNumber)
             return true;
-         }
       }
    }
    return false;
 }
 
 //+------------------------------------------------------------------+
-//| Manage Open Position                                              |
-//+------------------------------------------------------------------+
-void ManageOpenPosition()
-{
-   // Position management - let it run to SL/TP
-   // Fintokei risk is monitored every tick by MonitorFintokeiRiskLimits()
-}
-
-//+------------------------------------------------------------------+
-//| Check if current time is within trading hours                     |
+//| Check if within trading hours                                     |
 //+------------------------------------------------------------------+
 bool IsWithinTradingHours()
 {
@@ -1482,11 +1084,7 @@ bool IsFridayEvening()
 {
    MqlDateTime currentTime;
    TimeToStruct(TimeCurrent(), currentTime);
-
-   if(currentTime.day_of_week == 5 && currentTime.hour >= 18)
-      return true;
-
-   return false;
+   return (currentTime.day_of_week == 5 && currentTime.hour >= 18);
 }
 
 //+------------------------------------------------------------------+
@@ -1495,6 +1093,5 @@ bool IsFridayEvening()
 void OnChartEvent(const int id, const long &lparam,
                   const double &dparam, const string &sparam)
 {
-   // Handle chart events if needed
 }
 //+------------------------------------------------------------------+
