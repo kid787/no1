@@ -44,6 +44,12 @@ input bool     InpUseATRFilter         = true;         // ATRフィルターを�
 input int      InpATRPeriod            = 14;           // ATR期間
 input double   InpATRRatio             = 0.8;          // ATR比率（平均の何倍以下でレンジ）
 
+input group "===== トレンドフィルター設定 ====="
+input bool     InpUseTrendFilter       = true;         // トレンドフィルターを使用
+input ENUM_TIMEFRAMES InpTrendTF       = PERIOD_M15;   // トレンド判定足
+input int      InpTrendEMAPeriod       = 50;           // トレンドEMA期間
+input int      InpTrendEMAShift        = 0;            // EMAシフト
+
 input group "===== エンベロープ設定（1分足）====="
 input int      InpEnvelopePeriod       = 20;           // エンベロープ期間
 input double   InpEnvelopeDev1         = 0.05;         // 偏差1 (%)
@@ -99,6 +105,7 @@ int h_adx_tf1, h_adx_tf2;           // ADX
 int h_bb_tf1, h_bb_tf2;             // ボリンジャーバンド
 int h_atr_tf1, h_atr_tf2;           // ATR
 int h_envelopes[6];                  // エンベロープ（6段階）
+int h_trend_ema;                     // トレンドEMA
 
 // リスク管理変数
 double g_initialBalance;
@@ -143,6 +150,7 @@ int OnInit()
     Print("ADXフィルター: ", InpUseADXFilter ? "ON" : "OFF");
     Print("BBスクイーズフィルター: ", InpUseBBSqueezeFilter ? "ON" : "OFF");
     Print("ATRフィルター: ", InpUseATRFilter ? "ON" : "OFF");
+    Print("トレンドフィルター: ", InpUseTrendFilter ? "ON" : "OFF", " (", EnumToString(InpTrendTF), " EMA", InpTrendEMAPeriod, ")");
     Print("プライスアクション: ", InpUsePriceAction ? "ON" : "OFF");
     Print("セッションフィルター: ", InpUseSessionFilter ? "ON" : "OFF");
     Print("ボリュームフィルター: ", InpUseVolumeFilter ? "ON" : "OFF");
@@ -163,6 +171,7 @@ void OnDeinit(const int reason)
     if(h_bb_tf2 != INVALID_HANDLE) IndicatorRelease(h_bb_tf2);
     if(h_atr_tf1 != INVALID_HANDLE) IndicatorRelease(h_atr_tf1);
     if(h_atr_tf2 != INVALID_HANDLE) IndicatorRelease(h_atr_tf2);
+    if(h_trend_ema != INVALID_HANDLE) IndicatorRelease(h_trend_ema);
 
     for(int i = 0; i < 6; i++)
     {
@@ -265,6 +274,14 @@ bool InitializeIndicators()
             Print("エラー: エンベロープ", i+1, "の作成に失敗");
             return false;
         }
+    }
+
+    // トレンドEMA
+    h_trend_ema = iMA(InpSymbol, InpTrendTF, InpTrendEMAPeriod, InpTrendEMAShift, MODE_EMA, PRICE_CLOSE);
+    if(h_trend_ema == INVALID_HANDLE)
+    {
+        Print("エラー: トレンドEMAの作成に失敗");
+        return false;
     }
 
     return true;
@@ -507,6 +524,31 @@ void UpdateRangeInfo()
 }
 
 //+------------------------------------------------------------------+
+//| トレンド方向の取得（1=上昇, -1=下降, 0=不明）                      |
+//+------------------------------------------------------------------+
+int GetTrendDirection()
+{
+    if(!InpUseTrendFilter)
+        return 0;  // フィルターOFFの場合は方向指定なし
+
+    double ema[];
+    ArraySetAsSeries(ema, true);
+
+    if(CopyBuffer(h_trend_ema, 0, 0, 3, ema) < 3)
+        return 0;
+
+    double currentPrice = symbolInfo.Bid();
+
+    // EMAより上なら上昇トレンド、下なら下降トレンド
+    if(currentPrice > ema[0])
+        return 1;   // 上昇トレンド → 買いのみ許可
+    else if(currentPrice < ema[0])
+        return -1;  // 下降トレンド → 売りのみ許可
+
+    return 0;
+}
+
+//+------------------------------------------------------------------+
 //| セッション判定                                                    |
 //+------------------------------------------------------------------+
 bool IsValidSession()
@@ -629,19 +671,27 @@ void CheckEntryConditions()
     bool buySignal = false;
     bool sellSignal = false;
 
+    // トレンド方向を取得
+    int trendDirection = GetTrendDirection();
+
     // 下限バンドタッチ → 買いシグナル
-    touchedBand = CheckEnvelopeLowerBandTouch();
-    if(touchedBand > 0)
+    // トレンドフィルター: 上昇トレンド(1)または方向不明(0)の場合のみ
+    if(trendDirection >= 0)
     {
-        if(!InpUsePriceAction || CheckBuyPriceAction())
+        touchedBand = CheckEnvelopeLowerBandTouch();
+        if(touchedBand > 0)
         {
-            buySignal = true;
-            g_touchedEnvelopeBand = touchedBand;
+            if(!InpUsePriceAction || CheckBuyPriceAction())
+            {
+                buySignal = true;
+                g_touchedEnvelopeBand = touchedBand;
+            }
         }
     }
 
     // 上限バンドタッチ → 売りシグナル
-    if(!buySignal)
+    // トレンドフィルター: 下降トレンド(-1)または方向不明(0)の場合のみ
+    if(!buySignal && trendDirection <= 0)
     {
         touchedBand = CheckEnvelopeUpperBandTouch();
         if(touchedBand > 0)
