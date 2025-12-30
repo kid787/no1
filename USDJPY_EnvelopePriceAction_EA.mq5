@@ -41,6 +41,7 @@ input double   InpEngulfingMinRatio    = 1.0;          // 包み足最小倍率
 
 input group "===== リスク管理設定 ====="
 input double   InpRiskPercent          = 3.0;          // 1トレードあたりのリスク (%)
+input double   InpMaxPositionLossPercent = 3.0;        // 1ポジション最大含み損 (%) ★重要
 input double   InpMaxDailyLossPercent  = 5.0;          // 1日の最大損失率 (%)
 input double   InpMaxTotalLossPercent  = 10.0;         // 全体の最大損失率 (%)
 input double   InpLotReduction1        = 5.0;          // ロット削減開始 損失率1 (%)
@@ -161,7 +162,10 @@ void OnTick()
     // 日次リセットのチェック
     CheckDailyReset();
 
-    // リスク管理チェック（最優先）
+    // 【最優先】個別ポジションの含み損チェック（3%ルール）
+    CheckPositionLossLimit();
+
+    // リスク管理チェック（5%/10%ルール）
     if(!CheckRiskLimits())
     {
         // リスク制限に達した場合、すべてのポジションを決済
@@ -288,6 +292,34 @@ bool CheckRiskLimits()
     }
 
     return true;
+}
+
+//+------------------------------------------------------------------+
+//| 個別ポジションの含み損チェック（3%ルール）                         |
+//+------------------------------------------------------------------+
+void CheckPositionLossLimit()
+{
+    double maxLossAmount = g_initialBalance * (InpMaxPositionLossPercent / 100.0);
+
+    for(int i = PositionsTotal() - 1; i >= 0; i--)
+    {
+        if(!positionInfo.SelectByIndex(i))
+            continue;
+
+        if(positionInfo.Symbol() != InpSymbol || positionInfo.Magic() != InpMagicNumber)
+            continue;
+
+        // 現在の含み損益を取得
+        double positionProfit = positionInfo.Profit() + positionInfo.Swap() + positionInfo.Commission();
+
+        // 含み損が最大許容額を超えた場合
+        if(positionProfit < 0 && MathAbs(positionProfit) >= maxLossAmount)
+        {
+            Print("警告: ポジション含み損が", InpMaxPositionLossPercent, "%に到達！");
+            Print("含み損: ", positionProfit, " 許容額: -", maxLossAmount);
+            ClosePosition(positionInfo.Ticket(), "1ポジション3%含み損制限");
+        }
+    }
 }
 
 //+------------------------------------------------------------------+
