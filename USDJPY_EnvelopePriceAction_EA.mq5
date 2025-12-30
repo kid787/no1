@@ -33,12 +33,12 @@ input bool     InpTradingOnFriday      = true;         // 金曜日にトレー�
 
 input group "===== エンベロープ設定 ====="
 input int      InpEnvelopePeriod       = 20;           // エンベロープ期間
-input double   InpEnvelopeDev1         = 0.15;         // 偏差1 (%)
-input double   InpEnvelopeDev2         = 0.20;         // 偏差2 (%)
-input double   InpEnvelopeDev3         = 0.25;         // 偏差3 (%)
-input double   InpEnvelopeDev4         = 0.30;         // 偏差4 (%)
-input double   InpEnvelopeDev5         = 0.35;         // 偏差5 (%)
-input double   InpEnvelopeDev6         = 0.40;         // 偏差6 (%)
+input double   InpEnvelopeDev1         = 0.25;         // 偏差1 (%)
+input double   InpEnvelopeDev2         = 0.30;         // 偏差2 (%)
+input double   InpEnvelopeDev3         = 0.35;         // 偏差3 (%)
+input double   InpEnvelopeDev4         = 0.40;         // 偏差4 (%)
+input double   InpEnvelopeDev5         = 0.45;         // 偏差5 (%)
+input double   InpEnvelopeDev6         = 0.50;         // 偏差6 (%)
 
 input group "===== 上位足フィルター設定 ====="
 input int      InpEMAPeriod            = 200;          // 上位足EMA期間
@@ -60,7 +60,7 @@ input double   InpMinLotSize           = 0.1;          // 最小エントリー�
 input int      InpSLBuffer             = 3;            // SLバッファ (pips)
 
 input group "===== 利確設定 ====="
-input bool     InpUsePartialClose      = true;         // 分割決済を使用
+input bool     InpUsePartialClose      = false;        // 分割決済を使用（false=TPまで保持）
 input double   InpPartialCloseRatio    = 0.5;          // 分割決済割合 (50%)
 
 input group "===== RSI設定 ====="
