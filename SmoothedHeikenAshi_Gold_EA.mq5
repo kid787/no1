@@ -3,12 +3,12 @@
 //|                                  Smoothed Heiken Ashi Strategy EA |
 //|                                       For XAUUSD (Gold) Trading   |
 //|                                    Fintokei Challenge Compliant   |
-//|                              v3.30 - Momentum Entry Edition       |
-//|                                  H1 Entry with Simpler Logic      |
+//|                              v3.31 - Adaptive ATR Edition         |
+//|                           Fixed ATR filter for 2024-2025 market   |
 //+------------------------------------------------------------------+
-#property copyright "Smoothed Heiken Ashi Gold EA v3.30 - Momentum Edition"
+#property copyright "Smoothed Heiken Ashi Gold EA v3.31 - Adaptive ATR"
 #property link      ""
-#property version   "3.30"
+#property version   "3.31"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -18,7 +18,7 @@
 //+------------------------------------------------------------------+
 //| Input Parameters                                                  |
 //+------------------------------------------------------------------+
-input group "=== v3.30 Momentum Entry Strategy ==="
+input group "=== v3.31 Adaptive ATR Strategy ==="
 input ENUM_TIMEFRAMES    InpEntryTimeframe     = PERIOD_H1;         // Entry Timeframe (H1 for less noise)
 input ENUM_TIMEFRAMES    InpTrendTF            = PERIOD_H4;         // Trend Timeframe (H4)
 input int                InpTrendConfirmBars   = 2;                 // Trend Confirm Bars
@@ -61,12 +61,13 @@ input group "=== Time-Based Exit (NEW) ==="
 input bool               InpUseTimeExit        = true;              // Exit Stale Trades
 input int                InpMaxBarsInTrade     = 48;                // Max Bars Before Exit (H1=48h)
 
-input group "=== ATR Settings ==="
+input group "=== ATR Settings (Adaptive for 2024-2025) ==="
 input int                InpATRPeriod          = 14;                // ATR Period
 input double             InpATRMultiplierSL    = 1.0;               // ATR Multiplier SL
-input double             InpATRMultiplierTP    = 1.5;               // ATR Multiplier TP (Lower for higher win%)
-input double             InpMinATRPips         = 50.0;              // Min ATR (Pips)
-input double             InpMaxATRPips         = 250.0;             // Max ATR (Pips)
+input double             InpATRMultiplierTP    = 1.5;               // ATR Multiplier TP
+input bool               InpUseATRFilter       = true;              // Use ATR Filter
+input double             InpMinATRPercent      = 0.3;               // Min ATR % of Price (adaptive)
+input double             InpMaxATRPercent      = 2.0;               // Max ATR % of Price (adaptive)
 
 input group "=== ADX Filter ==="
 input bool               InpUseADXFilter       = true;              // Use ADX Filter
@@ -104,7 +105,7 @@ input bool               InpAvoidMonday        = true;              // Avoid Mon
 
 input group "=== General Settings ==="
 input ulong              InpMagicNumber        = 202412006;         // Magic Number
-input string             InpTradeComment       = "SHA_Mom_v3.3";    // Trade Comment
+input string             InpTradeComment       = "SHA_Adp_v3.31";   // Trade Comment
 input bool               InpDebugMode          = true;              // Debug Mode
 
 //+------------------------------------------------------------------+
@@ -205,16 +206,16 @@ int OnInit()
    InitializeFintokeiRiskManagement();
 
    Print("==============================================");
-   Print("SmoothedHeikenAshi Gold EA v3.30 - MOMENTUM");
+   Print("SmoothedHeikenAshi Gold EA v3.31 - ADAPTIVE ATR");
    Print("==============================================");
-   Print("MAJOR CHANGES:");
-   Print("  - Entry TF: H1 (reduced noise from M1)");
-   Print("  - Simpler momentum-based entry");
-   Print("  - Lower TP ratio: ", InpATRMultiplierTP, "x ATR");
+   Print("v3.31 FIX: ATR filter now uses % of price");
+   Print("  - Works with Gold at any price ($1800-$3000+)");
+   Print("  - ATR Range: ", InpMinATRPercent, "% - ", InpMaxATRPercent, "% of price");
+   Print("  - Entry TF: H1 | Trend TF: H4");
+   Print("  - TP ratio: ", InpATRMultiplierTP, "x ATR");
    Print("  - Partial TP at 1:1 (", InpPartialTPPercent, "%)");
-   Print("  - Time-based exit: ", InpMaxBarsInTrade, " bars max");
-   Print("  - Persistent consecutive loss tracking");
-   Print("  - Cooldown: ", InpCooldownBars, " bars after ", InpMaxConsecutiveLosses, " losses");
+   Print("  - Time exit: ", InpMaxBarsInTrade, " bars max");
+   Print("  - Cooldown: ", InpCooldownBars, "h after ", InpMaxConsecutiveLosses, " losses");
    Print("==============================================");
 
    return INIT_SUCCEEDED;
@@ -732,19 +733,34 @@ double GetATR(int shift = 1)
 }
 
 //+------------------------------------------------------------------+
-//| Check ATR Filter                                                  |
+//| Check ATR Filter (Adaptive - uses % of price, not fixed pips)     |
 //+------------------------------------------------------------------+
 bool CheckATRFilter()
 {
-   double atr = GetATR(1);
-   double atrPips = atr / pipValue;
+   if(!InpUseATRFilter) return true;
 
-   if(atrPips < InpMinATRPips || atrPips > InpMaxATRPips)
+   double atr = GetATR(1);
+   double currentPrice = symbolInfo.Bid();
+
+   if(currentPrice <= 0) return true;
+
+   // Calculate ATR as percentage of current price (adaptive to price level)
+   double atrPercent = (atr / currentPrice) * 100.0;
+
+   if(atrPercent < InpMinATRPercent)
    {
       if(InpDebugMode)
-         Print("ATR out of range: ", DoubleToString(atrPips, 1), " pips");
+         Print("ATR too low: ", DoubleToString(atrPercent, 3), "% (min: ", InpMinATRPercent, "%)");
       return false;
    }
+
+   if(atrPercent > InpMaxATRPercent)
+   {
+      if(InpDebugMode)
+         Print("ATR too high: ", DoubleToString(atrPercent, 3), "% (max: ", InpMaxATRPercent, "%)");
+      return false;
+   }
+
    return true;
 }
 
