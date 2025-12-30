@@ -2,11 +2,12 @@
 //|                                   SmoothedHeikenAshi_Gold_EA.mq5 |
 //|                                  Smoothed Heiken Ashi Strategy EA |
 //|                                       For XAUUSD (Gold) Trading   |
-//|                                                        v2.00      |
+//|                                    Fintokei Challenge Compliant   |
+//|                                                        v3.00      |
 //+------------------------------------------------------------------+
-#property copyright "Smoothed Heiken Ashi Gold EA v2.0"
+#property copyright "Smoothed Heiken Ashi Gold EA v3.0 - Fintokei Edition"
 #property link      ""
-#property version   "2.00"
+#property version   "3.00"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -16,6 +17,20 @@
 //+------------------------------------------------------------------+
 //| Input Parameters                                                  |
 //+------------------------------------------------------------------+
+input group "=== Fintokei Risk Management (CRITICAL) ==="
+input double             InpInitialCapital     = 2000000.0;        // Initial Capital (JPY) - Set Your Plan Size
+input double             InpDailyLossLimit     = 5.0;              // Daily Loss Limit (%) - Fintokei: 5%
+input double             InpOverallLossLimit   = 10.0;             // Overall Loss Limit (%) - Fintokei: 10%
+input double             InpMaxRiskPerTrade    = 3.0;              // Max Risk Per Trade (%) - Recommended: 3%
+input double             InpSafetyBuffer       = 0.5;              // Safety Buffer (%) - Extra margin before limit
+input bool               InpAutoCloseOnRisk    = true;             // Auto-Close Positions Near Limit
+input int                InpServerUTCOffset    = 0;                // Server UTC Offset (hours)
+
+input group "=== Lot Size Optimization (High Lot Strategy) ==="
+input bool               InpUseTightSL         = true;             // Use Tight SL for Higher Lots
+input double             InpTightSLMultiplier  = 0.6;              // Tight SL Multiplier (0.5-0.8)
+input double             InpMinSLPipsOptimized = 150.0;            // Min SL for Optimized Entry [Gold: 150=$1.5]
+
 input group "=== Smoothed Heiken Ashi Settings ==="
 input int                InpSmoothingLength    = 15;              // Smoothing Length
 input ENUM_TIMEFRAMES    InpTimeframe          = PERIOD_H1;       // Timeframe (H1 Recommended)
@@ -53,7 +68,7 @@ input int                InpShortConfirmBars   = 4;               // SHA Bearish
 input int                InpShortBounceStrength = 3;              // Short Bounce Strength (1-3, Higher = Stricter)
 
 input group "=== Money Management ==="
-input double             InpRiskPercent        = 1.0;             // Risk Percent of Balance (0 = Fixed Lot)
+input double             InpRiskPercent        = 3.0;             // Risk Percent of Balance (0 = Fixed Lot)
 input double             InpFixedLot           = 0.1;             // Fixed Lot Size (if Risk% = 0)
 input double             InpRiskRewardRatio    = 2.0;             // Risk:Reward Ratio (Used if ATR TP disabled)
 input bool               InpUseATRForSLTP      = true;            // Use ATR for SL/TP Calculation
@@ -74,8 +89,8 @@ input int                InpEndMinute          = 0;               // End Minute
 input bool               InpAvoidFriday        = true;            // Avoid Trading on Friday After 18:00
 
 input group "=== General Settings ==="
-input ulong              InpMagicNumber        = 202412002;       // Magic Number
-input string             InpTradeComment       = "SHA_Gold_v2";   // Trade Comment
+input ulong              InpMagicNumber        = 202412003;       // Magic Number
+input string             InpTradeComment       = "SHA_Gold_v3";   // Trade Comment
 input bool               InpDebugMode          = true;            // Debug Mode
 
 //+------------------------------------------------------------------+
@@ -102,6 +117,16 @@ double pipValue = 0.01;
 // Daily trade counter
 int dailyTradeCount = 0;
 datetime lastTradeDate = 0;
+
+// ===== Fintokei Risk Management Variables =====
+double g_initialCapital = 0;           // Initial capital (set once)
+double g_dailyStartEquity = 0;         // Equity at UTC 0:00
+datetime g_lastDailyReset = 0;         // Last UTC day reset
+double g_dailyLossLimit = 0;           // Today's loss limit (absolute)
+double g_overallLossLimit = 0;         // Overall loss limit (absolute)
+double g_currentDrawdown = 0;          // Current drawdown from start equity
+double g_maxDrawdownToday = 0;         // Max drawdown today
+bool g_tradingAllowed = true;          // Trading permission flag
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
@@ -170,12 +195,27 @@ int OnInit()
       }
    }
 
+   // ===== Initialize Fintokei Risk Management =====
+   InitializeFintokeiRiskManagement();
+
    Print("==============================================");
-   Print("SmoothedHeikenAshi Gold EA v2.00 Initialized");
+   Print("SmoothedHeikenAshi Gold EA v3.00 - FINTOKEI EDITION");
    Print("==============================================");
    Print("Symbol: ", _Symbol, " | Digits: ", digits);
    Print("Timeframe: ", EnumToString(tf), " (H1 Recommended)");
    Print("Pip Value: ", pipValue);
+   Print("----------------------------------------------");
+   Print("FINTOKEI RISK SETTINGS:");
+   Print("  Initial Capital: ", DoubleToString(g_initialCapital, 0), " JPY");
+   Print("  Daily Loss Limit: ", InpDailyLossLimit, "% (", DoubleToString(g_dailyLossLimit, 0), " JPY)");
+   Print("  Overall Loss Limit: ", InpOverallLossLimit, "% (", DoubleToString(g_overallLossLimit, 0), " JPY)");
+   Print("  Max Risk Per Trade: ", InpMaxRiskPerTrade, "%");
+   Print("  Safety Buffer: ", InpSafetyBuffer, "%");
+   Print("  Auto-Close on Risk: ", InpAutoCloseOnRisk ? "ON" : "OFF");
+   Print("----------------------------------------------");
+   Print("HIGH LOT OPTIMIZATION: ", InpUseTightSL ? "ON" : "OFF");
+   if(InpUseTightSL)
+      Print("  Tight SL Multiplier: ", InpTightSLMultiplier);
    Print("----------------------------------------------");
    Print("SHA Smoothing: ", InpSmoothingLength, " | Confirm Bars: ", InpSHAConfirmBars);
    Print("Breakout: ", InpBreakoutPips, " pips | Pullback: ", InpPullbackPips, " pips");
@@ -192,6 +232,302 @@ int OnInit()
 }
 
 //+------------------------------------------------------------------+
+//| Initialize Fintokei Risk Management                               |
+//+------------------------------------------------------------------+
+void InitializeFintokeiRiskManagement()
+{
+   // Set initial capital from input or current balance
+   if(InpInitialCapital > 0)
+      g_initialCapital = InpInitialCapital;
+   else
+      g_initialCapital = AccountInfoDouble(ACCOUNT_BALANCE);
+
+   // Calculate overall loss limit (10% of initial capital - never changes)
+   g_overallLossLimit = g_initialCapital * (InpOverallLossLimit / 100.0);
+
+   // Initialize daily values
+   ResetDailyRiskTracking();
+}
+
+//+------------------------------------------------------------------+
+//| Reset Daily Risk Tracking (Called at UTC 0:00)                    |
+//+------------------------------------------------------------------+
+void ResetDailyRiskTracking()
+{
+   // Get current equity for daily tracking
+   g_dailyStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+
+   // Calculate today's daily loss limit (5% of start equity)
+   g_dailyLossLimit = g_dailyStartEquity * (InpDailyLossLimit / 100.0);
+
+   // Reset daily tracking
+   g_maxDrawdownToday = 0;
+   g_lastDailyReset = GetUTCDate();
+   g_tradingAllowed = true;
+
+   Print("=== DAILY RISK RESET (UTC 0:00) ===");
+   Print("Start Equity: ", DoubleToString(g_dailyStartEquity, 2), " JPY");
+   Print("Daily Loss Limit: ", DoubleToString(g_dailyLossLimit, 2), " JPY");
+   Print("Fail Line (Equity): ", DoubleToString(g_dailyStartEquity - g_dailyLossLimit, 2), " JPY");
+   Print("===================================");
+}
+
+//+------------------------------------------------------------------+
+//| Get Current UTC Date                                              |
+//+------------------------------------------------------------------+
+datetime GetUTCDate()
+{
+   datetime serverTime = TimeCurrent();
+   // Adjust for server UTC offset
+   datetime utcTime = serverTime - InpServerUTCOffset * 3600;
+
+   MqlDateTime dt;
+   TimeToStruct(utcTime, dt);
+   return StringToTime(StringFormat("%04d.%02d.%02d", dt.year, dt.mon, dt.day));
+}
+
+//+------------------------------------------------------------------+
+//| Check if New UTC Day                                              |
+//+------------------------------------------------------------------+
+bool IsNewUTCDay()
+{
+   datetime currentUTCDate = GetUTCDate();
+   return (currentUTCDate != g_lastDailyReset);
+}
+
+//+------------------------------------------------------------------+
+//| Monitor Fintokei Risk Limits (Called Every Tick)                  |
+//+------------------------------------------------------------------+
+bool MonitorFintokeiRiskLimits()
+{
+   double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double currentBalance = AccountInfoDouble(ACCOUNT_BALANCE);
+
+   // Check for new UTC day
+   if(IsNewUTCDay())
+   {
+      ResetDailyRiskTracking();
+   }
+
+   // ===== Check Overall Loss Limit (10% Rule) =====
+   double overallDrawdown = g_initialCapital - currentEquity;
+   double overallFailLine = g_initialCapital - g_overallLossLimit;
+   double safetyMargin = g_initialCapital * (InpSafetyBuffer / 100.0);
+
+   if(currentEquity <= overallFailLine + safetyMargin)
+   {
+      Print("!!! CRITICAL: Approaching Overall Loss Limit !!!");
+      Print("Current Equity: ", DoubleToString(currentEquity, 2));
+      Print("Overall Fail Line: ", DoubleToString(overallFailLine, 2));
+
+      if(InpAutoCloseOnRisk && HasOpenPosition())
+      {
+         Print("AUTO-CLOSING all positions to protect account!");
+         CloseAllPositions();
+      }
+
+      g_tradingAllowed = false;
+      return false;
+   }
+
+   // ===== Check Daily Loss Limit (5% Rule) =====
+   double dailyDrawdown = g_dailyStartEquity - currentEquity;
+   double dailyFailLine = g_dailyStartEquity - g_dailyLossLimit;
+   double dailySafetyMargin = g_dailyStartEquity * (InpSafetyBuffer / 100.0);
+
+   // Update max drawdown
+   if(dailyDrawdown > g_maxDrawdownToday)
+      g_maxDrawdownToday = dailyDrawdown;
+
+   if(currentEquity <= dailyFailLine + dailySafetyMargin)
+   {
+      Print("!!! WARNING: Approaching Daily Loss Limit !!!");
+      Print("Daily Start Equity: ", DoubleToString(g_dailyStartEquity, 2));
+      Print("Current Equity: ", DoubleToString(currentEquity, 2));
+      Print("Daily Fail Line: ", DoubleToString(dailyFailLine, 2));
+      Print("Today's Drawdown: ", DoubleToString(dailyDrawdown, 2), " (",
+            DoubleToString((dailyDrawdown / g_dailyStartEquity) * 100, 2), "%)");
+
+      if(InpAutoCloseOnRisk && HasOpenPosition())
+      {
+         Print("AUTO-CLOSING all positions to protect daily limit!");
+         CloseAllPositions();
+      }
+
+      g_tradingAllowed = false;
+      return false;
+   }
+
+   // Calculate remaining risk capacity
+   double dailyRemainingRisk = g_dailyLossLimit - dailyDrawdown - dailySafetyMargin;
+   double overallRemainingRisk = g_overallLossLimit - overallDrawdown - safetyMargin;
+
+   if(InpDebugMode)
+   {
+      static datetime lastLogTime = 0;
+      if(TimeCurrent() - lastLogTime >= 300) // Log every 5 minutes
+      {
+         Print("--- Fintokei Risk Status ---");
+         Print("Daily: ", DoubleToString((dailyDrawdown / g_dailyStartEquity) * 100, 2),
+               "% used | Remaining: ", DoubleToString(dailyRemainingRisk, 0), " JPY");
+         Print("Overall: ", DoubleToString((overallDrawdown / g_initialCapital) * 100, 2),
+               "% used | Remaining: ", DoubleToString(overallRemainingRisk, 0), " JPY");
+         lastLogTime = TimeCurrent();
+      }
+   }
+
+   g_tradingAllowed = true;
+   return true;
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Maximum Allowed Risk for New Position                   |
+//+------------------------------------------------------------------+
+double GetMaxAllowedRisk()
+{
+   double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+
+   // Calculate remaining capacity for both limits
+   double dailyDrawdown = g_dailyStartEquity - currentEquity;
+   double dailyRemaining = g_dailyLossLimit - dailyDrawdown;
+   double dailySafetyMargin = g_dailyStartEquity * (InpSafetyBuffer / 100.0);
+
+   double overallDrawdown = g_initialCapital - currentEquity;
+   double overallRemaining = g_overallLossLimit - overallDrawdown;
+   double overallSafetyMargin = g_initialCapital * (InpSafetyBuffer / 100.0);
+
+   // Use the more restrictive limit
+   double maxRiskAmount = MathMin(dailyRemaining - dailySafetyMargin,
+                                   overallRemaining - overallSafetyMargin);
+
+   // Also apply per-trade risk limit
+   double perTradeLimit = currentEquity * (InpMaxRiskPerTrade / 100.0);
+   maxRiskAmount = MathMin(maxRiskAmount, perTradeLimit);
+
+   // Ensure non-negative
+   if(maxRiskAmount < 0) maxRiskAmount = 0;
+
+   return maxRiskAmount;
+}
+
+//+------------------------------------------------------------------+
+//| Close All Positions                                               |
+//+------------------------------------------------------------------+
+void CloseAllPositions()
+{
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      if(positionInfo.SelectByIndex(i))
+      {
+         if(positionInfo.Symbol() == _Symbol && positionInfo.Magic() == InpMagicNumber)
+         {
+            ulong ticket = positionInfo.Ticket();
+            trade.PositionClose(ticket);
+            Print("Emergency closed position #", ticket);
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Loss Per Lot for Given SL Distance                      |
+//+------------------------------------------------------------------+
+double CalculateLossPerLot(double slDistance)
+{
+   double tickSize = symbolInfo.TickSize();
+   double tickValue = symbolInfo.TickValue();
+
+   if(tickSize == 0) return 0;
+
+   double numTicks = slDistance / tickSize;
+   return numTicks * tickValue;
+}
+
+//+------------------------------------------------------------------+
+//| Calculate Optimized Lot Size (Fintokei Compliant)                 |
+//+------------------------------------------------------------------+
+double CalculateFintokeiLotSize(double slDistance)
+{
+   // Get maximum allowed risk
+   double maxRiskAmount = GetMaxAllowedRisk();
+
+   if(maxRiskAmount <= 0)
+   {
+      Print("No risk capacity available!");
+      return 0;
+   }
+
+   // Use the configured risk percent or the max allowed, whichever is lower
+   double currentEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double desiredRisk = currentEquity * (InpRiskPercent / 100.0);
+   double riskAmount = MathMin(desiredRisk, maxRiskAmount);
+
+   // Calculate lot size
+   double lossPerLot = CalculateLossPerLot(slDistance);
+
+   if(lossPerLot <= 0)
+   {
+      Print("Cannot calculate loss per lot!");
+      return InpFixedLot;
+   }
+
+   double lotSize = riskAmount / lossPerLot;
+
+   // Normalize lot size
+   double minLot = symbolInfo.LotsMin();
+   double maxLot = symbolInfo.LotsMax();
+   double lotStep = symbolInfo.LotsStep();
+
+   lotSize = MathFloor(lotSize / lotStep) * lotStep;
+   lotSize = MathMax(minLot, MathMin(maxLot, lotSize));
+
+   if(InpDebugMode)
+   {
+      Print("--- Lot Size Calculation ---");
+      Print("Max Allowed Risk: ", DoubleToString(maxRiskAmount, 0), " JPY");
+      Print("Desired Risk: ", DoubleToString(desiredRisk, 0), " JPY");
+      Print("Used Risk: ", DoubleToString(riskAmount, 0), " JPY");
+      Print("SL Distance: $", DoubleToString(slDistance, 2));
+      Print("Loss Per Lot: ", DoubleToString(lossPerLot, 0), " JPY");
+      Print("Calculated Lot: ", DoubleToString(lotSize, 2));
+   }
+
+   return NormalizeDouble(lotSize, 2);
+}
+
+//+------------------------------------------------------------------+
+//| Get Optimized SL for Higher Lot Size                              |
+//+------------------------------------------------------------------+
+double GetOptimizedSL(double baseSL, double entryPrice, bool isLong)
+{
+   if(!InpUseTightSL)
+      return baseSL;
+
+   double baseDistance = isLong ? (entryPrice - baseSL) : (baseSL - entryPrice);
+   double optimizedDistance = baseDistance * InpTightSLMultiplier;
+
+   // Ensure minimum SL distance
+   double minDistance = InpMinSLPipsOptimized * pipValue;
+   if(optimizedDistance < minDistance)
+      optimizedDistance = minDistance;
+
+   double optimizedSL;
+   if(isLong)
+      optimizedSL = entryPrice - optimizedDistance;
+   else
+      optimizedSL = entryPrice + optimizedDistance;
+
+   if(InpDebugMode)
+   {
+      Print("SL Optimization: Base=", DoubleToString(baseDistance, 2),
+            " -> Optimized=", DoubleToString(optimizedDistance, 2),
+            " (", DoubleToString(InpTightSLMultiplier * 100, 0), "%)");
+   }
+
+   return NormalizeDouble(optimizedSL, symbolInfo.Digits());
+}
+
+//+------------------------------------------------------------------+
 //| Expert deinitialization function                                  |
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
@@ -201,7 +537,13 @@ void OnDeinit(const int reason)
    if(adxHandle != INVALID_HANDLE)
       IndicatorRelease(adxHandle);
 
-   Print("SmoothedHeikenAshi Gold EA v2.0 deinitialized. Reason: ", reason);
+   Print("=== Final Fintokei Risk Report ===");
+   Print("Max Drawdown Today: ", DoubleToString(g_maxDrawdownToday, 2), " JPY (",
+         DoubleToString((g_maxDrawdownToday / g_dailyStartEquity) * 100, 2), "%)");
+   Print("Final Equity: ", DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2), " JPY");
+   Print("==================================");
+
+   Print("SmoothedHeikenAshi Gold EA v3.0 deinitialized. Reason: ", reason);
 }
 
 //+------------------------------------------------------------------+
@@ -209,6 +551,13 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
+   // ===== FINTOKEI RISK MONITORING (EVERY TICK) =====
+   if(!MonitorFintokeiRiskLimits())
+   {
+      // Risk limit reached - no trading allowed
+      return;
+   }
+
    // Check for new bar
    static datetime lastBarTime = 0;
    ENUM_TIMEFRAMES tf = InpTimeframe == PERIOD_CURRENT ? Period() : InpTimeframe;
@@ -480,7 +829,6 @@ bool CheckADXFilterLong()
    double plusDI = GetPlusDI(1);
    double minusDI = GetMinusDI(1);
 
-   // ADX must be in valid range
    if(adx < InpMinADX)
    {
       if(InpDebugMode)
@@ -495,7 +843,6 @@ bool CheckADXFilterLong()
       return false;
    }
 
-   // +DI must be above -DI for bullish trend
    if(plusDI <= minusDI)
    {
       if(InpDebugMode)
@@ -517,7 +864,6 @@ bool CheckADXFilterShort()
    double plusDI = GetPlusDI(1);
    double minusDI = GetMinusDI(1);
 
-   // Use stricter ADX minimum for Short trades
    if(adx < InpMinADXShort)
    {
       if(InpDebugMode)
@@ -532,7 +878,6 @@ bool CheckADXFilterShort()
       return false;
    }
 
-   // -DI must be above +DI for bearish trend
    if(minusDI <= plusDI)
    {
       if(InpDebugMode)
@@ -540,7 +885,6 @@ bool CheckADXFilterShort()
       return false;
    }
 
-   // Additional check: -DI should be significantly stronger
    double diDiff = minusDI - plusDI;
    if(diDiff < 5.0)
    {
@@ -553,7 +897,7 @@ bool CheckADXFilterShort()
 }
 
 //+------------------------------------------------------------------+
-//| Get Resistance Level (excluding recent bars)                      |
+//| Get Resistance Level                                              |
 //+------------------------------------------------------------------+
 double GetResistanceLevel(int skipBars)
 {
@@ -570,7 +914,7 @@ double GetResistanceLevel(int skipBars)
 }
 
 //+------------------------------------------------------------------+
-//| Get Support Level (excluding recent bars)                         |
+//| Get Support Level                                                 |
 //+------------------------------------------------------------------+
 double GetSupportLevel(int skipBars)
 {
@@ -587,7 +931,7 @@ double GetSupportLevel(int skipBars)
 }
 
 //+------------------------------------------------------------------+
-//| Check for Valid Bounce (Improved Pullback Detection)              |
+//| Check for Valid Bounce                                            |
 //+------------------------------------------------------------------+
 bool CheckBounce(bool isLong, int barShift)
 {
@@ -612,28 +956,26 @@ bool CheckBounce(bool isLong, int barShift)
 
    if(isLong)
    {
-      // For Long: Check bullish bounce from SHA
       bool isBullishBar = close1 > open1;
       double lowerWick = MathMin(open1, close1) - low1;
       double upperWick = high1 - MathMax(open1, close1);
       double body = MathAbs(close1 - open1);
 
-      // Bounce strength checks
       bool strongBounce = false;
 
       switch(InpBounceStrength)
       {
-         case 1: // Weak - just need bullish bar
+         case 1:
             strongBounce = isBullishBar;
             break;
 
-         case 2: // Medium - bullish bar with lower wick touching SHA area
+         case 2:
             strongBounce = isBullishBar &&
                           (low1 <= shaMiddle + InpPullbackPips * pipValue) &&
                           (lowerWick >= body * 0.3);
             break;
 
-         case 3: // Strong - bullish engulfing or strong rejection
+         case 3:
             strongBounce = isBullishBar &&
                           (low1 <= shaMiddle + InpPullbackPips * pipValue) &&
                           (lowerWick >= body * 0.5) &&
@@ -641,18 +983,10 @@ bool CheckBounce(bool isLong, int barShift)
             break;
       }
 
-      if(InpDebugMode && !strongBounce)
-      {
-         Print("Bounce check failed (Long): Bullish=", isBullishBar,
-               " | LowerWick=", DoubleToString(lowerWick, 2),
-               " | Body=", DoubleToString(body, 2));
-      }
-
       return strongBounce;
    }
    else
    {
-      // For Short: Check bearish bounce from SHA
       bool isBearishBar = close1 < open1;
       double upperWick = high1 - MathMax(open1, close1);
       double lowerWick = MathMin(open1, close1) - low1;
@@ -678,13 +1012,6 @@ bool CheckBounce(bool isLong, int barShift)
                           (upperWick >= body * 0.5) &&
                           (close1 < low2 || body > MathAbs(close2 - open2));
             break;
-      }
-
-      if(InpDebugMode && !strongBounce)
-      {
-         Print("Bounce check failed (Short): Bearish=", isBearishBar,
-               " | UpperWick=", DoubleToString(upperWick, 2),
-               " | Body=", DoubleToString(body, 2));
       }
 
       return strongBounce;
@@ -713,7 +1040,6 @@ bool CheckBounceStrict(bool isLong, int barShift, int strength)
 
    double shaMiddle = GetSHAMiddle(barShift);
 
-   // For Short: Check bearish bounce from SHA with specified strength
    bool isBearishBar = close1 < open1;
    double upperWick = high1 - MathMax(open1, close1);
    double lowerWick = MathMin(open1, close1) - low1;
@@ -734,7 +1060,6 @@ bool CheckBounceStrict(bool isLong, int barShift, int strength)
          break;
 
       case 3:
-         // Strictest: Strong bearish engulfing or pin bar
          strongBounce = isBearishBar &&
                        (high1 >= shaMiddle - InpPullbackPips * pipValue) &&
                        (upperWick >= body * 0.5) &&
@@ -742,19 +1067,11 @@ bool CheckBounceStrict(bool isLong, int barShift, int strength)
          break;
    }
 
-   if(InpDebugMode && !strongBounce)
-   {
-      Print("Strict Bounce check failed (Short): Bearish=", isBearishBar,
-            " | UpperWick=", DoubleToString(upperWick, 2),
-            " | Body=", DoubleToString(body, 2),
-            " | Strength=", strength);
-   }
-
    return strongBounce;
 }
 
 //+------------------------------------------------------------------+
-//| Detect Pullback to SHA (Improved Logic)                           |
+//| Detect Pullback to SHA                                            |
 //+------------------------------------------------------------------+
 bool DetectPullback(bool isLong, double &pullbackBar)
 {
@@ -772,31 +1089,19 @@ bool DetectPullback(bool isLong, double &pullbackBar)
 
       if(isLong)
       {
-         // For Long: Price should pull back DOWN to SHA
-         // Low should be close to SHA middle, but close should still be above
          double distanceToSHA = barLow - shaMiddle;
 
          if(distanceToSHA <= tolerance && distanceToSHA >= -tolerance * 0.5)
          {
-            // Found potential pullback bar
-            if(barClose > shaMiddle)  // Ensure it didn't close below SHA
+            if(barClose > shaMiddle)
             {
                pullbackBar = i;
-
-               if(InpDebugMode)
-               {
-                  Print("Pullback detected (Long) at bar ", i,
-                        " | Low=", barLow, " | SHA=", shaMiddle,
-                        " | Distance=", DoubleToString(distanceToSHA / pipValue, 2), " pips");
-               }
-
                return true;
             }
          }
       }
       else
       {
-         // For Short: Price should pull back UP to SHA
          double distanceToSHA = shaMiddle - barHigh;
 
          if(distanceToSHA <= tolerance && distanceToSHA >= -tolerance * 0.5)
@@ -804,14 +1109,6 @@ bool DetectPullback(bool isLong, double &pullbackBar)
             if(barClose < shaMiddle)
             {
                pullbackBar = i;
-
-               if(InpDebugMode)
-               {
-                  Print("Pullback detected (Short) at bar ", i,
-                        " | High=", barHigh, " | SHA=", shaMiddle,
-                        " | Distance=", DoubleToString(distanceToSHA / pipValue, 2), " pips");
-               }
-
                return true;
             }
          }
@@ -826,6 +1123,14 @@ bool DetectPullback(bool isLong, double &pullbackBar)
 //+------------------------------------------------------------------+
 void ProcessTradingLogic()
 {
+   // Check if trading is allowed by Fintokei risk management
+   if(!g_tradingAllowed)
+   {
+      if(InpDebugMode)
+         Print("Trading suspended due to risk limits");
+      return;
+   }
+
    ENUM_TIMEFRAMES tf = InpTimeframe == PERIOD_CURRENT ? Period() : InpTimeframe;
 
    double currentClose = iClose(_Symbol, tf, 1);
@@ -833,24 +1138,16 @@ void ProcessTradingLogic()
    double shaMiddle = GetSHAMiddle(1);
    double breakoutBuffer = InpBreakoutPips * pipValue;
 
-   // ==================== COMMON FILTERS ====================
    if(!CheckATRFilter())
       return;
 
    // ==================== LONG SETUP ====================
-   bool longChecked = false;
-
    if(IsSHABullishConsecutive(InpSHAConfirmBars) && currentClose > shaMiddle)
    {
-      longChecked = true;
-
-      // Check ADX for bullish trend
       if(CheckADXFilterLong())
       {
-         // Get resistance from older bars
          double resistance = GetResistanceLevel(InpBreakoutLookback);
 
-         // Check for breakout above resistance
          bool breakoutDetected = false;
          for(int i = 1; i <= InpBreakoutLookback; i++)
          {
@@ -864,24 +1161,20 @@ void ProcessTradingLogic()
 
          if(breakoutDetected)
          {
-            // Check for pullback with improved detection
             double pullbackBar;
             if(DetectPullback(true, pullbackBar))
             {
-               // Check for bounce confirmation
                if(CheckBounce(true, 1))
                {
-                  // Final confirmation: current bar is bullish
                   if(currentClose > currentOpen)
                   {
                      double adx = GetADX(1);
                      double atr = GetATR(1);
 
                      Print("=================================================");
-                     Print("LONG ENTRY CONDITIONS MET!");
+                     Print("LONG ENTRY CONDITIONS MET! (Fintokei Compliant)");
                      Print("SHA: Bullish x", InpSHAConfirmBars, " bars");
                      Print("Resistance: ", resistance, " (Broken)");
-                     Print("Pullback detected, Bounce confirmed");
                      Print("ADX: ", DoubleToString(adx, 2), " | ATR: ", DoubleToString(atr / pipValue, 2), " pips");
                      Print("=================================================");
 
@@ -895,21 +1188,16 @@ void ProcessTradingLogic()
    }
 
    // ==================== SHORT SETUP ====================
-   // Check if Short trades are enabled
    if(!InpEnableShort)
       return;
 
-   // Use stricter confirmation for Short (InpShortConfirmBars)
    if(IsSHABearishConsecutive(InpShortConfirmBars) && currentClose < shaMiddle)
    {
-      // Check ADX for bearish trend (stricter for Short)
       if(!CheckADXFilterShort())
          return;
 
-      // Get support from older bars
       double support = GetSupportLevel(InpBreakoutLookback);
 
-      // Check for breakout below support
       bool breakoutDetected = false;
       for(int i = 1; i <= InpBreakoutLookback; i++)
       {
@@ -926,7 +1214,6 @@ void ProcessTradingLogic()
          double pullbackBar;
          if(DetectPullback(false, pullbackBar))
          {
-            // Use stricter bounce check for Short
             if(CheckBounceStrict(false, 1, InpShortBounceStrength))
             {
                if(currentClose < currentOpen)
@@ -935,10 +1222,9 @@ void ProcessTradingLogic()
                   double atr = GetATR(1);
 
                   Print("=================================================");
-                  Print("SHORT ENTRY CONDITIONS MET!");
-                  Print("SHA: Bearish x", InpShortConfirmBars, " bars (Strict)");
+                  Print("SHORT ENTRY CONDITIONS MET! (Fintokei Compliant)");
+                  Print("SHA: Bearish x", InpShortConfirmBars, " bars");
                   Print("Support: ", support, " (Broken)");
-                  Print("Pullback detected, Strong Bounce confirmed");
                   Print("ADX: ", DoubleToString(adx, 2), " | ATR: ", DoubleToString(atr / pipValue, 2), " pips");
                   Print("=================================================");
 
@@ -952,7 +1238,7 @@ void ProcessTradingLogic()
 }
 
 //+------------------------------------------------------------------+
-//| Execute Long Entry                                                |
+//| Execute Long Entry (Fintokei Compliant)                           |
 //+------------------------------------------------------------------+
 void ExecuteLongEntry()
 {
@@ -960,20 +1246,23 @@ void ExecuteLongEntry()
    double shaMiddle = GetSHAMiddle(1);
    double atr = GetATR(1);
 
-   // Calculate SL
-   double sl;
+   // Calculate base SL
+   double baseSL;
    if(InpUseATRForSLTP && atr > 0)
    {
-      sl = ask - atr * InpATRMultiplierSL;
+      baseSL = ask - atr * InpATRMultiplierSL;
    }
    else
    {
-      sl = shaMiddle - InpMinSLPips * pipValue;
+      baseSL = shaMiddle - InpMinSLPips * pipValue;
    }
 
-   // Ensure SL is within limits
+   // Apply tight SL optimization for higher lot
+   double sl = GetOptimizedSL(baseSL, ask, true);
+
+   // Calculate SL distance
    double slDistance = ask - sl;
-   double minSL = InpMinSLPips * pipValue;
+   double minSL = (InpUseTightSL ? InpMinSLPipsOptimized : InpMinSLPips) * pipValue;
    double maxSL = InpMaxSLPips * pipValue;
 
    if(slDistance < minSL)
@@ -1003,11 +1292,22 @@ void ExecuteLongEntry()
    sl = NormalizeDouble(sl, digits);
    tp = NormalizeDouble(tp, digits);
 
-   // Calculate lot size
-   double lotSize = CalculateLotSize(slDistance);
+   // Calculate Fintokei-compliant lot size
+   double lotSize = CalculateFintokeiLotSize(slDistance);
    if(lotSize <= 0)
    {
-      Print("Invalid lot size!");
+      Print("Cannot open trade: No risk capacity or invalid lot size!");
+      return;
+   }
+
+   // Verify trade risk is within limits
+   double tradeRisk = CalculateLossPerLot(slDistance) * lotSize;
+   double maxAllowed = GetMaxAllowedRisk();
+
+   if(tradeRisk > maxAllowed)
+   {
+      Print("Trade risk (", DoubleToString(tradeRisk, 0), " JPY) exceeds max allowed (",
+            DoubleToString(maxAllowed, 0), " JPY)");
       return;
    }
 
@@ -1017,10 +1317,12 @@ void ExecuteLongEntry()
       dailyTradeCount++;
 
       Print("========================================");
-      Print("LONG POSITION OPENED!");
+      Print("LONG POSITION OPENED! (Fintokei Compliant)");
       Print("Entry: ", ask, " | SL: ", sl, " | TP: ", tp);
       Print("Lot: ", lotSize, " | SL: $", DoubleToString(slDistance, 2),
             " | TP: $", DoubleToString(tp - ask, 2));
+      Print("Trade Risk: ", DoubleToString(tradeRisk, 0), " JPY (",
+            DoubleToString((tradeRisk / AccountInfoDouble(ACCOUNT_EQUITY)) * 100, 2), "%)");
       Print("RR: 1:", DoubleToString((tp - ask) / slDistance, 2));
       Print("Daily Trades: ", dailyTradeCount);
       Print("========================================");
@@ -1032,7 +1334,7 @@ void ExecuteLongEntry()
 }
 
 //+------------------------------------------------------------------+
-//| Execute Short Entry                                               |
+//| Execute Short Entry (Fintokei Compliant)                          |
 //+------------------------------------------------------------------+
 void ExecuteShortEntry()
 {
@@ -1040,20 +1342,23 @@ void ExecuteShortEntry()
    double shaMiddle = GetSHAMiddle(1);
    double atr = GetATR(1);
 
-   // Calculate SL
-   double sl;
+   // Calculate base SL
+   double baseSL;
    if(InpUseATRForSLTP && atr > 0)
    {
-      sl = bid + atr * InpATRMultiplierSL;
+      baseSL = bid + atr * InpATRMultiplierSL;
    }
    else
    {
-      sl = shaMiddle + InpMinSLPips * pipValue;
+      baseSL = shaMiddle + InpMinSLPips * pipValue;
    }
 
-   // Ensure SL is within limits
+   // Apply tight SL optimization for higher lot
+   double sl = GetOptimizedSL(baseSL, bid, false);
+
+   // Calculate SL distance
    double slDistance = sl - bid;
-   double minSL = InpMinSLPips * pipValue;
+   double minSL = (InpUseTightSL ? InpMinSLPipsOptimized : InpMinSLPips) * pipValue;
    double maxSL = InpMaxSLPips * pipValue;
 
    if(slDistance < minSL)
@@ -1083,11 +1388,22 @@ void ExecuteShortEntry()
    sl = NormalizeDouble(sl, digits);
    tp = NormalizeDouble(tp, digits);
 
-   // Calculate lot size
-   double lotSize = CalculateLotSize(slDistance);
+   // Calculate Fintokei-compliant lot size
+   double lotSize = CalculateFintokeiLotSize(slDistance);
    if(lotSize <= 0)
    {
-      Print("Invalid lot size!");
+      Print("Cannot open trade: No risk capacity or invalid lot size!");
+      return;
+   }
+
+   // Verify trade risk is within limits
+   double tradeRisk = CalculateLossPerLot(slDistance) * lotSize;
+   double maxAllowed = GetMaxAllowedRisk();
+
+   if(tradeRisk > maxAllowed)
+   {
+      Print("Trade risk (", DoubleToString(tradeRisk, 0), " JPY) exceeds max allowed (",
+            DoubleToString(maxAllowed, 0), " JPY)");
       return;
    }
 
@@ -1097,10 +1413,12 @@ void ExecuteShortEntry()
       dailyTradeCount++;
 
       Print("========================================");
-      Print("SHORT POSITION OPENED!");
+      Print("SHORT POSITION OPENED! (Fintokei Compliant)");
       Print("Entry: ", bid, " | SL: ", sl, " | TP: ", tp);
       Print("Lot: ", lotSize, " | SL: $", DoubleToString(slDistance, 2),
             " | TP: $", DoubleToString(bid - tp, 2));
+      Print("Trade Risk: ", DoubleToString(tradeRisk, 0), " JPY (",
+            DoubleToString((tradeRisk / AccountInfoDouble(ACCOUNT_EQUITY)) * 100, 2), "%)");
       Print("RR: 1:", DoubleToString((bid - tp) / slDistance, 2));
       Print("Daily Trades: ", dailyTradeCount);
       Print("========================================");
@@ -1109,36 +1427,6 @@ void ExecuteShortEntry()
    {
       Print("Failed to open Short! Error: ", GetLastError());
    }
-}
-
-//+------------------------------------------------------------------+
-//| Calculate Lot Size based on Risk                                  |
-//+------------------------------------------------------------------+
-double CalculateLotSize(double slDistance)
-{
-   if(InpRiskPercent <= 0)
-      return InpFixedLot;
-
-   double accountBalance = AccountInfoDouble(ACCOUNT_BALANCE);
-   double riskAmount = accountBalance * InpRiskPercent / 100.0;
-
-   double tickSize = symbolInfo.TickSize();
-   double tickValue = symbolInfo.TickValue();
-
-   if(tickSize == 0 || tickValue == 0)
-      return InpFixedLot;
-
-   double slTicks = slDistance / tickSize;
-   double lotSize = riskAmount / (slTicks * tickValue);
-
-   double minLot = symbolInfo.LotsMin();
-   double maxLot = symbolInfo.LotsMax();
-   double lotStep = symbolInfo.LotsStep();
-
-   lotSize = MathFloor(lotSize / lotStep) * lotStep;
-   lotSize = MathMax(minLot, MathMin(maxLot, lotSize));
-
-   return NormalizeDouble(lotSize, 2);
 }
 
 //+------------------------------------------------------------------+
@@ -1166,7 +1454,7 @@ bool HasOpenPosition()
 void ManageOpenPosition()
 {
    // Position management - let it run to SL/TP
-   // Future: Add trailing stop, breakeven, partial close
+   // Fintokei risk is monitored every tick by MonitorFintokeiRiskLimits()
 }
 
 //+------------------------------------------------------------------+
@@ -1195,7 +1483,6 @@ bool IsFridayEvening()
    MqlDateTime currentTime;
    TimeToStruct(TimeCurrent(), currentTime);
 
-   // Friday = 5
    if(currentTime.day_of_week == 5 && currentTime.hour >= 18)
       return true;
 
