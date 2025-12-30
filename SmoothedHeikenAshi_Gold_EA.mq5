@@ -3,12 +3,12 @@
 //|                                  Smoothed Heiken Ashi Strategy EA |
 //|                                       For XAUUSD (Gold) Trading   |
 //|                                    Fintokei Challenge Compliant   |
-//|                              v4.00 - High Win Rate Edition        |
-//|                      Break & Retest + RSI Divergence + Session    |
+//|                              v4.01 - Relaxed Filters Edition      |
+//|                      Fixed ATR range + Improved Break/Retest      |
 //+------------------------------------------------------------------+
-#property copyright "Smoothed Heiken Ashi Gold EA v4.00 - High Win Rate"
+#property copyright "Smoothed Heiken Ashi Gold EA v4.01 - Relaxed Filters"
 #property link      ""
-#property version   "4.00"
+#property version   "4.01"
 #property strict
 
 #include <Trade\Trade.mqh>
@@ -26,9 +26,9 @@ input int                InpSHAConfirmBars     = 2;                 // SHA Confi
 
 input group "=== Break & Retest Filter (NEW) ==="
 input bool               InpUseBreakRetest     = true;              // Use Break & Retest
-input int                InpSwingLookback      = 20;                // Swing High/Low Lookback
-input double             InpRetestTolerance    = 0.3;               // Retest Tolerance (% of ATR)
-input int                InpRetestBars         = 5;                 // Bars to Wait for Retest
+input int                InpSwingLookback      = 15;                // Swing High/Low Lookback (reduced)
+input double             InpRetestTolerance    = 0.5;               // Retest Tolerance (% of ATR, increased)
+input int                InpRetestBars         = 8;                 // Bars to Wait for Retest (increased)
 
 input group "=== EMA Crossover Filter (NEW) ==="
 input bool               InpUseEMACross        = true;              // Use EMA Crossover
@@ -88,7 +88,7 @@ input int                InpATRPeriod          = 14;                // ATR Perio
 input double             InpATRMultiplierSL    = 1.0;               // ATR Multiplier SL
 input double             InpATRMultiplierTP    = 2.0;               // ATR Multiplier TP
 input bool               InpUseATRFilter       = true;              // Use ATR Filter
-input double             InpMinATRPercent      = 0.3;               // Min ATR % of Price
+input double             InpMinATRPercent      = 0.15;              // Min ATR % of Price (lowered for 2025)
 input double             InpMaxATRPercent      = 2.0;               // Max ATR % of Price
 
 input group "=== ADX Filter ==="
@@ -120,7 +120,7 @@ input bool               InpResetLossesOnWin   = true;              // Reset Cou
 
 input group "=== General Settings ==="
 input ulong              InpMagicNumber        = 202412007;         // Magic Number
-input string             InpTradeComment       = "SHA_HWR_v4.0";    // Trade Comment
+input string             InpTradeComment       = "SHA_HWR_v4.01";   // Trade Comment
 input bool               InpDebugMode          = true;              // Debug Mode
 
 //+------------------------------------------------------------------+
@@ -548,31 +548,50 @@ bool CheckBreakRetest(bool isLong)
    double atr = GetATR(1);
    double tolerance = atr * InpRetestTolerance;
 
-   if(isLong && g_breakoutDirection == 1)
+   // Check direction alignment
+   if(isLong && g_breakoutDirection != 1) return false;
+   if(!isLong && g_breakoutDirection != -1) return false;
+
+   // Within valid retest window
+   if(g_barsSinceBreakout < 1 || g_barsSinceBreakout > InpRetestBars) return false;
+
+   if(isLong)
    {
-      // Check if price retested the broken level
       double retestLevel = g_lastSwingHigh;
-      if(g_barsSinceBreakout >= 1 && g_barsSinceBreakout <= InpRetestBars)
+      // Look for any pullback in recent bars
+      for(int i = 1; i <= MathMin(g_barsSinceBreakout, 5); i++)
       {
-         double lowOfRetest = iLow(_Symbol, InpEntryTimeframe, 1);
-         if(lowOfRetest <= retestLevel + tolerance && currentClose > retestLevel)
+         double low = iLow(_Symbol, InpEntryTimeframe, i);
+         // If price pulled back near the breakout level, it's a retest
+         if(low <= retestLevel + tolerance)
          {
-            if(InpDebugMode) Print("Bullish Retest confirmed at ", retestLevel);
+            if(InpDebugMode) Print("Bullish Retest found at bar ", i, " level: ", retestLevel);
             return true;
          }
       }
+      // Even without perfect retest, allow if price is above breakout level
+      if(currentClose > retestLevel && g_barsSinceBreakout <= 3)
+      {
+         if(InpDebugMode) Print("Bullish momentum continuation above ", retestLevel);
+         return true;
+      }
    }
-   else if(!isLong && g_breakoutDirection == -1)
+   else
    {
       double retestLevel = g_lastSwingLow;
-      if(g_barsSinceBreakout >= 1 && g_barsSinceBreakout <= InpRetestBars)
+      for(int i = 1; i <= MathMin(g_barsSinceBreakout, 5); i++)
       {
-         double highOfRetest = iHigh(_Symbol, InpEntryTimeframe, 1);
-         if(highOfRetest >= retestLevel - tolerance && currentClose < retestLevel)
+         double high = iHigh(_Symbol, InpEntryTimeframe, i);
+         if(high >= retestLevel - tolerance)
          {
-            if(InpDebugMode) Print("Bearish Retest confirmed at ", retestLevel);
+            if(InpDebugMode) Print("Bearish Retest found at bar ", i, " level: ", retestLevel);
             return true;
          }
+      }
+      if(currentClose < retestLevel && g_barsSinceBreakout <= 3)
+      {
+         if(InpDebugMode) Print("Bearish momentum continuation below ", retestLevel);
+         return true;
       }
    }
 
