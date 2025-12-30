@@ -47,6 +47,7 @@ input double   InpMaxTotalLossPercent  = 10.0;         // 全体の最大損失�
 input double   InpLotReduction1        = 5.0;          // ロット削減開始 損失率1 (%)
 input double   InpLotReduction2        = 7.0;          // ロット削減開始 損失率2 (%)
 input double   InpLotReductionFactor   = 0.5;          // ロット削減率 (50%)
+input double   InpMinLotSize           = 0.1;          // 最小エントリーロット（これ未満はスキップ）
 input int      InpSLBuffer             = 3;            // SLバッファ (pips)
 
 input group "===== 利確設定 ====="
@@ -940,6 +941,13 @@ void ExecuteBuyEntry()
         return;
     }
 
+    // 最小ロットサイズチェック（SLが広すぎる場合はスキップ）
+    if(lots < InpMinLotSize)
+    {
+        Print("スキップ: ロットサイズ(", lots, ")が最小値(", InpMinLotSize, ")未満。SLが広すぎます。SL=", slPips, "pips");
+        return;
+    }
+
     // リスクチェック（エントリー前）
     double potentialLoss = CalculateLossPerLot(slPips) * lots;
     double currentEquity = accountInfo.Equity();
@@ -1015,6 +1023,13 @@ void ExecuteSellEntry()
     if(lots <= 0)
     {
         Print("エラー: ロットサイズが0以下です");
+        return;
+    }
+
+    // 最小ロットサイズチェック（SLが広すぎる場合はスキップ）
+    if(lots < InpMinLotSize)
+    {
+        Print("スキップ: ロットサイズ(", lots, ")が最小値(", InpMinLotSize, ")未満。SLが広すぎます。SL=", slPips, "pips");
         return;
     }
 
