@@ -146,7 +146,7 @@ void OnDeinit(const int reason)
         if(h_envelopes[i] != INVALID_HANDLE) IndicatorRelease(h_envelopes[i]);
     }
 
-    Print("EA終了: ", EnumToString((ENUM_DEINIT_REASON)reason));
+    Print("EA終了: 理由コード = ", reason);
 }
 
 //+------------------------------------------------------------------+
