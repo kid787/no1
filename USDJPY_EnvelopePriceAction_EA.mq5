@@ -22,6 +22,15 @@ input ENUM_TIMEFRAMES InpEntryTimeframe = PERIOD_M1;   // エントリー足
 input ENUM_TIMEFRAMES InpFilterTimeframe = PERIOD_H1;  // 上位足フィルター
 input int      InpMagicNumber          = 20241230;     // マジックナンバー
 
+input group "===== トレード時間設定 ====="
+input int      InpTradingStartHour     = 0;            // トレード開始時刻（サーバー時間）
+input int      InpTradingEndHour       = 24;           // トレード終了時刻（サーバー時間）
+input bool     InpTradingOnMonday      = true;         // 月曜日にトレード
+input bool     InpTradingOnTuesday     = true;         // 火曜日にトレード
+input bool     InpTradingOnWednesday   = true;         // 水曜日にトレード
+input bool     InpTradingOnThursday    = true;         // 木曜日にトレード
+input bool     InpTradingOnFriday      = true;         // 金曜日にトレード
+
 input group "===== エンベロープ設定 ====="
 input int      InpEnvelopePeriod       = 20;           // エンベロープ期間
 input double   InpEnvelopeDev1         = 0.15;         // 偏差1 (%)
@@ -184,6 +193,10 @@ void OnTick()
 
     // 新しいバーでのみエントリーチェック
     if(!IsNewBar(InpEntryTimeframe))
+        return;
+
+    // トレード時間チェック
+    if(!IsTradingTime())
         return;
 
     // エントリー条件のチェック
@@ -425,6 +438,47 @@ double GetPipSize()
         return point * 10.0;
     else
         return point;
+}
+
+//+------------------------------------------------------------------+
+//| トレード時間のチェック                                            |
+//+------------------------------------------------------------------+
+bool IsTradingTime()
+{
+    MqlDateTime currentTime;
+    TimeToStruct(TimeCurrent(), currentTime);
+
+    // 曜日チェック（0=日曜, 1=月曜, ..., 5=金曜, 6=土曜）
+    switch(currentTime.day_of_week)
+    {
+        case 0: return false;  // 日曜日は常に取引しない
+        case 1: if(!InpTradingOnMonday) return false; break;
+        case 2: if(!InpTradingOnTuesday) return false; break;
+        case 3: if(!InpTradingOnWednesday) return false; break;
+        case 4: if(!InpTradingOnThursday) return false; break;
+        case 5: if(!InpTradingOnFriday) return false; break;
+        case 6: return false;  // 土曜日は常に取引しない
+    }
+
+    // 時間チェック
+    int currentHour = currentTime.hour;
+
+    // 開始時刻 < 終了時刻の場合（例：9時〜17時）
+    if(InpTradingStartHour < InpTradingEndHour)
+    {
+        if(currentHour < InpTradingStartHour || currentHour >= InpTradingEndHour)
+            return false;
+    }
+    // 開始時刻 > 終了時刻の場合（例：22時〜6時、日をまたぐ）
+    else if(InpTradingStartHour > InpTradingEndHour)
+    {
+        if(currentHour < InpTradingStartHour && currentHour >= InpTradingEndHour)
+            return false;
+    }
+    // 開始時刻 == 終了時刻の場合は24時間取引
+    // (何もしない)
+
+    return true;
 }
 
 //+------------------------------------------------------------------+
