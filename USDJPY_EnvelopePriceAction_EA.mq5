@@ -86,6 +86,7 @@ int g_lastEntryBar;
 int g_touchedEnvelopeBand;  // タッチしたエンベロープバンドのレベル（1-6）
 datetime g_lastBandTouchTime;
 double g_entryEnvelopeLevel; // エントリー時のエンベロープレベル
+bool g_partialCloseDone;     // 分割決済実行済みフラグ
 
 // ネックラインブレイク用
 double g_doubleBottomNeckline;
@@ -984,6 +985,7 @@ void ExecuteBuyEntry()
 
     // エントリー記録
     g_entryEnvelopeLevel = (double)g_touchedEnvelopeBand;
+    g_partialCloseDone = false;  // 分割決済フラグをリセット
 
     // オーダー送信
     if(trade.Buy(lots, InpSymbol, entryPrice, slPrice, tpPrice,
@@ -1059,6 +1061,7 @@ void ExecuteSellEntry()
     }
 
     g_entryEnvelopeLevel = (double)g_touchedEnvelopeBand;
+    g_partialCloseDone = false;  // 分割決済フラグをリセット
 
     if(trade.Sell(lots, InpSymbol, entryPrice, slPrice, tpPrice,
                   StringFormat("Envelope Sell L%d", g_touchedEnvelopeBand)))
@@ -1200,6 +1203,10 @@ bool CheckRSIDivergence(ENUM_POSITION_TYPE posType)
 //+------------------------------------------------------------------+
 void CheckPartialClose(ulong ticket, ENUM_POSITION_TYPE posType)
 {
+    // 既に分割決済実行済みの場合はスキップ（1回のみ実行）
+    if(g_partialCloseDone)
+        return;
+
     if(!positionInfo.SelectByTicket(ticket))
         return;
 
@@ -1223,6 +1230,7 @@ void CheckPartialClose(ulong ticket, ENUM_POSITION_TYPE posType)
         {
             trade.PositionClosePartial(ticket, closeVolume);
             Print("部分決済実行（買い）: ", closeVolume, " ロット @ 中心線到達");
+            g_partialCloseDone = true;  // フラグをセット（1回のみ）
         }
     }
     else if(posType == POSITION_TYPE_SELL && currentPrice <= centerLine && openPrice > centerLine)
@@ -1232,6 +1240,7 @@ void CheckPartialClose(ulong ticket, ENUM_POSITION_TYPE posType)
         {
             trade.PositionClosePartial(ticket, closeVolume);
             Print("部分決済実行（売り）: ", closeVolume, " ロット @ 中心線到達");
+            g_partialCloseDone = true;  // フラグをセット（1回のみ）
         }
     }
 }
