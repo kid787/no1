@@ -1,9 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                   EntryLogic.mqh |
-//|        Entry Logic v2.1 - Fintokei最適化版                         |
-//|        ★この2つが揃った時のみエントリー★                          |
-//|        ①MAが収束→拡散していく所                                   |
-//|        ②上位足の方向に下位足がトレンド転換してくる所                |
+//|        Entry Logic v2.1b - v2.0ベースのシンプルロジック             |
+//|        トレンドフォロー＋押し目/戻り目エントリー                     |
 //|        ※ショート制限オプション追加                                 |
 //+------------------------------------------------------------------+
 #ifndef ENTRY_LOGIC_MQH
@@ -16,8 +14,9 @@
 enum ENUM_ENTRY_PATTERN
 {
    PATTERN_NONE = 0,
-   PATTERN_H4_H1_CONVERGENCE_BREAKOUT,    // H4上位 + H1収束→拡散 + H1ダウ転換
-   PATTERN_H1_M15_CONVERGENCE_BREAKOUT    // H1上位 + M15収束→拡散 + M15ダウ転換
+   PATTERN_SMA_PULLBACK,       // SMAへの押し目/戻り目
+   PATTERN_TREND_CONTINUATION, // トレンド継続
+   PATTERN_SMA_CROSS           // SMAクロス
 };
 
 //--- Entry signal structure
@@ -33,8 +32,8 @@ struct EntrySignal
 };
 
 //+------------------------------------------------------------------+
-//| Entry Logic Manager v2.1                                          |
-//| Fintokei最適化版「2条件同時成立」エントリー                         |
+//| Entry Logic Manager v2.1b                                         |
+//| v2.0ベースのシンプルなトレンドフォローロジック                       |
 //+------------------------------------------------------------------+
 class CEntryLogic
 {
@@ -71,7 +70,7 @@ public:
       m_RiskManager = riskManager;
       m_Point = SymbolInfoDouble(symbol, SYMBOL_POINT);
 
-      Print("[EntryLogic] Initialized v2.1 - Fintokei最適化版");
+      Print("[EntryLogic] Initialized v2.1b - シンプルトレンドフォロー");
       return true;
    }
 
@@ -119,94 +118,228 @@ public:
       double bid = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
       double ask = SymbolInfoDouble(m_Symbol, SYMBOL_ASK);
 
-      // Check main pattern: H4 trend + H1 convergence→divergence + H1 Dow break
-      signal = CheckH4H1Pattern(bid, ask);
+      // パターン1: SMAへの押し目/戻り目
+      signal = CheckPullbackPattern(bid, ask);
+      if(signal.valid) return signal;
+
+      // パターン2: トレンド継続パターン
+      signal = CheckTrendContinuation(bid, ask);
       if(signal.valid) return signal;
 
       return signal;
    }
 
    //+------------------------------------------------------------------+
-   //| メインパターン: H4トレンド方向 + H1収束→拡散 + H1ダウ転換          |
-   //| ★この2つが揃った時のみエントリー★                                |
+   //| パターン1: SMAへの押し目/戻り目                                    |
+   //| - マルチタイムフレームでトレンドが揃っている                        |
+   //| - 価格がSMA20またはSMA80にタッチして反発                           |
    //+------------------------------------------------------------------+
-   EntrySignal CheckH4H1Pattern(double bid, double ask)
+   EntrySignal CheckPullbackPattern(double bid, double ask)
    {
       EntrySignal signal;
       signal.valid = false;
-      signal.pattern = PATTERN_H4_H1_CONVERGENCE_BREAKOUT;
+      signal.pattern = PATTERN_SMA_PULLBACK;
       signal.reason = "";
 
       CSMAManager* sma = m_TrendAnalyzer.GetSMAManager();
       CDowSwingDetector* swing = m_TrendAnalyzer.GetSwingDetector();
 
       ENUM_TREND_DIRECTION h4Trend = m_TrendAnalyzer.GetTrendH4();
+      ENUM_TREND_DIRECTION h1Trend = m_TrendAnalyzer.GetTrendH1();
       ENUM_TREND_DIRECTION d1Trend = m_TrendAnalyzer.GetTrendD1();
 
-      //=== BUY CONDITION ===
-      // 1. H4(上位足)が上向き
-      // 2. H1のMAが収束→拡散（条件①）
-      // 3. H1で高値ブレイク（ダウ転換、条件②）
+      double h1Sma20 = sma.GetH1_SMA20();
+      double h1Sma80 = sma.GetH1_SMA80();
+
+      // Get recent candle data
+      double close[], low[], high[];
+      ArraySetAsSeries(close, true);
+      ArraySetAsSeries(low, true);
+      ArraySetAsSeries(high, true);
+      CopyClose(m_Symbol, PERIOD_H1, 0, 5, close);
+      CopyLow(m_Symbol, PERIOD_H1, 0, 5, low);
+      CopyHigh(m_Symbol, PERIOD_H1, 0, 5, high);
+
+      //=== BUY: 押し目買い ===
+      // 条件: H4上昇 + H1上昇 + 価格がSMA20/80にタッチ後反発
       if(m_EnableLongTrades && h4Trend == TREND_UP && d1Trend != TREND_DOWN)
       {
-         // 条件①: H1のMA収束→拡散
-         bool maCondition = sma.IsConvergenceToDivergenceTransition(PERIOD_H1);
+         // SMAが上昇配列 (SMA20 > SMA80)
+         bool smaAligned = (h1Sma20 > h1Sma80);
 
-         // 条件②: H1でダウ転換（高値ブレイク）
-         bool dowCondition = swing.IsBullishDowBreak(PERIOD_H1);
+         // 押し目チェック: 最近の安値がSMA20またはSMA80にタッチ
+         bool pullbackToSma20 = false;
+         bool pullbackToSma80 = false;
 
-         // ログ出力
-         PrintFormat("[Entry] BUY Check: H4=UP, MA収束→拡散=%s, ダウ転換=%s",
-                     maCondition ? "YES" : "NO",
-                     dowCondition ? "YES" : "NO");
+         for(int i = 1; i <= 3; i++)
+         {
+            // SMA20への押し目 (安値がSMA20±20pipsに到達)
+            if(low[i] <= h1Sma20 + 20 * m_Point && low[i] >= h1Sma20 - 50 * m_Point)
+               pullbackToSma20 = true;
+            // SMA80への押し目 (安値がSMA80±20pipsに到達)
+            if(low[i] <= h1Sma80 + 20 * m_Point && low[i] >= h1Sma80 - 50 * m_Point)
+               pullbackToSma80 = true;
+         }
 
-         // ★2つの条件が揃った時のみエントリー★
-         // v2.1: フォールバック条件を削除（条件が緩すぎてパフォーマンス悪化のため）
-         if(maCondition && dowCondition)
+         // 反発確認: 現在の終値がSMA20より上
+         bool bounced = (close[0] > h1Sma20);
+
+         if(smaAligned && (pullbackToSma20 || pullbackToSma80) && bounced)
          {
             signal.direction = TREND_UP;
             signal.entryPrice = ask;
             signal.stopLoss = GetStopLoss(TREND_UP, PERIOD_H1);
             signal.takeProfit = GetTakeProfit(TREND_UP, signal.entryPrice, signal.stopLoss);
             signal.valid = true;
-            signal.reason = "★BUY★ H4 UP + H1 MA収束→拡散 + H1 高値ブレイク";
 
-            PrintFormat("[Entry] ★SIGNAL★ %s | Entry=%.5f, SL=%.5f, TP=%.5f",
+            string pullbackType = pullbackToSma20 ? "SMA20" : "SMA80";
+            signal.reason = StringFormat("BUY: 押し目 (%s) H4=%s H1=%s",
+                                         pullbackType,
+                                         TrendStr(h4Trend), TrendStr(h1Trend));
+
+            PrintFormat("[Entry] ★SIGNAL★ %s | Entry=%.2f, SL=%.2f, TP=%.2f",
                         signal.reason, signal.entryPrice, signal.stopLoss, signal.takeProfit);
 
             return signal;
          }
-      }
-
-      //=== SELL CONDITION ===
-      // 1. H4(上位足)が下向き
-      // 2. H1のMAが収束→拡散（条件①）
-      // 3. H1で安値ブレイク（ダウ転換、条件②）
-      if(m_EnableShortTrades && h4Trend == TREND_DOWN && d1Trend != TREND_UP)
-      {
-         // 条件①: H1のMA収束→拡散
-         bool maCondition = sma.IsConvergenceToDivergenceTransition(PERIOD_H1);
-
-         // 条件②: H1でダウ転換（安値ブレイク）
-         bool dowCondition = swing.IsBearishDowBreak(PERIOD_H1);
 
          // ログ出力
-         PrintFormat("[Entry] SELL Check: H4=DOWN, MA収束→拡散=%s, ダウ転換=%s",
-                     maCondition ? "YES" : "NO",
-                     dowCondition ? "YES" : "NO");
+         PrintFormat("[Entry] BUY Pullback: Aligned=%s, PB20=%s, PB80=%s, Bounce=%s",
+                     smaAligned ? "Y" : "N",
+                     pullbackToSma20 ? "Y" : "N",
+                     pullbackToSma80 ? "Y" : "N",
+                     bounced ? "Y" : "N");
+      }
 
-         // ★2つの条件が揃った時のみエントリー★
-         // v2.1: フォールバック条件を削除（条件が緩すぎてパフォーマンス悪化のため）
-         if(maCondition && dowCondition)
+      //=== SELL: 戻り売り ===
+      if(m_EnableShortTrades && h4Trend == TREND_DOWN && d1Trend != TREND_UP)
+      {
+         // SMAが下降配列 (SMA20 < SMA80)
+         bool smaAligned = (h1Sma20 < h1Sma80);
+
+         // 戻りチェック: 最近の高値がSMA20またはSMA80にタッチ
+         bool pullbackToSma20 = false;
+         bool pullbackToSma80 = false;
+
+         for(int i = 1; i <= 3; i++)
+         {
+            if(high[i] >= h1Sma20 - 20 * m_Point && high[i] <= h1Sma20 + 50 * m_Point)
+               pullbackToSma20 = true;
+            if(high[i] >= h1Sma80 - 20 * m_Point && high[i] <= h1Sma80 + 50 * m_Point)
+               pullbackToSma80 = true;
+         }
+
+         // 反発確認: 現在の終値がSMA20より下
+         bool bounced = (close[0] < h1Sma20);
+
+         if(smaAligned && (pullbackToSma20 || pullbackToSma80) && bounced)
          {
             signal.direction = TREND_DOWN;
             signal.entryPrice = bid;
             signal.stopLoss = GetStopLoss(TREND_DOWN, PERIOD_H1);
             signal.takeProfit = GetTakeProfit(TREND_DOWN, signal.entryPrice, signal.stopLoss);
             signal.valid = true;
-            signal.reason = "★SELL★ H4 DOWN + H1 MA収束→拡散 + H1 安値ブレイク";
 
-            PrintFormat("[Entry] ★SIGNAL★ %s | Entry=%.5f, SL=%.5f, TP=%.5f",
+            string pullbackType = pullbackToSma20 ? "SMA20" : "SMA80";
+            signal.reason = StringFormat("SELL: 戻り (%s) H4=%s H1=%s",
+                                         pullbackType,
+                                         TrendStr(h4Trend), TrendStr(h1Trend));
+
+            PrintFormat("[Entry] ★SIGNAL★ %s | Entry=%.2f, SL=%.2f, TP=%.2f",
+                        signal.reason, signal.entryPrice, signal.stopLoss, signal.takeProfit);
+
+            return signal;
+         }
+      }
+
+      return signal;
+   }
+
+   //+------------------------------------------------------------------+
+   //| パターン2: トレンド継続パターン                                    |
+   //| - D1, H4, H1が同方向                                              |
+   //| - SMAスロープが強い                                               |
+   //| - 価格がSMAの上(買い)/下(売り)にある                               |
+   //+------------------------------------------------------------------+
+   EntrySignal CheckTrendContinuation(double bid, double ask)
+   {
+      EntrySignal signal;
+      signal.valid = false;
+      signal.pattern = PATTERN_TREND_CONTINUATION;
+      signal.reason = "";
+
+      CSMAManager* sma = m_TrendAnalyzer.GetSMAManager();
+
+      ENUM_TREND_DIRECTION h4Trend = m_TrendAnalyzer.GetTrendH4();
+      ENUM_TREND_DIRECTION h1Trend = m_TrendAnalyzer.GetTrendH1();
+      ENUM_TREND_DIRECTION d1Trend = m_TrendAnalyzer.GetTrendD1();
+
+      double h1Sma20 = sma.GetH1_SMA20();
+      double h1Sma80 = sma.GetH1_SMA80();
+      double h4Sma20 = sma.GetH4_SMA20();
+      double h4Sma80 = sma.GetH4_SMA80();
+
+      // SMAスロープ計算 (傾き)
+      double h1Slope20 = (sma.GetH1_SMA20(0) - sma.GetH1_SMA20(3)) / 3;
+      double h4Slope20 = (sma.GetH4_SMA20(0) - sma.GetH4_SMA20(3)) / 3;
+
+      double price = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
+
+      //=== BUY: 強いトレンド継続 ===
+      if(m_EnableLongTrades && d1Trend == TREND_UP && h4Trend == TREND_UP && h1Trend == TREND_UP)
+      {
+         // 全SMAの上に価格がある
+         bool aboveAllSma = (price > h1Sma20) && (price > h1Sma80) && (price > h4Sma20);
+
+         // SMAが上昇配列
+         bool smaAligned = (h1Sma20 > h1Sma80) && (h4Sma20 > h4Sma80);
+
+         // SMAスロープが正 (上昇中)
+         bool slopePositive = (h1Slope20 > 0) && (h4Slope20 > 0);
+
+         if(aboveAllSma && smaAligned && slopePositive)
+         {
+            signal.direction = TREND_UP;
+            signal.entryPrice = ask;
+            signal.stopLoss = GetStopLoss(TREND_UP, PERIOD_H1);
+            signal.takeProfit = GetTakeProfit(TREND_UP, signal.entryPrice, signal.stopLoss);
+            signal.valid = true;
+            signal.reason = "BUY: トレンド継続 D1+H4+H1 UP";
+
+            PrintFormat("[Entry] ★SIGNAL★ %s | Entry=%.2f, SL=%.2f, TP=%.2f",
+                        signal.reason, signal.entryPrice, signal.stopLoss, signal.takeProfit);
+
+            return signal;
+         }
+
+         PrintFormat("[Entry] BUY Trend: AboveAll=%s, Aligned=%s, Slope=%s",
+                     aboveAllSma ? "Y" : "N",
+                     smaAligned ? "Y" : "N",
+                     slopePositive ? "Y" : "N");
+      }
+
+      //=== SELL: 強いトレンド継続 ===
+      if(m_EnableShortTrades && d1Trend == TREND_DOWN && h4Trend == TREND_DOWN && h1Trend == TREND_DOWN)
+      {
+         // 全SMAの下に価格がある
+         bool belowAllSma = (price < h1Sma20) && (price < h1Sma80) && (price < h4Sma20);
+
+         // SMAが下降配列
+         bool smaAligned = (h1Sma20 < h1Sma80) && (h4Sma20 < h4Sma80);
+
+         // SMAスロープが負 (下降中)
+         bool slopeNegative = (h1Slope20 < 0) && (h4Slope20 < 0);
+
+         if(belowAllSma && smaAligned && slopeNegative)
+         {
+            signal.direction = TREND_DOWN;
+            signal.entryPrice = bid;
+            signal.stopLoss = GetStopLoss(TREND_DOWN, PERIOD_H1);
+            signal.takeProfit = GetTakeProfit(TREND_DOWN, signal.entryPrice, signal.stopLoss);
+            signal.valid = true;
+            signal.reason = "SELL: トレンド継続 D1+H4+H1 DOWN";
+
+            PrintFormat("[Entry] ★SIGNAL★ %s | Entry=%.2f, SL=%.2f, TP=%.2f",
                         signal.reason, signal.entryPrice, signal.stopLoss, signal.takeProfit);
 
             return signal;
@@ -277,15 +410,25 @@ public:
          return entryPrice - tpDistance;
    }
 
+   //--- Helper: Trend to string
+   string TrendStr(ENUM_TREND_DIRECTION trend)
+   {
+      if(trend == TREND_UP) return "UP";
+      if(trend == TREND_DOWN) return "DOWN";
+      return "NEUTRAL";
+   }
+
    //--- Get pattern name
    string GetPatternName(ENUM_ENTRY_PATTERN pattern)
    {
       switch(pattern)
       {
-         case PATTERN_H4_H1_CONVERGENCE_BREAKOUT:
-            return "H4+H1 Convergence Breakout";
-         case PATTERN_H1_M15_CONVERGENCE_BREAKOUT:
-            return "H1+M15 Convergence Breakout";
+         case PATTERN_SMA_PULLBACK:
+            return "SMA Pullback";
+         case PATTERN_TREND_CONTINUATION:
+            return "Trend Continuation";
+         case PATTERN_SMA_CROSS:
+            return "SMA Cross";
          default:
             return "None";
       }

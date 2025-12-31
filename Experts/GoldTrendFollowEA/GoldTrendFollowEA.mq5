@@ -5,13 +5,13 @@
 //+------------------------------------------------------------------+
 //| 概要:                                                             |
 //| - ダウ理論とSMAを用いたマルチタイムフレーム・トレンドフォロー戦略    |
-//| - v2.1: Fintokei最適化版                                          |
-//| - 連続損失制限、ショート制限、低リスク設定                         |
+//| - v2.1b: シンプルトレンドフォロー + Fintokei安全機能               |
+//| - 押し目/戻り目パターン、トレンド継続パターン                       |
 //|   (1日5%損失制限、全体10%損失制限、ポジションリスク3%)            |
 //+------------------------------------------------------------------+
 #property copyright "Gold Trend Follow EA"
 #property link      ""
-#property version   "2.10"
+#property version   "2.11"
 #property strict
 
 //--- Include files
@@ -129,7 +129,7 @@ int OnInit()
    g_LastBarTime = 0;
    g_IsInitialized = true;
 
-   PrintFormat("[EA] ===== Gold Trend Follow EA v2.1 Initialized =====");
+   PrintFormat("[EA] ===== Gold Trend Follow EA v2.1b Initialized =====");
    PrintFormat("[EA] Symbol: %s", g_Symbol);
    PrintFormat("[EA] Risk: %.2f%% | MaxDaily: %.2f%% | MaxTotal: %.2f%%",
                InpRiskPercent, InpMaxDailyLoss, InpMaxTotalLoss);
