@@ -11,7 +11,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Gold Trend Follow EA"
 #property link      ""
-#property version   "1.00"
+#property version   "2.00"
 #property strict
 
 //--- Include files
@@ -51,7 +51,7 @@ input int      InpStartHour = 8;                // 開始時間 (サーバー時
 input int      InpEndHour = 22;                 // 終了時間 (サーバー時間)
 
 input group "===== デバッグ設定 ====="
-input bool     InpDebugMode = false;            // デバッグモード
+input bool     InpDebugMode = true;             // デバッグモード (デフォルト有効)
 
 //+------------------------------------------------------------------+
 //| Global Variables                                                  |
@@ -175,9 +175,13 @@ void OnTick()
    //--- Update trend analysis
    g_TrendAnalyzer.Update();
 
+   //--- Always log trend status on new bar (helps debugging)
+   PrintFormat("[EA] %s | Trend: %s",
+               TimeToString(currentBarTime, TIME_DATE|TIME_MINUTES),
+               g_TrendAnalyzer.GetTrendString());
+
    if(InpDebugMode)
    {
-      PrintFormat("[EA] Trend Status: %s", g_TrendAnalyzer.GetTrendString());
       PrintFormat("[EA] Risk Status: %s", g_RiskManager.GetStatusString());
    }
 
