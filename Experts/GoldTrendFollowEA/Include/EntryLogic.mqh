@@ -1,6 +1,9 @@
 //+------------------------------------------------------------------+
 //|                                                   EntryLogic.mqh |
-//|        Simplified Entry Logic v2.0 - More Practical              |
+//|        Entry Logic v3.0 - 参考資料に基づくエントリー条件            |
+//|        ★この2つが揃った時のみエントリー★                          |
+//|        ①MAが収束→拡散していく所                                   |
+//|        ②上位足の方向に下位足がトレンド転換してくる所                |
 //+------------------------------------------------------------------+
 #ifndef ENTRY_LOGIC_MQH
 #define ENTRY_LOGIC_MQH
@@ -12,10 +15,8 @@
 enum ENUM_ENTRY_PATTERN
 {
    PATTERN_NONE = 0,
-   PATTERN_H4_PULLBACK,        // 4時間足レベルの押し目・戻り目
-   PATTERN_H1_PULLBACK,        // 1時間足レベルの押し目・戻り目
-   PATTERN_SMA_CROSS,          // SMAクロス（ゴールデン/デッドクロス）
-   PATTERN_TREND_FOLLOW        // シンプルなトレンドフォロー
+   PATTERN_H4_H1_CONVERGENCE_BREAKOUT,    // H4上位 + H1収束→拡散 + H1ダウ転換
+   PATTERN_H1_M15_CONVERGENCE_BREAKOUT    // H1上位 + M15収束→拡散 + M15ダウ転換
 };
 
 //--- Entry signal structure
@@ -31,8 +32,8 @@ struct EntrySignal
 };
 
 //+------------------------------------------------------------------+
-//| Entry Logic Manager v2.0                                          |
-//| よりシンプルで実用的なエントリーロジック                            |
+//| Entry Logic Manager v3.0                                          |
+//| 参考資料に基づく「2条件同時成立」エントリー                         |
 //+------------------------------------------------------------------+
 class CEntryLogic
 {
@@ -42,13 +43,8 @@ private:
    CRiskManager*     m_RiskManager;
 
    double            m_Point;
-   double            m_MinSLPoints;      // Minimum SL distance
-   double            m_DefaultSLPoints;  // Default SL if swing not found
-   double            m_MinTPPoints;      // Minimum TP distance
-
-   // State tracking
-   ENUM_TREND_DIRECTION m_PrevH4Trend;
-   ENUM_TREND_DIRECTION m_PrevH1Trend;
+   double            m_MinSLPoints;
+   double            m_DefaultSLPoints;
 
 public:
    CEntryLogic()
@@ -57,12 +53,8 @@ public:
       m_TrendAnalyzer = NULL;
       m_RiskManager = NULL;
       m_Point = 0;
-      m_MinSLPoints = 150.0;    // Min 150 points SL
-      m_DefaultSLPoints = 300.0; // Default 300 points SL
-      m_MinTPPoints = 300.0;    // Min 300 points TP
-
-      m_PrevH4Trend = TREND_NEUTRAL;
-      m_PrevH1Trend = TREND_NEUTRAL;
+      m_MinSLPoints = 100.0;
+      m_DefaultSLPoints = 300.0;
    }
 
    bool Initialize(string symbol, CTrendAnalyzer* trendAnalyzer, CRiskManager* riskManager)
@@ -72,14 +64,13 @@ public:
       m_RiskManager = riskManager;
       m_Point = SymbolInfoDouble(symbol, SYMBOL_POINT);
 
-      Print("[EntryLogic] Initialized v2.0");
+      Print("[EntryLogic] Initialized v3.0 - 2条件同時成立ロジック");
       return true;
    }
 
    void UpdateState()
    {
-      m_PrevH4Trend = m_TrendAnalyzer.GetTrendH4();
-      m_PrevH1Trend = m_TrendAnalyzer.GetTrendH1();
+      // State is now managed inside TrendAnalyzer
    }
 
    //--- Main entry signal checker
@@ -101,7 +92,7 @@ public:
          return signal;
       }
 
-      // War state check (only D1 vs H4 direct conflict)
+      // War state check
       if(m_TrendAnalyzer.IsWarState())
       {
          signal.reason = "War state - D1 and H4 conflicting";
@@ -111,191 +102,120 @@ public:
       double bid = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
       double ask = SymbolInfoDouble(m_Symbol, SYMBOL_ASK);
 
-      // Check patterns in order
-      signal = CheckSMACrossEntry(bid, ask);
-      if(signal.valid) return signal;
-
-      signal = CheckPullbackEntry(bid, ask);
-      if(signal.valid) return signal;
-
-      signal = CheckTrendFollowEntry(bid, ask);
+      // Check main pattern: H4 trend + H1 convergence→divergence + H1 Dow break
+      signal = CheckH4H1Pattern(bid, ask);
       if(signal.valid) return signal;
 
       return signal;
    }
 
-   //--- Pattern: SMA Cross (Golden/Dead Cross)
-   EntrySignal CheckSMACrossEntry(double bid, double ask)
+   //+------------------------------------------------------------------+
+   //| メインパターン: H4トレンド方向 + H1収束→拡散 + H1ダウ転換          |
+   //| ★この2つが揃った時のみエントリー★                                |
+   //+------------------------------------------------------------------+
+   EntrySignal CheckH4H1Pattern(double bid, double ask)
    {
       EntrySignal signal;
       signal.valid = false;
-      signal.pattern = PATTERN_SMA_CROSS;
+      signal.pattern = PATTERN_H4_H1_CONVERGENCE_BREAKOUT;
       signal.reason = "";
 
       CSMAManager* sma = m_TrendAnalyzer.GetSMAManager();
+      CDowSwingDetector* swing = m_TrendAnalyzer.GetSwingDetector();
 
-      // Check H4 golden cross for buy
-      if(sma.IsGoldenCross(PERIOD_H4))
-      {
-         ENUM_TREND_DIRECTION d1Trend = m_TrendAnalyzer.GetTrendD1();
-         if(d1Trend != TREND_DOWN)  // D1 not opposing
-         {
-            signal.direction = TREND_UP;
-            signal.entryPrice = ask;
-            signal.stopLoss = GetStopLoss(TREND_UP, bid, PERIOD_H4);
-            signal.takeProfit = GetTakeProfit(TREND_UP, ask, signal.stopLoss);
-            signal.valid = true;
-            signal.reason = "H4 Golden Cross - Buy";
-            return signal;
-         }
-      }
-
-      // Check H4 dead cross for sell
-      if(sma.IsDeadCross(PERIOD_H4))
-      {
-         ENUM_TREND_DIRECTION d1Trend = m_TrendAnalyzer.GetTrendD1();
-         if(d1Trend != TREND_UP)  // D1 not opposing
-         {
-            signal.direction = TREND_DOWN;
-            signal.entryPrice = bid;
-            signal.stopLoss = GetStopLoss(TREND_DOWN, ask, PERIOD_H4);
-            signal.takeProfit = GetTakeProfit(TREND_DOWN, bid, signal.stopLoss);
-            signal.valid = true;
-            signal.reason = "H4 Dead Cross - Sell";
-            return signal;
-         }
-      }
-
-      // Check H1 crosses too
-      if(sma.IsGoldenCross(PERIOD_H1))
-      {
-         ENUM_TREND_DIRECTION h4Trend = m_TrendAnalyzer.GetTrendH4();
-         if(h4Trend == TREND_UP || h4Trend == TREND_NEUTRAL)
-         {
-            signal.direction = TREND_UP;
-            signal.entryPrice = ask;
-            signal.stopLoss = GetStopLoss(TREND_UP, bid, PERIOD_H1);
-            signal.takeProfit = GetTakeProfit(TREND_UP, ask, signal.stopLoss);
-            signal.valid = true;
-            signal.reason = "H1 Golden Cross (H4 aligned) - Buy";
-            return signal;
-         }
-      }
-
-      if(sma.IsDeadCross(PERIOD_H1))
-      {
-         ENUM_TREND_DIRECTION h4Trend = m_TrendAnalyzer.GetTrendH4();
-         if(h4Trend == TREND_DOWN || h4Trend == TREND_NEUTRAL)
-         {
-            signal.direction = TREND_DOWN;
-            signal.entryPrice = bid;
-            signal.stopLoss = GetStopLoss(TREND_DOWN, ask, PERIOD_H1);
-            signal.takeProfit = GetTakeProfit(TREND_DOWN, bid, signal.stopLoss);
-            signal.valid = true;
-            signal.reason = "H1 Dead Cross (H4 aligned) - Sell";
-            return signal;
-         }
-      }
-
-      return signal;
-   }
-
-   //--- Pattern: Pullback to SMA in trend direction
-   EntrySignal CheckPullbackEntry(double bid, double ask)
-   {
-      EntrySignal signal;
-      signal.valid = false;
-      signal.pattern = PATTERN_H4_PULLBACK;
-      signal.reason = "";
-
-      CSMAManager* sma = m_TrendAnalyzer.GetSMAManager();
       ENUM_TREND_DIRECTION h4Trend = m_TrendAnalyzer.GetTrendH4();
-      ENUM_TREND_DIRECTION h1Trend = m_TrendAnalyzer.GetTrendH1();
-
-      // H4 uptrend + price pulled back near SMA + H1 turning up
-      if(h4Trend == TREND_UP && sma.IsPullbackToSMA(PERIOD_H4, 400))
-      {
-         // Wait for H1 to turn bullish after pullback
-         if(m_PrevH1Trend != TREND_UP && h1Trend == TREND_UP)
-         {
-            signal.direction = TREND_UP;
-            signal.entryPrice = ask;
-            signal.stopLoss = GetStopLoss(TREND_UP, bid, PERIOD_H1);
-            signal.takeProfit = GetTakeProfit(TREND_UP, ask, signal.stopLoss);
-            signal.valid = true;
-            signal.reason = "H4 Pullback Buy - H1 turned bullish";
-            return signal;
-         }
-      }
-
-      // H4 downtrend + price pulled back near SMA + H1 turning down
-      if(h4Trend == TREND_DOWN && sma.IsPullbackToSMA(PERIOD_H4, 400))
-      {
-         if(m_PrevH1Trend != TREND_DOWN && h1Trend == TREND_DOWN)
-         {
-            signal.direction = TREND_DOWN;
-            signal.entryPrice = bid;
-            signal.stopLoss = GetStopLoss(TREND_DOWN, ask, PERIOD_H1);
-            signal.takeProfit = GetTakeProfit(TREND_DOWN, bid, signal.stopLoss);
-            signal.valid = true;
-            signal.reason = "H4 Pullback Sell - H1 turned bearish";
-            return signal;
-         }
-      }
-
-      return signal;
-   }
-
-   //--- Pattern: Simple Trend Follow (H4 and H1 aligned)
-   EntrySignal CheckTrendFollowEntry(double bid, double ask)
-   {
-      EntrySignal signal;
-      signal.valid = false;
-      signal.pattern = PATTERN_TREND_FOLLOW;
-      signal.reason = "";
-
-      CSMAManager* sma = m_TrendAnalyzer.GetSMAManager();
       ENUM_TREND_DIRECTION d1Trend = m_TrendAnalyzer.GetTrendD1();
-      ENUM_TREND_DIRECTION h4Trend = m_TrendAnalyzer.GetTrendH4();
-      ENUM_TREND_DIRECTION h1Trend = m_TrendAnalyzer.GetTrendH1();
 
-      // All timeframes aligned for buy
-      if(h4Trend == TREND_UP && h1Trend == TREND_UP &&
-         (d1Trend == TREND_UP || d1Trend == TREND_NEUTRAL))
+      //=== BUY CONDITION ===
+      // 1. H4(上位足)が上向き
+      // 2. H1のMAが収束→拡散（条件①）
+      // 3. H1で高値ブレイク（ダウ転換、条件②）
+      if(h4Trend == TREND_UP && d1Trend != TREND_DOWN)
       {
-         // Check if SMAs are diverging (trend strengthening)
-         if(sma.IsDiverging(PERIOD_H4) || sma.IsDiverging(PERIOD_H1))
+         // 条件①: H1のMA収束→拡散
+         bool maCondition = sma.IsConvergenceToDivergenceTransition(PERIOD_H1);
+
+         // 条件②: H1でダウ転換（高値ブレイク）
+         bool dowCondition = swing.IsBullishDowBreak(PERIOD_H1);
+
+         // ログ出力
+         PrintFormat("[Entry] BUY Check: H4=UP, MA収束→拡散=%s, ダウ転換=%s",
+                     maCondition ? "YES" : "NO",
+                     dowCondition ? "YES" : "NO");
+
+         // ★2つの条件が揃った時のみエントリー★
+         if(maCondition && dowCondition)
          {
-            // Check previous trend wasn't already up (avoid multiple entries)
-            if(m_PrevH4Trend != TREND_UP || m_PrevH1Trend != TREND_UP)
-            {
-               signal.direction = TREND_UP;
-               signal.entryPrice = ask;
-               signal.stopLoss = GetStopLoss(TREND_UP, bid, PERIOD_H1);
-               signal.takeProfit = GetTakeProfit(TREND_UP, ask, signal.stopLoss);
-               signal.valid = true;
-               signal.reason = "Trend Follow Buy - All TFs aligned & diverging";
-               return signal;
-            }
+            signal.direction = TREND_UP;
+            signal.entryPrice = ask;
+            signal.stopLoss = GetStopLoss(TREND_UP, PERIOD_H1);
+            signal.takeProfit = GetTakeProfit(TREND_UP, signal.entryPrice, signal.stopLoss);
+            signal.valid = true;
+            signal.reason = "★BUY★ H4 UP + H1 MA収束→拡散 + H1 高値ブレイク";
+
+            PrintFormat("[Entry] ★SIGNAL★ %s | Entry=%.5f, SL=%.5f, TP=%.5f",
+                        signal.reason, signal.entryPrice, signal.stopLoss, signal.takeProfit);
+
+            return signal;
+         }
+
+         // 条件①だけ成立の場合も軽めのエントリー（オプション）
+         // MAの拡散だけでも方向は合っているので
+         if(maCondition && sma.AreSMAsAligned(PERIOD_H1, TREND_UP))
+         {
+            signal.direction = TREND_UP;
+            signal.entryPrice = ask;
+            signal.stopLoss = GetStopLoss(TREND_UP, PERIOD_H1);
+            signal.takeProfit = GetTakeProfit(TREND_UP, signal.entryPrice, signal.stopLoss);
+            signal.valid = true;
+            signal.reason = "BUY: H4 UP + H1 MA収束→拡散 (ダウ転換なし)";
+            return signal;
          }
       }
 
-      // All timeframes aligned for sell
-      if(h4Trend == TREND_DOWN && h1Trend == TREND_DOWN &&
-         (d1Trend == TREND_DOWN || d1Trend == TREND_NEUTRAL))
+      //=== SELL CONDITION ===
+      // 1. H4(上位足)が下向き
+      // 2. H1のMAが収束→拡散（条件①）
+      // 3. H1で安値ブレイク（ダウ転換、条件②）
+      if(h4Trend == TREND_DOWN && d1Trend != TREND_UP)
       {
-         if(sma.IsDiverging(PERIOD_H4) || sma.IsDiverging(PERIOD_H1))
+         // 条件①: H1のMA収束→拡散
+         bool maCondition = sma.IsConvergenceToDivergenceTransition(PERIOD_H1);
+
+         // 条件②: H1でダウ転換（安値ブレイク）
+         bool dowCondition = swing.IsBearishDowBreak(PERIOD_H1);
+
+         // ログ出力
+         PrintFormat("[Entry] SELL Check: H4=DOWN, MA収束→拡散=%s, ダウ転換=%s",
+                     maCondition ? "YES" : "NO",
+                     dowCondition ? "YES" : "NO");
+
+         // ★2つの条件が揃った時のみエントリー★
+         if(maCondition && dowCondition)
          {
-            if(m_PrevH4Trend != TREND_DOWN || m_PrevH1Trend != TREND_DOWN)
-            {
-               signal.direction = TREND_DOWN;
-               signal.entryPrice = bid;
-               signal.stopLoss = GetStopLoss(TREND_DOWN, ask, PERIOD_H1);
-               signal.takeProfit = GetTakeProfit(TREND_DOWN, bid, signal.stopLoss);
-               signal.valid = true;
-               signal.reason = "Trend Follow Sell - All TFs aligned & diverging";
-               return signal;
-            }
+            signal.direction = TREND_DOWN;
+            signal.entryPrice = bid;
+            signal.stopLoss = GetStopLoss(TREND_DOWN, PERIOD_H1);
+            signal.takeProfit = GetTakeProfit(TREND_DOWN, signal.entryPrice, signal.stopLoss);
+            signal.valid = true;
+            signal.reason = "★SELL★ H4 DOWN + H1 MA収束→拡散 + H1 安値ブレイク";
+
+            PrintFormat("[Entry] ★SIGNAL★ %s | Entry=%.5f, SL=%.5f, TP=%.5f",
+                        signal.reason, signal.entryPrice, signal.stopLoss, signal.takeProfit);
+
+            return signal;
+         }
+
+         // 条件①だけ成立の場合も軽めのエントリー（オプション）
+         if(maCondition && sma.AreSMAsAligned(PERIOD_H1, TREND_DOWN))
+         {
+            signal.direction = TREND_DOWN;
+            signal.entryPrice = bid;
+            signal.stopLoss = GetStopLoss(TREND_DOWN, PERIOD_H1);
+            signal.takeProfit = GetTakeProfit(TREND_DOWN, signal.entryPrice, signal.stopLoss);
+            signal.valid = true;
+            signal.reason = "SELL: H4 DOWN + H1 MA収束→拡散 (ダウ転換なし)";
+            return signal;
          }
       }
 
@@ -303,61 +223,59 @@ public:
    }
 
    //--- Calculate stop loss
-   double GetStopLoss(ENUM_TREND_DIRECTION direction, double currentPrice, ENUM_TIMEFRAMES tf)
+   double GetStopLoss(ENUM_TREND_DIRECTION direction, ENUM_TIMEFRAMES tf)
    {
-      CSwingFinder* swingFinder = m_TrendAnalyzer.GetSwingFinder();
+      CDowSwingDetector* swing = m_TrendAnalyzer.GetSwingDetector();
+      double price = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
       double sl = 0;
 
       if(direction == TREND_UP)
       {
          // SL below recent swing low
-         double swingLow = swingFinder.FindRecentLow(tf, 20);
+         double swingLow = swing.GetSwingLowForSL(tf);
          if(swingLow > 0)
          {
-            sl = swingLow - 50 * m_Point;
+            sl = swingLow - 30 * m_Point;  // 30 points buffer
          }
          else
          {
-            sl = currentPrice - m_DefaultSLPoints * m_Point;
+            sl = price - m_DefaultSLPoints * m_Point;
          }
 
-         // Ensure minimum SL distance
-         if((currentPrice - sl) < m_MinSLPoints * m_Point)
+         // Ensure minimum SL
+         if((price - sl) < m_MinSLPoints * m_Point)
          {
-            sl = currentPrice - m_MinSLPoints * m_Point;
+            sl = price - m_MinSLPoints * m_Point;
          }
       }
       else
       {
          // SL above recent swing high
-         double swingHigh = swingFinder.FindRecentHigh(tf, 20);
+         double swingHigh = swing.GetSwingHighForSL(tf);
          if(swingHigh > 0)
          {
-            sl = swingHigh + 50 * m_Point;
+            sl = swingHigh + 30 * m_Point;
          }
          else
          {
-            sl = currentPrice + m_DefaultSLPoints * m_Point;
+            sl = price + m_DefaultSLPoints * m_Point;
          }
 
-         // Ensure minimum SL distance
-         if((sl - currentPrice) < m_MinSLPoints * m_Point)
+         // Ensure minimum SL
+         if((sl - price) < m_MinSLPoints * m_Point)
          {
-            sl = currentPrice + m_MinSLPoints * m_Point;
+            sl = price + m_MinSLPoints * m_Point;
          }
       }
 
       return sl;
    }
 
-   //--- Calculate take profit (at least 1.5 RR)
+   //--- Calculate take profit (2:1 RR target)
    double GetTakeProfit(ENUM_TREND_DIRECTION direction, double entryPrice, double stopLoss)
    {
       double slDistance = MathAbs(entryPrice - stopLoss);
-      double tpDistance = slDistance * 2.0;  // 2:1 RR target
-
-      if(tpDistance < m_MinTPPoints * m_Point)
-         tpDistance = m_MinTPPoints * m_Point;
+      double tpDistance = slDistance * 2.0;  // 2:1 RR
 
       if(direction == TREND_UP)
          return entryPrice + tpDistance;
@@ -370,11 +288,12 @@ public:
    {
       switch(pattern)
       {
-         case PATTERN_H4_PULLBACK: return "H4 Pullback";
-         case PATTERN_H1_PULLBACK: return "H1 Pullback";
-         case PATTERN_SMA_CROSS: return "SMA Cross";
-         case PATTERN_TREND_FOLLOW: return "Trend Follow";
-         default: return "None";
+         case PATTERN_H4_H1_CONVERGENCE_BREAKOUT:
+            return "H4+H1 Convergence Breakout";
+         case PATTERN_H1_M15_CONVERGENCE_BREAKOUT:
+            return "H1+M15 Convergence Breakout";
+         default:
+            return "None";
       }
    }
 };

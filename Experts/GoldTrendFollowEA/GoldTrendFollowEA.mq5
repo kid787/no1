@@ -11,7 +11,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Gold Trend Follow EA"
 #property link      ""
-#property version   "2.00"
+#property version   "3.00"
 #property strict
 
 //--- Include files

@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                TrendAnalysis.mqh |
-//|           Dow Theory & SMA Multi-Timeframe Trend Analysis        |
-//|                          v2.0 - Improved Logic                   |
+//|        Dow Theory & SMA Multi-Timeframe Trend Analysis v3.0      |
+//|        参考資料に基づく収束→拡散 & ダウ転換ロジック                  |
 //+------------------------------------------------------------------+
 #ifndef TREND_ANALYSIS_MQH
 #define TREND_ANALYSIS_MQH
@@ -14,17 +14,17 @@ enum ENUM_TREND_DIRECTION
    TREND_NEUTRAL = 0    // 中立・レンジ
 };
 
-//--- Swing point structure
-struct SwingPoint
+//--- MA convergence/divergence state
+enum ENUM_MA_STATE
 {
-   double   price;
-   datetime time;
-   int      barIndex;
-   bool     isHigh;
+   MA_STATE_CONVERGING,    // 収束中（MAが近づいている）
+   MA_STATE_DIVERGING,     // 拡散中（MAが離れている）
+   MA_STATE_TRANSITION,    // 遷移中（収束→拡散の瞬間）
+   MA_STATE_UNKNOWN
 };
 
 //+------------------------------------------------------------------+
-//| Multi-Timeframe SMA Manager                                       |
+//| Multi-Timeframe SMA Manager with Convergence/Divergence Detection|
 //+------------------------------------------------------------------+
 class CSMAManager
 {
@@ -35,11 +35,22 @@ private:
    int               m_HandleM15_20;
    int               m_HandleD1_20;
 
-public:
-   //--- Constructor
-   CSMAManager() { m_Symbol = ""; }
+   // State tracking for convergence/divergence
+   double            m_PrevGapH1;     // Previous H1 SMA gap
+   double            m_PrevGapH4;     // Previous H4 SMA gap
+   bool              m_WasConvergingH1;
+   bool              m_WasConvergingH4;
 
-   //--- Initialize SMA handles for all timeframes
+public:
+   CSMAManager()
+   {
+      m_Symbol = "";
+      m_PrevGapH1 = 0;
+      m_PrevGapH4 = 0;
+      m_WasConvergingH1 = false;
+      m_WasConvergingH4 = false;
+   }
+
    bool Initialize(string symbol)
    {
       m_Symbol = symbol;
@@ -55,13 +66,12 @@ public:
       m_HandleH4_120 = iMA(symbol, PERIOD_H4, 120, 0, MODE_SMA, PRICE_CLOSE);
       m_HandleH4_600 = iMA(symbol, PERIOD_H4, 600, 0, MODE_SMA, PRICE_CLOSE);
 
-      // 15分足 SMA (エントリー用)
+      // 15分足 SMA
       m_HandleM15_20 = iMA(symbol, PERIOD_M15, 20, 0, MODE_SMA, PRICE_CLOSE);
 
       // 日足 SMA
       m_HandleD1_20 = iMA(symbol, PERIOD_D1, 20, 0, MODE_SMA, PRICE_CLOSE);
 
-      // Verify all handles
       if(m_HandleH1_20 == INVALID_HANDLE || m_HandleH1_80 == INVALID_HANDLE ||
          m_HandleH1_480 == INVALID_HANDLE || m_HandleH4_20 == INVALID_HANDLE ||
          m_HandleH4_80 == INVALID_HANDLE || m_HandleH4_120 == INVALID_HANDLE ||
@@ -72,11 +82,14 @@ public:
          return false;
       }
 
-      Print("[SMAManager] Initialized successfully");
+      // Initialize gap tracking
+      m_PrevGapH1 = GetMAGap(PERIOD_H1);
+      m_PrevGapH4 = GetMAGap(PERIOD_H4);
+
+      Print("[SMAManager] Initialized v3.0");
       return true;
    }
 
-   //--- Release handles
    void Deinitialize()
    {
       if(m_HandleH1_20 != INVALID_HANDLE) IndicatorRelease(m_HandleH1_20);
@@ -90,284 +103,199 @@ public:
       if(m_HandleD1_20 != INVALID_HANDLE) IndicatorRelease(m_HandleD1_20);
    }
 
-   //--- Get SMA value
    double GetSMA(int handle, int shift = 0)
    {
       double buffer[];
       ArraySetAsSeries(buffer, true);
-
       if(CopyBuffer(handle, 0, shift, 1, buffer) != 1)
          return 0;
-
       return buffer[0];
    }
 
-   //--- H1 SMA getters
+   // SMA Getters
    double GetH1_SMA20(int shift = 0) { return GetSMA(m_HandleH1_20, shift); }
    double GetH1_SMA80(int shift = 0) { return GetSMA(m_HandleH1_80, shift); }
    double GetH1_SMA480(int shift = 0) { return GetSMA(m_HandleH1_480, shift); }
-
-   //--- H4 SMA getters
    double GetH4_SMA20(int shift = 0) { return GetSMA(m_HandleH4_20, shift); }
    double GetH4_SMA80(int shift = 0) { return GetSMA(m_HandleH4_80, shift); }
    double GetH4_SMA120(int shift = 0) { return GetSMA(m_HandleH4_120, shift); }
    double GetH4_SMA600(int shift = 0) { return GetSMA(m_HandleH4_600, shift); }
-
-   //--- M15 SMA getter
    double GetM15_SMA20(int shift = 0) { return GetSMA(m_HandleM15_20, shift); }
-
-   //--- D1 SMA getter
    double GetD1_SMA20(int shift = 0) { return GetSMA(m_HandleD1_20, shift); }
 
-   //--- Get SMA slope (direction) - percentage change over period
-   double GetSMASlope(int handle, int period = 5)
+   //--- Get current MA gap (SMA20 - SMA80)
+   double GetMAGap(ENUM_TIMEFRAMES tf, int shift = 0)
    {
-      double sma0 = GetSMA(handle, 0);
-      double sma1 = GetSMA(handle, period);
-
-      if(sma1 == 0) return 0;
-
-      return (sma0 - sma1) / sma1 * 100.0;
+      if(tf == PERIOD_H1)
+         return GetH1_SMA20(shift) - GetH1_SMA80(shift);
+      else if(tf == PERIOD_H4)
+         return GetH4_SMA20(shift) - GetH4_SMA80(shift);
+      return 0;
    }
 
-   //--- Simplified trend detection using SMA position and slope
-   ENUM_TREND_DIRECTION GetSimpleTrend(ENUM_TIMEFRAMES tf)
+   //--- Get MA gap absolute (distance between SMAs)
+   double GetMAGapAbs(ENUM_TIMEFRAMES tf, int shift = 0)
    {
-      double price = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
-      double sma20 = 0, sma80 = 0;
-      double slope20 = 0;
+      return MathAbs(GetMAGap(tf, shift));
+   }
 
-      if(tf == PERIOD_H1)
+   //--- Check if currently converging (gap getting smaller)
+   bool IsConverging(ENUM_TIMEFRAMES tf)
+   {
+      double gap0 = GetMAGapAbs(tf, 0);
+      double gap3 = GetMAGapAbs(tf, 3);
+      double gap5 = GetMAGapAbs(tf, 5);
+
+      // Converging if gap is consistently decreasing
+      return (gap0 < gap3) && (gap3 < gap5);
+   }
+
+   //--- Check if currently diverging (gap getting larger)
+   bool IsDiverging(ENUM_TIMEFRAMES tf)
+   {
+      double gap0 = GetMAGapAbs(tf, 0);
+      double gap3 = GetMAGapAbs(tf, 3);
+      double gap5 = GetMAGapAbs(tf, 5);
+
+      // Diverging if gap is consistently increasing
+      return (gap0 > gap3) && (gap3 > gap5);
+   }
+
+   //--- ★重要★ 収束→拡散の遷移を検出
+   bool IsConvergenceToDivergenceTransition(ENUM_TIMEFRAMES tf)
+   {
+      // 過去に収束していて、今拡散し始めた瞬間
+      double gap0 = GetMAGapAbs(tf, 0);
+      double gap1 = GetMAGapAbs(tf, 1);
+      double gap2 = GetMAGapAbs(tf, 2);
+      double gap3 = GetMAGapAbs(tf, 3);
+      double gap5 = GetMAGapAbs(tf, 5);
+
+      // Was converging: gap was decreasing (gap5 > gap3 > gap2)
+      bool wasConverging = (gap5 > gap3) && (gap3 > gap2);
+
+      // Now diverging: gap is increasing (gap0 > gap1)
+      bool nowDiverging = (gap0 > gap1) && (gap0 > gap2);
+
+      // Transition point: minimum gap was around bar 1-2
+      bool atTransition = wasConverging && nowDiverging;
+
+      if(atTransition)
       {
-         sma20 = GetH1_SMA20();
-         sma80 = GetH1_SMA80();
-         slope20 = GetSMASlope(m_HandleH1_20, 3);
-      }
-      else if(tf == PERIOD_H4)
-      {
-         sma20 = GetH4_SMA20();
-         sma80 = GetH4_SMA80();
-         slope20 = GetSMASlope(m_HandleH4_20, 3);
-      }
-      else if(tf == PERIOD_D1)
-      {
-         sma20 = GetD1_SMA20();
-         sma80 = GetH1_SMA480();  // Use H1 480 as proxy
-         slope20 = GetSMASlope(m_HandleD1_20, 3);
+         PrintFormat("[SMA] Convergence→Divergence detected on %s! Gap: %.1f→%.1f→%.1f→%.1f→%.1f",
+                     EnumToString(tf), gap5, gap3, gap2, gap1, gap0);
       }
 
-      // Simple trend logic:
-      // UP: Price above both SMAs AND SMA20 above SMA80
-      // DOWN: Price below both SMAs AND SMA20 below SMA80
-      if(price > sma20 && price > sma80 && sma20 > sma80)
+      return atTransition;
+   }
+
+   //--- Update state tracking (call once per bar)
+   void UpdateState()
+   {
+      // Save current state as previous
+      m_WasConvergingH1 = IsConverging(PERIOD_H1);
+      m_WasConvergingH4 = IsConverging(PERIOD_H4);
+      m_PrevGapH1 = GetMAGapAbs(PERIOD_H1);
+      m_PrevGapH4 = GetMAGapAbs(PERIOD_H4);
+   }
+
+   //--- Get MA direction based on position (SMA20 vs SMA80)
+   ENUM_TREND_DIRECTION GetMADirection(ENUM_TIMEFRAMES tf)
+   {
+      double gap = GetMAGap(tf);
+      double point = SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
+
+      // SMA20 > SMA80 = bullish, SMA20 < SMA80 = bearish
+      if(gap > 50 * point)  // 50 points threshold
          return TREND_UP;
-      if(price < sma20 && price < sma80 && sma20 < sma80)
-         return TREND_DOWN;
-
-      // Alternative: just use slope
-      if(slope20 > 0.05)  // 0.05% positive slope
-         return TREND_UP;
-      if(slope20 < -0.05)
+      else if(gap < -50 * point)
          return TREND_DOWN;
 
       return TREND_NEUTRAL;
    }
 
-   //--- Check if SMAs are aligned (all pointing same direction)
+   //--- Get SMA slope
+   double GetSMASlope(int handle, int period = 5)
+   {
+      double sma0 = GetSMA(handle, 0);
+      double sma1 = GetSMA(handle, period);
+      if(sma1 == 0) return 0;
+      return (sma0 - sma1) / sma1 * 100.0;
+   }
+
+   //--- Check SMA alignment
    bool AreSMAsAligned(ENUM_TIMEFRAMES tf, ENUM_TREND_DIRECTION direction)
    {
       double sma20 = 0, sma80 = 0;
-      double slope20 = 0;
 
       if(tf == PERIOD_H1)
       {
          sma20 = GetH1_SMA20();
          sma80 = GetH1_SMA80();
-         slope20 = GetSMASlope(m_HandleH1_20, 3);
       }
       else if(tf == PERIOD_H4)
       {
          sma20 = GetH4_SMA20();
          sma80 = GetH4_SMA80();
-         slope20 = GetSMASlope(m_HandleH4_20, 3);
       }
 
       if(direction == TREND_UP)
-      {
-         return (sma20 > sma80) && (slope20 > 0);
-      }
+         return sma20 > sma80;
       else if(direction == TREND_DOWN)
-      {
-         return (sma20 < sma80) && (slope20 < 0);
-      }
+         return sma20 < sma80;
 
       return false;
-   }
-
-   //--- Check convergence state (SMAs getting closer)
-   bool IsConverging(ENUM_TIMEFRAMES tf)
-   {
-      double sma20_0, sma80_0, sma20_5, sma80_5;
-
-      if(tf == PERIOD_H1)
-      {
-         sma20_0 = GetH1_SMA20(0);
-         sma80_0 = GetH1_SMA80(0);
-         sma20_5 = GetH1_SMA20(5);
-         sma80_5 = GetH1_SMA80(5);
-      }
-      else if(tf == PERIOD_H4)
-      {
-         sma20_0 = GetH4_SMA20(0);
-         sma80_0 = GetH4_SMA80(0);
-         sma20_5 = GetH4_SMA20(5);
-         sma80_5 = GetH4_SMA80(5);
-      }
-      else
-         return false;
-
-      double gap0 = MathAbs(sma20_0 - sma80_0);
-      double gap5 = MathAbs(sma20_5 - sma80_5);
-
-      return gap0 < gap5;
-   }
-
-   //--- Check divergence (expanding)
-   bool IsDiverging(ENUM_TIMEFRAMES tf)
-   {
-      double sma20_0, sma80_0, sma20_5, sma80_5;
-
-      if(tf == PERIOD_H1)
-      {
-         sma20_0 = GetH1_SMA20(0);
-         sma80_0 = GetH1_SMA80(0);
-         sma20_5 = GetH1_SMA20(5);
-         sma80_5 = GetH1_SMA80(5);
-      }
-      else if(tf == PERIOD_H4)
-      {
-         sma20_0 = GetH4_SMA20(0);
-         sma80_0 = GetH4_SMA80(0);
-         sma20_5 = GetH4_SMA20(5);
-         sma80_5 = GetH4_SMA80(5);
-      }
-      else
-         return false;
-
-      double gap0 = MathAbs(sma20_0 - sma80_0);
-      double gap5 = MathAbs(sma20_5 - sma80_5);
-
-      return gap0 > gap5;
-   }
-
-   //--- Check for pullback to SMA (price near SMA20 or SMA80)
-   bool IsPullbackToSMA(ENUM_TIMEFRAMES tf, double thresholdPoints = 200)
-   {
-      double price = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
-      double sma20 = 0, sma80 = 0;
-
-      if(tf == PERIOD_H1)
-      {
-         sma20 = GetH1_SMA20();
-         sma80 = GetH1_SMA80();
-      }
-      else if(tf == PERIOD_H4)
-      {
-         sma20 = GetH4_SMA20();
-         sma80 = GetH4_SMA80();
-      }
-
-      double point = SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
-      double threshold = thresholdPoints * point;
-
-      return (MathAbs(price - sma20) < threshold) || (MathAbs(price - sma80) < threshold);
-   }
-
-   //--- Detect golden cross (SMA20 crosses above SMA80)
-   bool IsGoldenCross(ENUM_TIMEFRAMES tf)
-   {
-      double sma20_0, sma80_0, sma20_1, sma80_1;
-
-      if(tf == PERIOD_H1)
-      {
-         sma20_0 = GetH1_SMA20(0);
-         sma80_0 = GetH1_SMA80(0);
-         sma20_1 = GetH1_SMA20(1);
-         sma80_1 = GetH1_SMA80(1);
-      }
-      else if(tf == PERIOD_H4)
-      {
-         sma20_0 = GetH4_SMA20(0);
-         sma80_0 = GetH4_SMA80(0);
-         sma20_1 = GetH4_SMA20(1);
-         sma80_1 = GetH4_SMA80(1);
-      }
-      else
-         return false;
-
-      return (sma20_0 > sma80_0) && (sma20_1 <= sma80_1);
-   }
-
-   //--- Detect dead cross (SMA20 crosses below SMA80)
-   bool IsDeadCross(ENUM_TIMEFRAMES tf)
-   {
-      double sma20_0, sma80_0, sma20_1, sma80_1;
-
-      if(tf == PERIOD_H1)
-      {
-         sma20_0 = GetH1_SMA20(0);
-         sma80_0 = GetH1_SMA80(0);
-         sma20_1 = GetH1_SMA20(1);
-         sma80_1 = GetH1_SMA80(1);
-      }
-      else if(tf == PERIOD_H4)
-      {
-         sma20_0 = GetH4_SMA20(0);
-         sma80_0 = GetH4_SMA80(0);
-         sma20_1 = GetH4_SMA20(1);
-         sma80_1 = GetH4_SMA80(1);
-      }
-      else
-         return false;
-
-      return (sma20_0 < sma80_0) && (sma20_1 >= sma80_1);
    }
 };
 
 //+------------------------------------------------------------------+
-//| Simple High-Low Finder for Dow Theory                            |
+//| Dow Theory Swing Detector - 下位足のダウ転換検出                   |
 //+------------------------------------------------------------------+
-class CSwingFinder
+class CDowSwingDetector
 {
 private:
    string   m_Symbol;
-   int      m_Lookback;
+   int      m_SwingBars;     // Bars to look back for swing detection
+   double   m_Point;
+
+   // State tracking
+   double   m_PrevSwingHigh;
+   double   m_PrevSwingLow;
 
 public:
-   CSwingFinder() { m_Symbol = ""; m_Lookback = 10; }
+   CDowSwingDetector()
+   {
+      m_Symbol = "";
+      m_SwingBars = 5;
+      m_Point = 0;
+      m_PrevSwingHigh = 0;
+      m_PrevSwingLow = 0;
+   }
 
-   bool Initialize(string symbol, int lookback = 10)
+   bool Initialize(string symbol, int swingBars = 5)
    {
       m_Symbol = symbol;
-      m_Lookback = lookback;
+      m_SwingBars = swingBars;
+      m_Point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+
+      Print("[DowSwing] Initialized");
       return true;
    }
 
-   //--- Find recent swing high
-   double FindSwingHigh(ENUM_TIMEFRAMES tf, int barsBack = 50)
+   //--- Find recent swing high (local maximum)
+   double FindRecentSwingHigh(ENUM_TIMEFRAMES tf, int lookback = 30)
    {
       double highs[];
       ArraySetAsSeries(highs, true);
 
-      if(CopyHigh(m_Symbol, tf, 0, barsBack, highs) < barsBack)
+      if(CopyHigh(m_Symbol, tf, 0, lookback, highs) < lookback)
          return 0;
 
-      double swingHigh = 0;
-
-      for(int i = m_Lookback; i < barsBack - m_Lookback; i++)
+      // Find most recent swing high
+      for(int i = m_SwingBars; i < lookback - m_SwingBars; i++)
       {
          bool isSwing = true;
-         for(int j = 1; j <= m_Lookback; j++)
+         for(int j = 1; j <= m_SwingBars; j++)
          {
             if(highs[i] <= highs[i - j] || highs[i] <= highs[i + j])
             {
@@ -376,30 +304,33 @@ public:
             }
          }
          if(isSwing)
-         {
-            swingHigh = highs[i];
-            break;
-         }
+            return highs[i];
       }
 
-      return swingHigh;
+      // Fallback: highest of last N bars
+      double highest = highs[1];
+      for(int i = 2; i < lookback / 2; i++)
+      {
+         if(highs[i] > highest)
+            highest = highs[i];
+      }
+      return highest;
    }
 
-   //--- Find recent swing low
-   double FindSwingLow(ENUM_TIMEFRAMES tf, int barsBack = 50)
+   //--- Find recent swing low (local minimum)
+   double FindRecentSwingLow(ENUM_TIMEFRAMES tf, int lookback = 30)
    {
       double lows[];
       ArraySetAsSeries(lows, true);
 
-      if(CopyLow(m_Symbol, tf, 0, barsBack, lows) < barsBack)
+      if(CopyLow(m_Symbol, tf, 0, lookback, lows) < lookback)
          return 0;
 
-      double swingLow = 0;
-
-      for(int i = m_Lookback; i < barsBack - m_Lookback; i++)
+      // Find most recent swing low
+      for(int i = m_SwingBars; i < lookback - m_SwingBars; i++)
       {
          bool isSwing = true;
-         for(int j = 1; j <= m_Lookback; j++)
+         for(int j = 1; j <= m_SwingBars; j++)
          {
             if(lows[i] >= lows[i - j] || lows[i] >= lows[i + j])
             {
@@ -408,63 +339,89 @@ public:
             }
          }
          if(isSwing)
-         {
-            swingLow = lows[i];
-            break;
-         }
+            return lows[i];
       }
 
-      return swingLow;
-   }
-
-   //--- Find recent high (simpler - just highest of N bars)
-   double FindRecentHigh(ENUM_TIMEFRAMES tf, int bars = 20)
-   {
-      double highs[];
-      ArraySetAsSeries(highs, true);
-
-      if(CopyHigh(m_Symbol, tf, 1, bars, highs) < bars)
-         return 0;
-
-      double maxHigh = highs[0];
-      for(int i = 1; i < bars; i++)
+      // Fallback: lowest of last N bars
+      double lowest = lows[1];
+      for(int i = 2; i < lookback / 2; i++)
       {
-         if(highs[i] > maxHigh)
-            maxHigh = highs[i];
+         if(lows[i] < lowest)
+            lowest = lows[i];
       }
-
-      return maxHigh;
+      return lowest;
    }
 
-   //--- Find recent low (simpler - just lowest of N bars)
-   double FindRecentLow(ENUM_TIMEFRAMES tf, int bars = 20)
+   //--- ★重要★ 下位足のダウ転換検出 - 高値ブレイク（買いシグナル）
+   bool IsBullishDowBreak(ENUM_TIMEFRAMES tf)
    {
-      double lows[];
-      ArraySetAsSeries(lows, true);
+      double closes[];
+      ArraySetAsSeries(closes, true);
 
-      if(CopyLow(m_Symbol, tf, 1, bars, lows) < bars)
-         return 0;
+      if(CopyClose(m_Symbol, tf, 0, 3, closes) < 3)
+         return false;
 
-      double minLow = lows[0];
-      for(int i = 1; i < bars; i++)
+      double currentClose = closes[0];
+      double prevClose = closes[1];
+      double swingHigh = FindRecentSwingHigh(tf, 30);
+
+      if(swingHigh == 0)
+         return false;
+
+      // Current close broke above swing high, prev close was below
+      bool breakout = (currentClose > swingHigh) && (prevClose <= swingHigh);
+
+      if(breakout)
       {
-         if(lows[i] < minLow)
-            minLow = lows[i];
+         PrintFormat("[DowSwing] Bullish breakout on %s! Close %.5f > SwingHigh %.5f",
+                     EnumToString(tf), currentClose, swingHigh);
       }
 
-      return minLow;
+      return breakout;
    }
+
+   //--- ★重要★ 下位足のダウ転換検出 - 安値ブレイク（売りシグナル）
+   bool IsBearishDowBreak(ENUM_TIMEFRAMES tf)
+   {
+      double closes[];
+      ArraySetAsSeries(closes, true);
+
+      if(CopyClose(m_Symbol, tf, 0, 3, closes) < 3)
+         return false;
+
+      double currentClose = closes[0];
+      double prevClose = closes[1];
+      double swingLow = FindRecentSwingLow(tf, 30);
+
+      if(swingLow == 0)
+         return false;
+
+      // Current close broke below swing low, prev close was above
+      bool breakout = (currentClose < swingLow) && (prevClose >= swingLow);
+
+      if(breakout)
+      {
+         PrintFormat("[DowSwing] Bearish breakout on %s! Close %.5f < SwingLow %.5f",
+                     EnumToString(tf), currentClose, swingLow);
+      }
+
+      return breakout;
+   }
+
+   //--- Get swing high/low for SL calculation
+   double GetSwingHighForSL(ENUM_TIMEFRAMES tf) { return FindRecentSwingHigh(tf, 20); }
+   double GetSwingLowForSL(ENUM_TIMEFRAMES tf) { return FindRecentSwingLow(tf, 20); }
 };
 
 //+------------------------------------------------------------------+
-//| Main Trend Analyzer combining SMA and Dow Theory                 |
+//| Main Trend Analyzer v3.0                                          |
 //+------------------------------------------------------------------+
 class CTrendAnalyzer
 {
 private:
    string            m_Symbol;
    CSMAManager       m_SMAManager;
-   CSwingFinder      m_SwingFinder;
+   CDowSwingDetector m_SwingDetector;
 
    ENUM_TREND_DIRECTION m_TrendD1;
    ENUM_TREND_DIRECTION m_TrendH4;
@@ -489,10 +446,10 @@ public:
       if(!m_SMAManager.Initialize(symbol))
          return false;
 
-      if(!m_SwingFinder.Initialize(symbol))
+      if(!m_SwingDetector.Initialize(symbol))
          return false;
 
-      Print("[TrendAnalyzer] Initialized v2.0");
+      Print("[TrendAnalyzer] Initialized v3.0");
       return true;
    }
 
@@ -501,60 +458,59 @@ public:
       m_SMAManager.Deinitialize();
    }
 
-   //--- Update all trend analysis (simplified)
    void Update()
    {
-      // Use simple SMA-based trend detection
-      m_TrendD1 = m_SMAManager.GetSimpleTrend(PERIOD_D1);
-      m_TrendH4 = m_SMAManager.GetSimpleTrend(PERIOD_H4);
-      m_TrendH1 = m_SMAManager.GetSimpleTrend(PERIOD_H1);
+      // Get MA direction for each timeframe
+      m_TrendD1 = GetTrendFromPrice(PERIOD_D1);
+      m_TrendH4 = m_SMAManager.GetMADirection(PERIOD_H4);
+      m_TrendH1 = m_SMAManager.GetMADirection(PERIOD_H1);
 
-      // Update war state
       UpdateWarState();
+      m_SMAManager.UpdateState();
    }
 
-   //--- Updated war state logic (more lenient)
+   //--- Get trend from price position relative to SMA
+   ENUM_TREND_DIRECTION GetTrendFromPrice(ENUM_TIMEFRAMES tf)
+   {
+      double price = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
+      double sma = 0;
+
+      if(tf == PERIOD_D1)
+         sma = m_SMAManager.GetD1_SMA20();
+      else if(tf == PERIOD_H4)
+         sma = m_SMAManager.GetH4_SMA80();
+      else if(tf == PERIOD_H1)
+         sma = m_SMAManager.GetH1_SMA80();
+
+      double point = SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
+
+      if(price > sma + 100 * point)
+         return TREND_UP;
+      else if(price < sma - 100 * point)
+         return TREND_DOWN;
+
+      return TREND_NEUTRAL;
+   }
+
    void UpdateWarState()
    {
       m_IsWarState = false;
 
-      // Only consider war state if D1 and H4 are DIRECTLY opposing
-      // (both have clear trends in opposite directions)
+      // War state only if D1 and H4 are directly opposing
       if(m_TrendD1 == TREND_UP && m_TrendH4 == TREND_DOWN)
          m_IsWarState = true;
       else if(m_TrendD1 == TREND_DOWN && m_TrendH4 == TREND_UP)
          m_IsWarState = true;
-
-      // H1 can be different - it's used for entry timing
-      // Don't block trades just because H1 is against H4
    }
 
-   //--- Check if higher TF supports trade direction
-   bool IsHigherTFAligned(ENUM_TREND_DIRECTION tradeDirection)
-   {
-      // D1 must not be opposing
-      if(tradeDirection == TREND_UP && m_TrendD1 == TREND_DOWN)
-         return false;
-      if(tradeDirection == TREND_DOWN && m_TrendD1 == TREND_UP)
-         return false;
-
-      // H4 should ideally match or be neutral
-      if(tradeDirection == TREND_UP)
-         return (m_TrendH4 == TREND_UP || m_TrendH4 == TREND_NEUTRAL);
-      if(tradeDirection == TREND_DOWN)
-         return (m_TrendH4 == TREND_DOWN || m_TrendH4 == TREND_NEUTRAL);
-
-      return false;
-   }
-
-   //--- Getters
+   // Getters
    ENUM_TREND_DIRECTION GetTrendD1() { return m_TrendD1; }
    ENUM_TREND_DIRECTION GetTrendH4() { return m_TrendH4; }
    ENUM_TREND_DIRECTION GetTrendH1() { return m_TrendH1; }
    bool IsWarState() { return m_IsWarState; }
 
    CSMAManager* GetSMAManager() { return &m_SMAManager; }
-   CSwingFinder* GetSwingFinder() { return &m_SwingFinder; }
+   CDowSwingDetector* GetSwingDetector() { return &m_SwingDetector; }
 
    string GetTrendString()
    {
