@@ -1,13 +1,14 @@
 //+------------------------------------------------------------------+
 //|                                                  RiskManager.mqh |
-//|                     Fintokei Risk Management for Gold EA v2.1    |
+//|                     Fintokei Risk Management for Gold EA v2.2    |
 //+------------------------------------------------------------------+
 #ifndef RISK_MANAGER_MQH
 #define RISK_MANAGER_MQH
 
 //+------------------------------------------------------------------+
-//| Fintokei Risk Management Class v2.1                              |
+//| Fintokei Risk Management Class v2.2                              |
 //| - 1日最大損失5%ルール (UTC 0時基準)                               |
+//| - 週間最大損失5%ルール (月曜UTC 0時基準)                           |
 //| - 全体最大損失10%ルール (初期資金基準)                             |
 //| - ポジションリスク最大3%                                          |
 //| - 段階的ロット削減 (5%損失で50%減、8%損失で更に50%減)              |
@@ -18,9 +19,12 @@ class CRiskManager
 private:
    double            m_InitialBalance;          // 初期資金
    double            m_DayStartEquity;          // 当日開始時の有効証拠金 (UTC 0時)
+   double            m_WeekStartEquity;         // 週開始時の有効証拠金 (月曜UTC 0時)
    datetime          m_LastDayUpdate;           // 最後に日次更新した日時
+   datetime          m_LastWeekUpdate;          // 最後に週次更新した日時
 
    double            m_MaxDailyLossPercent;     // 1日最大損失率 (5%)
+   double            m_MaxWeeklyLossPercent;    // 週間最大損失率 (5%)
    double            m_MaxTotalLossPercent;     // 全体最大損失率 (10%)
    double            m_MaxPositionRiskPercent;  // 1ポジションの最大リスク (3%)
 
@@ -42,9 +46,12 @@ public:
    {
       m_InitialBalance = 0;
       m_DayStartEquity = 0;
+      m_WeekStartEquity = 0;
       m_LastDayUpdate = 0;
+      m_LastWeekUpdate = 0;
 
       m_MaxDailyLossPercent = 5.0;
+      m_MaxWeeklyLossPercent = 5.0;
       m_MaxTotalLossPercent = 10.0;
       m_MaxPositionRiskPercent = 3.0;
 
@@ -69,11 +76,13 @@ public:
          m_InitialBalance = AccountInfoDouble(ACCOUNT_BALANCE);
 
       m_DayStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+      m_WeekStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
       m_LastDayUpdate = GetUTCDayStart();
+      m_LastWeekUpdate = GetUTCWeekStart();
       m_IsInitialized = true;
 
-      PrintFormat("[RiskManager] Initialized: InitialBalance=%.2f, DayStartEquity=%.2f",
-                  m_InitialBalance, m_DayStartEquity);
+      PrintFormat("[RiskManager] Initialized v2.2: InitialBalance=%.2f, DayStartEquity=%.2f, WeekStartEquity=%.2f",
+                  m_InitialBalance, m_DayStartEquity, m_WeekStartEquity);
 
       return true;
    }
@@ -99,6 +108,19 @@ public:
       }
    }
 
+   //--- Update weekly equity at Monday UTC 0:00
+   void UpdateWeeklyEquity()
+   {
+      datetime currentWeekStart = GetUTCWeekStart();
+
+      if(currentWeekStart > m_LastWeekUpdate)
+      {
+         m_WeekStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
+         m_LastWeekUpdate = currentWeekStart;
+         PrintFormat("[RiskManager] Weekly equity updated: %.2f", m_WeekStartEquity);
+      }
+   }
+
    //--- Get UTC day start time
    datetime GetUTCDayStart()
    {
@@ -113,6 +135,29 @@ public:
       dt.sec = 0;
 
       return StructToTime(dt);
+   }
+
+   //--- Get UTC week start time (Monday 00:00 UTC)
+   datetime GetUTCWeekStart()
+   {
+      datetime serverTime = TimeCurrent();
+      int gmtOffset = (int)((TimeLocal() - TimeGMT()) / 3600);
+      datetime utcTime = serverTime - gmtOffset * 3600;
+
+      MqlDateTime dt;
+      TimeToStruct(utcTime, dt);
+
+      // day_of_week: 0=Sunday, 1=Monday, ...
+      int daysToSubtract = dt.day_of_week;
+      if(daysToSubtract == 0) daysToSubtract = 7; // Sunday -> subtract 7 days to get previous Monday
+      daysToSubtract -= 1; // Adjust for Monday being 1
+
+      dt.hour = 0;
+      dt.min = 0;
+      dt.sec = 0;
+
+      datetime dayStart = StructToTime(dt);
+      return dayStart - daysToSubtract * 86400;
    }
 
    //--- Get current equity
@@ -140,6 +185,19 @@ public:
       return 0;
    }
 
+   //--- Calculate current weekly loss percentage
+   double GetWeeklyLossPercent()
+   {
+      UpdateWeeklyEquity();
+      double currentEquity = GetCurrentEquity();
+      double loss = m_WeekStartEquity - currentEquity;
+
+      if(m_WeekStartEquity > 0)
+         return (loss / m_WeekStartEquity) * 100.0;
+
+      return 0;
+   }
+
    //--- Calculate total loss percentage from initial balance
    double GetTotalLossPercent()
    {
@@ -158,6 +216,12 @@ public:
       return m_DayStartEquity * (1.0 - m_MaxDailyLossPercent / 100.0);
    }
 
+   //--- Get weekly loss limit
+   double GetWeeklyLossLimit()
+   {
+      return m_WeekStartEquity * (1.0 - m_MaxWeeklyLossPercent / 100.0);
+   }
+
    //--- Get total loss limit (全体失格ライン)
    double GetTotalLossLimit()
    {
@@ -168,9 +232,11 @@ public:
    bool IsTradeAllowed()
    {
       UpdateDailyEquity();
+      UpdateWeeklyEquity();
 
       double currentEquity = GetCurrentEquity();
       double dailyLimit = GetDailyLossLimit();
+      double weeklyLimit = GetWeeklyLossLimit();
       double totalLimit = GetTotalLossLimit();
 
       // Check consecutive loss limit
@@ -186,6 +252,14 @@ public:
       {
          PrintFormat("[RiskManager] BLOCKED: Daily loss limit reached. Equity=%.2f, Limit=%.2f",
                      currentEquity, dailyLimit);
+         return false;
+      }
+
+      // Check weekly loss limit
+      if(currentEquity <= weeklyLimit)
+      {
+         PrintFormat("[RiskManager] BLOCKED: Weekly loss limit reached (%.2f%%). Wait until next week.",
+                     GetWeeklyLossPercent());
          return false;
       }
 
@@ -229,13 +303,11 @@ public:
       if(totalLoss >= m_LotReduction2Threshold)
       {
          // 8%以上損失: ロット25%
-         PrintFormat("[RiskManager] Lot reduction: 25%% (loss=%.2f%%)", totalLoss);
          return m_LotReduction2Factor;
       }
       else if(totalLoss >= m_LotReduction1Threshold)
       {
          // 5%以上損失: ロット50%
-         PrintFormat("[RiskManager] Lot reduction: 50%% (loss=%.2f%%)", totalLoss);
          return m_LotReduction1Factor;
       }
 
@@ -246,15 +318,18 @@ public:
    double GetMaxRiskAmount()
    {
       UpdateDailyEquity();
+      UpdateWeeklyEquity();
 
       double currentEquity = GetCurrentEquity();
       double currentBalance = GetCurrentBalance();
 
       // Calculate remaining risk capacity
       double dailyLimit = GetDailyLossLimit();
+      double weeklyLimit = GetWeeklyLossLimit();
       double totalLimit = GetTotalLossLimit();
 
       double remainingDailyRisk = currentEquity - dailyLimit;
+      double remainingWeeklyRisk = currentEquity - weeklyLimit;
       double remainingTotalRisk = currentEquity - totalLimit;
 
       // Get existing position risk
@@ -264,7 +339,8 @@ public:
       double maxPositionRisk = currentBalance * (m_MaxPositionRiskPercent / 100.0);
 
       // Use the most restrictive limit
-      double maxRisk = MathMin(remainingDailyRisk - existingRisk, remainingTotalRisk - existingRisk);
+      double maxRisk = MathMin(remainingDailyRisk - existingRisk, remainingWeeklyRisk - existingRisk);
+      maxRisk = MathMin(maxRisk, remainingTotalRisk - existingRisk);
       maxRisk = MathMin(maxRisk, maxPositionRisk);
 
       // Apply lot reduction if applicable
@@ -335,9 +411,10 @@ public:
          "ConsecLoss=OFF";
 
       return StringFormat(
-         "Equity=%.0f | DailyLoss=%.2f%% | TotalLoss=%.2f%% | LotMult=%.2f | %s",
+         "Equity=%.0f | DailyLoss=%.2f%% | WeeklyLoss=%.2f%% | TotalLoss=%.2f%% | LotMult=%.2f | %s",
          GetCurrentEquity(),
          GetDailyLossPercent(),
+         GetWeeklyLossPercent(),
          GetTotalLossPercent(),
          GetLotReductionMultiplier(),
          consecLossStr
@@ -347,13 +424,16 @@ public:
    //--- Getters
    double GetInitialBalance() { return m_InitialBalance; }
    double GetDayStartEquity() { return m_DayStartEquity; }
+   double GetWeekStartEquity() { return m_WeekStartEquity; }
    double GetMaxDailyLossPercent() { return m_MaxDailyLossPercent; }
+   double GetMaxWeeklyLossPercent() { return m_MaxWeeklyLossPercent; }
    double GetMaxTotalLossPercent() { return m_MaxTotalLossPercent; }
    double GetMaxPositionRiskPercent() { return m_MaxPositionRiskPercent; }
 
    //--- Setters
    void SetInitialBalance(double balance) { m_InitialBalance = balance; }
    void SetMaxDailyLossPercent(double pct) { m_MaxDailyLossPercent = pct; }
+   void SetMaxWeeklyLossPercent(double pct) { m_MaxWeeklyLossPercent = pct; }
    void SetMaxTotalLossPercent(double pct) { m_MaxTotalLossPercent = pct; }
    void SetMaxPositionRiskPercent(double pct) { m_MaxPositionRiskPercent = pct; }
    void SetMaxConsecutiveLosses(int count) { m_MaxConsecutiveLosses = count; }

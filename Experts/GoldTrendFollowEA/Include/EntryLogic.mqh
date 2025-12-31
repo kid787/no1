@@ -1,8 +1,8 @@
 //+------------------------------------------------------------------+
 //|                                                   EntryLogic.mqh |
-//|        Entry Logic v2.1b - v2.0ベースのシンプルロジック             |
+//|        Entry Logic v2.2 - Fintokei完全対応版                       |
 //|        トレンドフォロー＋押し目/戻り目エントリー                     |
-//|        ※ショート制限オプション追加                                 |
+//|        ADXトレンド強度フィルター追加                                |
 //+------------------------------------------------------------------+
 #ifndef ENTRY_LOGIC_MQH
 #define ENTRY_LOGIC_MQH
@@ -32,8 +32,8 @@ struct EntrySignal
 };
 
 //+------------------------------------------------------------------+
-//| Entry Logic Manager v2.1b                                         |
-//| v2.0ベースのシンプルなトレンドフォローロジック                       |
+//| Entry Logic Manager v2.2                                          |
+//| Fintokei完全対応版 - ADXフィルター付きトレンドフォロー              |
 //+------------------------------------------------------------------+
 class CEntryLogic
 {
@@ -70,7 +70,7 @@ public:
       m_RiskManager = riskManager;
       m_Point = SymbolInfoDouble(symbol, SYMBOL_POINT);
 
-      Print("[EntryLogic] Initialized v2.1b - シンプルトレンドフォロー");
+      Print("[EntryLogic] Initialized v2.2 - Fintokei完全対応版");
       return true;
    }
 
@@ -112,6 +112,13 @@ public:
       if(m_TrendAnalyzer.IsWarState())
       {
          signal.reason = "War state - D1 and H4 conflicting";
+         return signal;
+      }
+
+      // ADX trend strength check - レンジ相場を回避
+      if(!m_TrendAnalyzer.IsTrendStrong())
+      {
+         signal.reason = StringFormat("Weak trend (ADX=%.1f) - Skipping", m_TrendAnalyzer.GetADX_H4());
          return signal;
       }
 

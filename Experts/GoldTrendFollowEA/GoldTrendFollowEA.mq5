@@ -5,13 +5,13 @@
 //+------------------------------------------------------------------+
 //| 概要:                                                             |
 //| - ダウ理論とSMAを用いたマルチタイムフレーム・トレンドフォロー戦略    |
-//| - v2.1b: シンプルトレンドフォロー + Fintokei安全機能               |
-//| - 押し目/戻り目パターン、トレンド継続パターン                       |
-//|   (1日5%損失制限、全体10%損失制限、ポジションリスク3%)            |
+//| - v2.2: Fintokei完全対応版 (10%DD以下目標)                         |
+//| - ADXトレンド強度フィルター、週次損失制限追加                       |
+//|   (1日5%損失制限、全体10%損失制限、週5%損失制限)                   |
 //+------------------------------------------------------------------+
 #property copyright "Gold Trend Follow EA"
 #property link      ""
-#property version   "2.11"
+#property version   "2.20"
 #property strict
 
 //--- Include files
@@ -27,15 +27,16 @@
 //+------------------------------------------------------------------+
 input group "===== 資金管理設定 (Fintokei準拠) ====="
 input double   InpInitialBalance = 0;           // 初期資金 (0=自動取得)
-input double   InpRiskPercent = 1.5;            // 1トレードのリスク率 (%) ※1.5%推奨
+input double   InpRiskPercent = 1.0;            // 1トレードのリスク率 (%) ※1.0%推奨
 input double   InpMaxDailyLoss = 5.0;           // 1日最大損失率 (%)
+input double   InpMaxWeeklyLoss = 5.0;          // 週間最大損失率 (%) ※追加
 input double   InpMaxTotalLoss = 10.0;          // 全体最大損失率 (%)
 input double   InpMaxPositionRisk = 3.0;        // 同時ポジション最大リスク (%)
 input int      InpMaxConsecutiveLosses = 3;     // 連続損失制限 (0=無制限)
 
 input group "===== トレード設定 ====="
 input double   InpMinRiskReward = 1.5;          // 最小リスクリワード比
-input int      InpMaxPositions = 2;             // 最大同時ポジション数
+input int      InpMaxPositions = 1;             // 最大同時ポジション数 ※1推奨
 input int      InpMagicNumber = 123456;         // マジックナンバー
 input string   InpSymbol = "XAUUSD";            // 取引シンボル
 input int      InpSlippage = 30;                // 許容スリッページ (points)
@@ -47,6 +48,11 @@ input bool     InpEnableH4Pullback = true;      // H4押し目・戻り目を有
 input bool     InpEnableH1Pullback = true;      // H1押し目・戻り目を有効化
 input bool     InpEnableD1Pullback = true;      // D1押し目・戻り目を有効化
 input bool     InpEnableH4Reversal = true;      // H4トレンド転換を有効化
+
+input group "===== トレンドフィルター ====="
+input bool     InpUseADXFilter = true;          // ADXフィルターを使用 ※推奨ON
+input int      InpADXPeriod = 14;               // ADX期間
+input double   InpADXMinLevel = 20.0;           // ADX最小値 (これ以下はレンジ)
 
 input group "===== 時間フィルター ====="
 input bool     InpUseTimeFilter = false;        // 時間フィルターを使用
@@ -100,12 +106,13 @@ int OnInit()
       return INIT_FAILED;
    }
    g_RiskManager.SetMaxDailyLossPercent(InpMaxDailyLoss);
+   g_RiskManager.SetMaxWeeklyLossPercent(InpMaxWeeklyLoss);
    g_RiskManager.SetMaxTotalLossPercent(InpMaxTotalLoss);
    g_RiskManager.SetMaxPositionRiskPercent(InpMaxPositionRisk);
    g_RiskManager.SetMaxConsecutiveLosses(InpMaxConsecutiveLosses);
 
    //--- Initialize Trend Analyzer
-   if(!g_TrendAnalyzer.Initialize(g_Symbol))
+   if(!g_TrendAnalyzer.Initialize(g_Symbol, InpUseADXFilter, InpADXPeriod, InpADXMinLevel))
    {
       Print("[EA] Error: Failed to initialize Trend Analyzer");
       return INIT_FAILED;
@@ -129,16 +136,18 @@ int OnInit()
    g_LastBarTime = 0;
    g_IsInitialized = true;
 
-   PrintFormat("[EA] ===== Gold Trend Follow EA v2.1b Initialized =====");
+   PrintFormat("[EA] ===== Gold Trend Follow EA v2.2 Initialized =====");
    PrintFormat("[EA] Symbol: %s", g_Symbol);
-   PrintFormat("[EA] Risk: %.2f%% | MaxDaily: %.2f%% | MaxTotal: %.2f%%",
-               InpRiskPercent, InpMaxDailyLoss, InpMaxTotalLoss);
+   PrintFormat("[EA] Risk: %.2f%% | MaxDaily: %.2f%% | MaxWeekly: %.2f%% | MaxTotal: %.2f%%",
+               InpRiskPercent, InpMaxDailyLoss, InpMaxWeeklyLoss, InpMaxTotalLoss);
    PrintFormat("[EA] Min RR: %.2f | Max Positions: %d | Max Consec Loss: %d",
                InpMinRiskReward, InpMaxPositions, InpMaxConsecutiveLosses);
-   PrintFormat("[EA] Long: %s | Short: %s",
+   PrintFormat("[EA] Long: %s | Short: %s | ADX Filter: %s (Min: %.1f)",
                InpEnableLongTrades ? "ON" : "OFF",
-               InpEnableShortTrades ? "ON" : "OFF");
-   PrintFormat("[EA] ================================================");
+               InpEnableShortTrades ? "ON" : "OFF",
+               InpUseADXFilter ? "ON" : "OFF",
+               InpADXMinLevel);
+   PrintFormat("[EA] ==================================================");
 
    return INIT_SUCCEEDED;
 }

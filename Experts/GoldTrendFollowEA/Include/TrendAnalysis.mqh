@@ -1,7 +1,7 @@
 //+------------------------------------------------------------------+
 //|                                                TrendAnalysis.mqh |
-//|        Dow Theory & SMA Multi-Timeframe Trend Analysis v2.1      |
-//|        参考資料に基づく収束→拡散 & ダウ転換ロジック                  |
+//|        Dow Theory & SMA Multi-Timeframe Trend Analysis v2.2      |
+//|        ADXトレンド強度フィルター追加                                |
 //+------------------------------------------------------------------+
 #ifndef TREND_ANALYSIS_MQH
 #define TREND_ANALYSIS_MQH
@@ -86,7 +86,7 @@ public:
       m_PrevGapH1 = GetMAGap(PERIOD_H1);
       m_PrevGapH4 = GetMAGap(PERIOD_H4);
 
-      Print("[SMAManager] Initialized v3.0");
+      Print("[SMAManager] Initialized v2.2");
       return true;
    }
 
@@ -414,7 +414,7 @@ public:
 };
 
 //+------------------------------------------------------------------+
-//| Main Trend Analyzer v3.0                                          |
+//| Main Trend Analyzer v2.2 with ADX Filter                          |
 //+------------------------------------------------------------------+
 class CTrendAnalyzer
 {
@@ -429,6 +429,15 @@ private:
 
    bool              m_IsWarState;
 
+   // ADX Filter
+   bool              m_UseADXFilter;
+   int               m_ADXPeriod;
+   double            m_ADXMinLevel;
+   int               m_HandleADX_H4;
+   int               m_HandleADX_H1;
+   double            m_CurrentADX_H4;
+   double            m_CurrentADX_H1;
+
 public:
    CTrendAnalyzer()
    {
@@ -437,11 +446,22 @@ public:
       m_TrendH4 = TREND_NEUTRAL;
       m_TrendH1 = TREND_NEUTRAL;
       m_IsWarState = false;
+
+      m_UseADXFilter = true;
+      m_ADXPeriod = 14;
+      m_ADXMinLevel = 20.0;
+      m_HandleADX_H4 = INVALID_HANDLE;
+      m_HandleADX_H1 = INVALID_HANDLE;
+      m_CurrentADX_H4 = 0;
+      m_CurrentADX_H1 = 0;
    }
 
-   bool Initialize(string symbol)
+   bool Initialize(string symbol, bool useADX = true, int adxPeriod = 14, double adxMinLevel = 20.0)
    {
       m_Symbol = symbol;
+      m_UseADXFilter = useADX;
+      m_ADXPeriod = adxPeriod;
+      m_ADXMinLevel = adxMinLevel;
 
       if(!m_SMAManager.Initialize(symbol))
          return false;
@@ -449,13 +469,30 @@ public:
       if(!m_SwingDetector.Initialize(symbol))
          return false;
 
-      Print("[TrendAnalyzer] Initialized v3.0");
+      // Initialize ADX indicators
+      if(m_UseADXFilter)
+      {
+         m_HandleADX_H4 = iADX(symbol, PERIOD_H4, m_ADXPeriod);
+         m_HandleADX_H1 = iADX(symbol, PERIOD_H1, m_ADXPeriod);
+
+         if(m_HandleADX_H4 == INVALID_HANDLE || m_HandleADX_H1 == INVALID_HANDLE)
+         {
+            Print("[TrendAnalyzer] Failed to create ADX handles");
+            return false;
+         }
+         PrintFormat("[TrendAnalyzer] ADX Filter enabled (Period=%d, MinLevel=%.1f)",
+                     m_ADXPeriod, m_ADXMinLevel);
+      }
+
+      Print("[TrendAnalyzer] Initialized v2.2");
       return true;
    }
 
    void Deinitialize()
    {
       m_SMAManager.Deinitialize();
+      if(m_HandleADX_H4 != INVALID_HANDLE) IndicatorRelease(m_HandleADX_H4);
+      if(m_HandleADX_H1 != INVALID_HANDLE) IndicatorRelease(m_HandleADX_H1);
    }
 
    void Update()
@@ -465,9 +502,40 @@ public:
       m_TrendH4 = m_SMAManager.GetMADirection(PERIOD_H4);
       m_TrendH1 = m_SMAManager.GetMADirection(PERIOD_H1);
 
+      // Update ADX values
+      if(m_UseADXFilter)
+      {
+         m_CurrentADX_H4 = GetADXValue(m_HandleADX_H4);
+         m_CurrentADX_H1 = GetADXValue(m_HandleADX_H1);
+      }
+
       UpdateWarState();
       m_SMAManager.UpdateState();
    }
+
+   //--- Get ADX value from handle
+   double GetADXValue(int handle, int shift = 0)
+   {
+      double buffer[];
+      ArraySetAsSeries(buffer, true);
+      if(CopyBuffer(handle, 0, shift, 1, buffer) != 1)
+         return 0;
+      return buffer[0];
+   }
+
+   //--- Check if trend is strong enough (ADX above minimum)
+   bool IsTrendStrong()
+   {
+      if(!m_UseADXFilter)
+         return true;  // No filter = always strong
+
+      // H4のADXがMinLevel以上ならトレンドあり
+      return (m_CurrentADX_H4 >= m_ADXMinLevel);
+   }
+
+   //--- Get current ADX values
+   double GetADX_H4() { return m_CurrentADX_H4; }
+   double GetADX_H1() { return m_CurrentADX_H1; }
 
    //--- Get trend from price position relative to SMA
    ENUM_TREND_DIRECTION GetTrendFromPrice(ENUM_TIMEFRAMES tf)
@@ -514,11 +582,24 @@ public:
 
    string GetTrendString()
    {
-      return StringFormat("D1=%s | H4=%s | H1=%s | War=%s",
-                          TrendToString(m_TrendD1),
-                          TrendToString(m_TrendH4),
-                          TrendToString(m_TrendH1),
-                          m_IsWarState ? "YES" : "NO");
+      if(m_UseADXFilter)
+      {
+         return StringFormat("D1=%s | H4=%s | H1=%s | War=%s | ADX(H4)=%.1f%s",
+                             TrendToString(m_TrendD1),
+                             TrendToString(m_TrendH4),
+                             TrendToString(m_TrendH1),
+                             m_IsWarState ? "YES" : "NO",
+                             m_CurrentADX_H4,
+                             IsTrendStrong() ? "" : " [WEAK]");
+      }
+      else
+      {
+         return StringFormat("D1=%s | H4=%s | H1=%s | War=%s",
+                             TrendToString(m_TrendD1),
+                             TrendToString(m_TrendH4),
+                             TrendToString(m_TrendH1),
+                             m_IsWarState ? "YES" : "NO");
+      }
    }
 
    string TrendToString(ENUM_TREND_DIRECTION trend)
