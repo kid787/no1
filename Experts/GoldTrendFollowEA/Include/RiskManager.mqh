@@ -1,16 +1,17 @@
 //+------------------------------------------------------------------+
 //|                                                  RiskManager.mqh |
-//|                     Fintokei Risk Management for Gold EA         |
+//|                     Fintokei Risk Management for Gold EA v2.1    |
 //+------------------------------------------------------------------+
 #ifndef RISK_MANAGER_MQH
 #define RISK_MANAGER_MQH
 
 //+------------------------------------------------------------------+
-//| Fintokei Risk Management Class                                   |
+//| Fintokei Risk Management Class v2.1                              |
 //| - 1日最大損失5%ルール (UTC 0時基準)                               |
 //| - 全体最大損失10%ルール (初期資金基準)                             |
 //| - ポジションリスク最大3%                                          |
 //| - 段階的ロット削減 (5%損失で50%減、8%損失で更に50%減)              |
+//| - 連続損失制限 (連敗でトレード停止)                                |
 //+------------------------------------------------------------------+
 class CRiskManager
 {
@@ -27,6 +28,11 @@ private:
    double            m_LotReduction2Threshold;  // ロット削減2閾値 (8%)
    double            m_LotReduction1Factor;     // ロット削減1係数 (0.5)
    double            m_LotReduction2Factor;     // ロット削減2係数 (0.25)
+
+   // 連続損失制限
+   int               m_MaxConsecutiveLosses;    // 連続損失上限 (0=無制限)
+   int               m_CurrentConsecutiveLosses;// 現在の連続損失カウント
+   datetime          m_ConsecutiveLossResetTime;// 連続損失リセット時刻
 
    bool              m_IsInitialized;
 
@@ -46,6 +52,10 @@ public:
       m_LotReduction2Threshold = 8.0;
       m_LotReduction1Factor = 0.5;
       m_LotReduction2Factor = 0.25;
+
+      m_MaxConsecutiveLosses = 3;
+      m_CurrentConsecutiveLosses = 0;
+      m_ConsecutiveLossResetTime = 0;
 
       m_IsInitialized = false;
    }
@@ -77,6 +87,13 @@ public:
       {
          m_DayStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
          m_LastDayUpdate = currentDayStart;
+
+         // 連続損失カウントも日次リセット
+         if(m_CurrentConsecutiveLosses > 0)
+         {
+            PrintFormat("[RiskManager] Consecutive loss count reset (was %d)", m_CurrentConsecutiveLosses);
+            m_CurrentConsecutiveLosses = 0;
+         }
 
          PrintFormat("[RiskManager] Daily equity updated: %.2f", m_DayStartEquity);
       }
@@ -155,6 +172,14 @@ public:
       double currentEquity = GetCurrentEquity();
       double dailyLimit = GetDailyLossLimit();
       double totalLimit = GetTotalLossLimit();
+
+      // Check consecutive loss limit
+      if(m_MaxConsecutiveLosses > 0 && m_CurrentConsecutiveLosses >= m_MaxConsecutiveLosses)
+      {
+         PrintFormat("[RiskManager] BLOCKED: Consecutive loss limit reached (%d/%d). Wait for next day.",
+                     m_CurrentConsecutiveLosses, m_MaxConsecutiveLosses);
+         return false;
+      }
 
       // Check daily loss limit
       if(currentEquity <= dailyLimit)
@@ -272,17 +297,50 @@ public:
       return totalRisk;
    }
 
+   //--- Record trade result (call after trade closes)
+   void RecordTradeResult(double profit)
+   {
+      if(profit < 0)
+      {
+         m_CurrentConsecutiveLosses++;
+         PrintFormat("[RiskManager] Trade LOSS recorded. Consecutive losses: %d/%d",
+                     m_CurrentConsecutiveLosses, m_MaxConsecutiveLosses);
+      }
+      else
+      {
+         if(m_CurrentConsecutiveLosses > 0)
+         {
+            PrintFormat("[RiskManager] Trade WIN recorded. Consecutive loss streak reset (was %d)",
+                        m_CurrentConsecutiveLosses);
+         }
+         m_CurrentConsecutiveLosses = 0;
+      }
+   }
+
+   //--- Get current consecutive losses
+   int GetCurrentConsecutiveLosses() { return m_CurrentConsecutiveLosses; }
+
+   //--- Check if consecutive loss limit is near
+   bool IsNearConsecutiveLossLimit()
+   {
+      if(m_MaxConsecutiveLosses <= 0) return false;
+      return m_CurrentConsecutiveLosses >= (m_MaxConsecutiveLosses - 1);
+   }
+
    //--- Get status string for logging
    string GetStatusString()
    {
+      string consecLossStr = (m_MaxConsecutiveLosses > 0) ?
+         StringFormat("ConsecLoss=%d/%d", m_CurrentConsecutiveLosses, m_MaxConsecutiveLosses) :
+         "ConsecLoss=OFF";
+
       return StringFormat(
-         "InitialBal=%.0f | DayStart=%.0f | Equity=%.0f | DailyLoss=%.2f%% | TotalLoss=%.2f%% | LotMult=%.2f",
-         m_InitialBalance,
-         m_DayStartEquity,
+         "Equity=%.0f | DailyLoss=%.2f%% | TotalLoss=%.2f%% | LotMult=%.2f | %s",
          GetCurrentEquity(),
          GetDailyLossPercent(),
          GetTotalLossPercent(),
-         GetLotReductionMultiplier()
+         GetLotReductionMultiplier(),
+         consecLossStr
       );
    }
 
@@ -298,6 +356,7 @@ public:
    void SetMaxDailyLossPercent(double pct) { m_MaxDailyLossPercent = pct; }
    void SetMaxTotalLossPercent(double pct) { m_MaxTotalLossPercent = pct; }
    void SetMaxPositionRiskPercent(double pct) { m_MaxPositionRiskPercent = pct; }
+   void SetMaxConsecutiveLosses(int count) { m_MaxConsecutiveLosses = count; }
 };
 
 #endif // RISK_MANAGER_MQH

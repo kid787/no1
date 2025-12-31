@@ -1,9 +1,10 @@
 //+------------------------------------------------------------------+
 //|                                                   EntryLogic.mqh |
-//|        Entry Logic v3.0 - 参考資料に基づくエントリー条件            |
+//|        Entry Logic v2.1 - Fintokei最適化版                         |
 //|        ★この2つが揃った時のみエントリー★                          |
 //|        ①MAが収束→拡散していく所                                   |
 //|        ②上位足の方向に下位足がトレンド転換してくる所                |
+//|        ※ショート制限オプション追加                                 |
 //+------------------------------------------------------------------+
 #ifndef ENTRY_LOGIC_MQH
 #define ENTRY_LOGIC_MQH
@@ -32,8 +33,8 @@ struct EntrySignal
 };
 
 //+------------------------------------------------------------------+
-//| Entry Logic Manager v3.0                                          |
-//| 参考資料に基づく「2条件同時成立」エントリー                         |
+//| Entry Logic Manager v2.1                                          |
+//| Fintokei最適化版「2条件同時成立」エントリー                         |
 //+------------------------------------------------------------------+
 class CEntryLogic
 {
@@ -46,6 +47,10 @@ private:
    double            m_MinSLPoints;
    double            m_DefaultSLPoints;
 
+   // Trade direction control
+   bool              m_EnableLongTrades;
+   bool              m_EnableShortTrades;
+
 public:
    CEntryLogic()
    {
@@ -55,6 +60,8 @@ public:
       m_Point = 0;
       m_MinSLPoints = 100.0;
       m_DefaultSLPoints = 300.0;
+      m_EnableLongTrades = true;
+      m_EnableShortTrades = false;  // Default: OFF for Fintokei
    }
 
    bool Initialize(string symbol, CTrendAnalyzer* trendAnalyzer, CRiskManager* riskManager)
@@ -64,8 +71,18 @@ public:
       m_RiskManager = riskManager;
       m_Point = SymbolInfoDouble(symbol, SYMBOL_POINT);
 
-      Print("[EntryLogic] Initialized v3.0 - 2条件同時成立ロジック");
+      Print("[EntryLogic] Initialized v2.1 - Fintokei最適化版");
       return true;
+   }
+
+   //--- Set trade direction enable/disable
+   void SetTradeDirections(bool enableLong, bool enableShort)
+   {
+      m_EnableLongTrades = enableLong;
+      m_EnableShortTrades = enableShort;
+      PrintFormat("[EntryLogic] Trade directions: Long=%s, Short=%s",
+                  enableLong ? "ON" : "OFF",
+                  enableShort ? "ON" : "OFF");
    }
 
    void UpdateState()
@@ -130,7 +147,7 @@ public:
       // 1. H4(上位足)が上向き
       // 2. H1のMAが収束→拡散（条件①）
       // 3. H1で高値ブレイク（ダウ転換、条件②）
-      if(h4Trend == TREND_UP && d1Trend != TREND_DOWN)
+      if(m_EnableLongTrades && h4Trend == TREND_UP && d1Trend != TREND_DOWN)
       {
          // 条件①: H1のMA収束→拡散
          bool maCondition = sma.IsConvergenceToDivergenceTransition(PERIOD_H1);
@@ -144,6 +161,7 @@ public:
                      dowCondition ? "YES" : "NO");
 
          // ★2つの条件が揃った時のみエントリー★
+         // v2.1: フォールバック条件を削除（条件が緩すぎてパフォーマンス悪化のため）
          if(maCondition && dowCondition)
          {
             signal.direction = TREND_UP;
@@ -158,26 +176,13 @@ public:
 
             return signal;
          }
-
-         // 条件①だけ成立の場合も軽めのエントリー（オプション）
-         // MAの拡散だけでも方向は合っているので
-         if(maCondition && sma.AreSMAsAligned(PERIOD_H1, TREND_UP))
-         {
-            signal.direction = TREND_UP;
-            signal.entryPrice = ask;
-            signal.stopLoss = GetStopLoss(TREND_UP, PERIOD_H1);
-            signal.takeProfit = GetTakeProfit(TREND_UP, signal.entryPrice, signal.stopLoss);
-            signal.valid = true;
-            signal.reason = "BUY: H4 UP + H1 MA収束→拡散 (ダウ転換なし)";
-            return signal;
-         }
       }
 
       //=== SELL CONDITION ===
       // 1. H4(上位足)が下向き
       // 2. H1のMAが収束→拡散（条件①）
       // 3. H1で安値ブレイク（ダウ転換、条件②）
-      if(h4Trend == TREND_DOWN && d1Trend != TREND_UP)
+      if(m_EnableShortTrades && h4Trend == TREND_DOWN && d1Trend != TREND_UP)
       {
          // 条件①: H1のMA収束→拡散
          bool maCondition = sma.IsConvergenceToDivergenceTransition(PERIOD_H1);
@@ -191,6 +196,7 @@ public:
                      dowCondition ? "YES" : "NO");
 
          // ★2つの条件が揃った時のみエントリー★
+         // v2.1: フォールバック条件を削除（条件が緩すぎてパフォーマンス悪化のため）
          if(maCondition && dowCondition)
          {
             signal.direction = TREND_DOWN;
@@ -203,18 +209,6 @@ public:
             PrintFormat("[Entry] ★SIGNAL★ %s | Entry=%.5f, SL=%.5f, TP=%.5f",
                         signal.reason, signal.entryPrice, signal.stopLoss, signal.takeProfit);
 
-            return signal;
-         }
-
-         // 条件①だけ成立の場合も軽めのエントリー（オプション）
-         if(maCondition && sma.AreSMAsAligned(PERIOD_H1, TREND_DOWN))
-         {
-            signal.direction = TREND_DOWN;
-            signal.entryPrice = bid;
-            signal.stopLoss = GetStopLoss(TREND_DOWN, PERIOD_H1);
-            signal.takeProfit = GetTakeProfit(TREND_DOWN, signal.entryPrice, signal.stopLoss);
-            signal.valid = true;
-            signal.reason = "SELL: H4 DOWN + H1 MA収束→拡散 (ダウ転換なし)";
             return signal;
          }
       }

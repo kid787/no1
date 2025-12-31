@@ -1,6 +1,6 @@
 //+------------------------------------------------------------------+
 //|                                                TrendAnalysis.mqh |
-//|        Dow Theory & SMA Multi-Timeframe Trend Analysis v3.0      |
+//|        Dow Theory & SMA Multi-Timeframe Trend Analysis v2.1      |
 //|        参考資料に基づく収束→拡散 & ダウ転換ロジック                  |
 //+------------------------------------------------------------------+
 #ifndef TREND_ANALYSIS_MQH

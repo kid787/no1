@@ -5,13 +5,13 @@
 //+------------------------------------------------------------------+
 //| 概要:                                                             |
 //| - ダウ理論とSMAを用いたマルチタイムフレーム・トレンドフォロー戦略    |
-//| - 4つの鉄板エントリーパターン                                      |
-//| - Fintokei資金管理ルール完全準拠                                  |
+//| - v2.1: Fintokei最適化版                                          |
+//| - 連続損失制限、ショート制限、低リスク設定                         |
 //|   (1日5%損失制限、全体10%損失制限、ポジションリスク3%)            |
 //+------------------------------------------------------------------+
 #property copyright "Gold Trend Follow EA"
 #property link      ""
-#property version   "3.00"
+#property version   "2.10"
 #property strict
 
 //--- Include files
@@ -25,12 +25,13 @@
 //+------------------------------------------------------------------+
 //| Input Parameters                                                  |
 //+------------------------------------------------------------------+
-input group "===== 資金管理設定 ====="
+input group "===== 資金管理設定 (Fintokei準拠) ====="
 input double   InpInitialBalance = 0;           // 初期資金 (0=自動取得)
-input double   InpRiskPercent = 2.0;            // 1トレードのリスク率 (%)
+input double   InpRiskPercent = 1.5;            // 1トレードのリスク率 (%) ※1.5%推奨
 input double   InpMaxDailyLoss = 5.0;           // 1日最大損失率 (%)
 input double   InpMaxTotalLoss = 10.0;          // 全体最大損失率 (%)
 input double   InpMaxPositionRisk = 3.0;        // 同時ポジション最大リスク (%)
+input int      InpMaxConsecutiveLosses = 3;     // 連続損失制限 (0=無制限)
 
 input group "===== トレード設定 ====="
 input double   InpMinRiskReward = 1.5;          // 最小リスクリワード比
@@ -40,6 +41,8 @@ input string   InpSymbol = "XAUUSD";            // 取引シンボル
 input int      InpSlippage = 30;                // 許容スリッページ (points)
 
 input group "===== エントリー設定 ====="
+input bool     InpEnableLongTrades = true;      // ロング（買い）を有効化
+input bool     InpEnableShortTrades = false;    // ショート（売り）を有効化 ※OFF推奨
 input bool     InpEnableH4Pullback = true;      // H4押し目・戻り目を有効化
 input bool     InpEnableH1Pullback = true;      // H1押し目・戻り目を有効化
 input bool     InpEnableD1Pullback = true;      // D1押し目・戻り目を有効化
@@ -99,6 +102,7 @@ int OnInit()
    g_RiskManager.SetMaxDailyLossPercent(InpMaxDailyLoss);
    g_RiskManager.SetMaxTotalLossPercent(InpMaxTotalLoss);
    g_RiskManager.SetMaxPositionRiskPercent(InpMaxPositionRisk);
+   g_RiskManager.SetMaxConsecutiveLosses(InpMaxConsecutiveLosses);
 
    //--- Initialize Trend Analyzer
    if(!g_TrendAnalyzer.Initialize(g_Symbol))
@@ -113,6 +117,7 @@ int OnInit()
       Print("[EA] Error: Failed to initialize Entry Logic");
       return INIT_FAILED;
    }
+   g_EntryLogic.SetTradeDirections(InpEnableLongTrades, InpEnableShortTrades);
 
    //--- Initialize Lot Calculator
    if(!g_LotCalculator.Initialize(g_Symbol, &g_RiskManager, InpRiskPercent))
@@ -124,13 +129,16 @@ int OnInit()
    g_LastBarTime = 0;
    g_IsInitialized = true;
 
-   PrintFormat("[EA] ===== Gold Trend Follow EA Initialized =====");
+   PrintFormat("[EA] ===== Gold Trend Follow EA v2.1 Initialized =====");
    PrintFormat("[EA] Symbol: %s", g_Symbol);
    PrintFormat("[EA] Risk: %.2f%% | MaxDaily: %.2f%% | MaxTotal: %.2f%%",
                InpRiskPercent, InpMaxDailyLoss, InpMaxTotalLoss);
-   PrintFormat("[EA] Min RR: %.2f | Max Positions: %d",
-               InpMinRiskReward, InpMaxPositions);
-   PrintFormat("[EA] ==============================================");
+   PrintFormat("[EA] Min RR: %.2f | Max Positions: %d | Max Consec Loss: %d",
+               InpMinRiskReward, InpMaxPositions, InpMaxConsecutiveLosses);
+   PrintFormat("[EA] Long: %s | Short: %s",
+               InpEnableLongTrades ? "ON" : "OFF",
+               InpEnableShortTrades ? "ON" : "OFF");
+   PrintFormat("[EA] ================================================");
 
    return INIT_SUCCEEDED;
 }
@@ -419,6 +427,57 @@ void OnTimer()
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
 {
    // Can be used for manual controls or visualization
+}
+
+//+------------------------------------------------------------------+
+//| Trade transaction handler - track consecutive losses              |
+//+------------------------------------------------------------------+
+void OnTradeTransaction(const MqlTradeTransaction& trans,
+                        const MqlTradeRequest& request,
+                        const MqlTradeResult& result)
+{
+   // Only process deal additions (trade closures)
+   if(trans.type != TRADE_TRANSACTION_DEAL_ADD)
+      return;
+
+   // Check if this is our deal
+   if(trans.symbol != g_Symbol)
+      return;
+
+   // Get deal info
+   ulong dealTicket = trans.deal;
+   if(dealTicket == 0)
+      return;
+
+   // Select the deal
+   if(!HistoryDealSelect(dealTicket))
+      return;
+
+   // Check magic number
+   long magic = HistoryDealGetInteger(dealTicket, DEAL_MAGIC);
+   if(magic != InpMagicNumber)
+      return;
+
+   // Check if this is a closing deal (OUT or IN_OUT)
+   ENUM_DEAL_ENTRY entry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(dealTicket, DEAL_ENTRY);
+   if(entry != DEAL_ENTRY_OUT && entry != DEAL_ENTRY_INOUT)
+      return;
+
+   // Get profit
+   double profit = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+   double commission = HistoryDealGetDouble(dealTicket, DEAL_COMMISSION);
+   double swap = HistoryDealGetDouble(dealTicket, DEAL_SWAP);
+   double totalPnL = profit + commission + swap;
+
+   // Record trade result
+   g_RiskManager.RecordTradeResult(totalPnL);
+
+   if(InpDebugMode)
+   {
+      PrintFormat("[EA] Trade closed: Profit=%.2f, Total=%.2f | %s",
+                  profit, totalPnL,
+                  totalPnL >= 0 ? "WIN" : "LOSS");
+   }
 }
 
 //+------------------------------------------------------------------+
