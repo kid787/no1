@@ -17,7 +17,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Gold Trend Follow EA"
 #property link      ""
-#property version   "2.30"
+#property version   "2.31"
 #property strict
 
 //--- Include files
@@ -44,7 +44,7 @@ input group "===== トレード設定 ====="
 input double   InpMinRiskReward = 1.5;          // 最小リスクリワード比
 input int      InpMaxPositions = 1;             // 最大同時ポジション数 ※1推奨
 input int      InpMagicNumber = 123456;         // マジックナンバー
-input string   InpSymbol = "XAUUSD";            // 取引シンボル
+input string   InpSymbol = "";                  // 取引シンボル (空=チャートシンボル自動)
 input int      InpSlippage = 30;                // 許容スリッページ (points)
 
 input group "===== エントリー設定 ====="
@@ -142,7 +142,7 @@ int OnInit()
    g_LastBarTime = 0;
    g_IsInitialized = true;
 
-   PrintFormat("[EA] ===== Gold Trend Follow EA v2.3 Initialized =====");
+   PrintFormat("[EA] ===== Gold Trend Follow EA v2.31 Initialized =====");
    PrintFormat("[EA] Symbol: %s", g_Symbol);
    PrintFormat("[EA] Risk: %.2f%% | MaxDaily: %.2f%% | MaxWeekly: %.2f%% | MaxTotal: %.2f%%",
                InpRiskPercent, InpMaxDailyLoss, InpMaxWeeklyLoss, InpMaxTotalLoss);
