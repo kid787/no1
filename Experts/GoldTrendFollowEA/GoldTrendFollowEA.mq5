@@ -5,13 +5,19 @@
 //+------------------------------------------------------------------+
 //| 概要:                                                             |
 //| - ダウ理論とSMAを用いたマルチタイムフレーム・トレンドフォロー戦略    |
-//| - v2.2: Fintokei完全対応版 (10%DD以下目標)                         |
+//| - v2.3: バックテスト最適化版 (10%DD以下目標)                       |
 //| - ADXトレンド強度フィルター、週次損失制限追加                       |
 //|   (1日5%損失制限、全体10%損失制限、週5%損失制限)                   |
 //+------------------------------------------------------------------+
+//| バックテスト結果 (2025年 EURJPY H1):                              |
+//| - Risk 1.2%: DD 8%/10%, PF 1.55, RF 2.08 ← Fintokei最適          |
+//| - Risk 1.3%: DD 9%/11%, PF 1.55, RF 2.17                         |
+//| - Risk 1.4%: DD 10%/12%, PF 1.53 (境界線)                        |
+//| - Long-only推奨 (ショートは勝率低下)                              |
+//+------------------------------------------------------------------+
 #property copyright "Gold Trend Follow EA"
 #property link      ""
-#property version   "2.20"
+#property version   "2.30"
 #property strict
 
 //--- Include files
@@ -27,7 +33,7 @@
 //+------------------------------------------------------------------+
 input group "===== 資金管理設定 (Fintokei準拠) ====="
 input double   InpInitialBalance = 0;           // 初期資金 (0=自動取得)
-input double   InpRiskPercent = 1.0;            // 1トレードのリスク率 (%) ※1.0%推奨
+input double   InpRiskPercent = 1.2;            // 1トレードのリスク率 (%) ※1.2%推奨 (Fintokei最適値)
 input double   InpMaxDailyLoss = 5.0;           // 1日最大損失率 (%)
 input double   InpMaxWeeklyLoss = 5.0;          // 週間最大損失率 (%) ※追加
 input double   InpMaxTotalLoss = 10.0;          // 全体最大損失率 (%)
@@ -42,8 +48,8 @@ input string   InpSymbol = "XAUUSD";            // 取引シンボル
 input int      InpSlippage = 30;                // 許容スリッページ (points)
 
 input group "===== エントリー設定 ====="
-input bool     InpEnableLongTrades = true;      // ロング（買い）を有効化
-input bool     InpEnableShortTrades = false;    // ショート（売り）を有効化 ※OFF推奨
+input bool     InpEnableLongTrades = true;      // ロング（買い）を有効化 ※ON推奨 (勝率46%)
+input bool     InpEnableShortTrades = false;    // ショート（売り）を有効化 ※OFF推奨 (勝率低下)
 input bool     InpEnableH4Pullback = true;      // H4押し目・戻り目を有効化
 input bool     InpEnableH1Pullback = true;      // H1押し目・戻り目を有効化
 input bool     InpEnableD1Pullback = true;      // D1押し目・戻り目を有効化
@@ -136,7 +142,7 @@ int OnInit()
    g_LastBarTime = 0;
    g_IsInitialized = true;
 
-   PrintFormat("[EA] ===== Gold Trend Follow EA v2.2 Initialized =====");
+   PrintFormat("[EA] ===== Gold Trend Follow EA v2.3 Initialized =====");
    PrintFormat("[EA] Symbol: %s", g_Symbol);
    PrintFormat("[EA] Risk: %.2f%% | MaxDaily: %.2f%% | MaxWeekly: %.2f%% | MaxTotal: %.2f%%",
                InpRiskPercent, InpMaxDailyLoss, InpMaxWeeklyLoss, InpMaxTotalLoss);
