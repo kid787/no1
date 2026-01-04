@@ -17,7 +17,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Gold Trend Follow EA"
 #property link      ""
-#property version   "2.31"
+#property version   "2.40"
 #property strict
 
 //--- Include files
@@ -55,6 +55,12 @@ input bool     InpEnableH1Pullback = true;      // H1押し目・戻り目を有
 input bool     InpEnableD1Pullback = true;      // D1押し目・戻り目を有効化
 input bool     InpEnableH4Reversal = true;      // H4トレンド転換を有効化
 
+input group "===== 分割決済設定 ====="
+input bool     InpEnablePartialTP = true;       // 分割決済を有効化
+input ENUM_TIMEFRAMES InpTP1Timeframe = PERIOD_H1;   // TP1 時間足 (直近高値/安値)
+input int      InpTP1ClosePercent = 50;         // TP1 決済割合 (%)
+input ENUM_TIMEFRAMES InpTP2Timeframe = PERIOD_H4;   // TP2 時間足 (直近高値/安値)
+
 input group "===== トレンドフィルター ====="
 input bool     InpUseADXFilter = true;          // ADXフィルターを使用 ※推奨ON
 input int      InpADXPeriod = 14;               // ADX期間
@@ -80,6 +86,17 @@ CLotCalculator g_LotCalculator;
 string         g_Symbol;
 datetime       g_LastBarTime;
 bool           g_IsInitialized;
+
+//--- 分割決済用: TP1目標価格を保存 (ポジションチケット, TP1価格)
+struct PartialTPInfo
+{
+   ulong  ticket;
+   double tp1Price;
+   double tp2Price;
+   bool   tp1Hit;       // TP1で部分決済済みフラグ
+   double originalLots; // 元のロットサイズ
+};
+PartialTPInfo g_PartialTPList[];  // 動的配列
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
@@ -142,7 +159,7 @@ int OnInit()
    g_LastBarTime = 0;
    g_IsInitialized = true;
 
-   PrintFormat("[EA] ===== Gold Trend Follow EA v2.31 Initialized =====");
+   PrintFormat("[EA] ===== Gold Trend Follow EA v2.4 Initialized =====");
    PrintFormat("[EA] Symbol: %s", g_Symbol);
    PrintFormat("[EA] Risk: %.2f%% | MaxDaily: %.2f%% | MaxWeekly: %.2f%% | MaxTotal: %.2f%%",
                InpRiskPercent, InpMaxDailyLoss, InpMaxWeeklyLoss, InpMaxTotalLoss);
@@ -153,6 +170,12 @@ int OnInit()
                InpEnableShortTrades ? "ON" : "OFF",
                InpUseADXFilter ? "ON" : "OFF",
                InpADXMinLevel);
+   if(InpEnablePartialTP)
+   {
+      PrintFormat("[EA] Partial TP: ON | TP1=%s (%d%%) | TP2=%s",
+                  EnumToString(InpTP1Timeframe), InpTP1ClosePercent,
+                  EnumToString(InpTP2Timeframe));
+   }
    PrintFormat("[EA] ==================================================");
 
    return INIT_SUCCEEDED;
@@ -183,6 +206,12 @@ void OnTick()
    {
       CloseAllPositions("Risk limit reached");
       return;
+   }
+
+   //--- ★分割決済チェック (毎ティック実行)★
+   if(InpEnablePartialTP)
+   {
+      CheckPartialTakeProfit();
    }
 
    //--- Only process on new bar (H1)
@@ -228,6 +257,24 @@ void OnTick()
       if(InpDebugMode && signal.reason != "")
          PrintFormat("[EA] No signal: %s", signal.reason);
       return;
+   }
+
+   //--- ★分割決済用: TP1/TP2を計算★
+   if(InpEnablePartialTP)
+   {
+      signal.takeProfit1 = g_EntryLogic.CalculateTPByTimeframe(signal.direction, InpTP1Timeframe, signal.entryPrice);
+      signal.takeProfit2 = g_EntryLogic.CalculateTPByTimeframe(signal.direction, InpTP2Timeframe, signal.entryPrice);
+
+      // TP2が有効ならTPとして設定
+      if(signal.takeProfit2 > 0)
+         signal.takeProfit = signal.takeProfit2;
+
+      if(InpDebugMode)
+      {
+         PrintFormat("[EA] Partial TP: TP1=%.5f (%s) | TP2=%.5f (%s)",
+                     signal.takeProfit1, EnumToString(InpTP1Timeframe),
+                     signal.takeProfit2, EnumToString(InpTP2Timeframe));
+      }
    }
 
    //--- Check minimum RR
@@ -278,6 +325,19 @@ bool ExecuteTrade(EntrySignal &signal, double lots)
       PrintFormat("[EA] Direction: %s", signal.direction == TREND_UP ? "BUY" : "SELL");
       PrintFormat("[EA] %s", g_LotCalculator.GetTradeSummary(signal.entryPrice, signal.stopLoss, signal.takeProfit, lots));
       PrintFormat("[EA] Reason: %s", signal.reason);
+
+      //--- ★分割決済: ポジション登録★
+      if(InpEnablePartialTP && signal.takeProfit1 > 0)
+      {
+         ulong ticket = g_Trade.ResultDeal();
+         if(ticket > 0)
+         {
+            RegisterPartialTP(ticket, signal.takeProfit1, signal.takeProfit2, lots);
+            PrintFormat("[EA] Partial TP registered: TP1=%.5f | TP2=%.5f",
+                        signal.takeProfit1, signal.takeProfit2);
+         }
+      }
+
       PrintFormat("[EA] =============================");
    }
    else
@@ -492,6 +552,166 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
       PrintFormat("[EA] Trade closed: Profit=%.2f, Total=%.2f | %s",
                   profit, totalPnL,
                   totalPnL >= 0 ? "WIN" : "LOSS");
+   }
+}
+
+//+------------------------------------------------------------------+
+//| 分割決済: ポジション登録                                          |
+//+------------------------------------------------------------------+
+void RegisterPartialTP(ulong ticket, double tp1, double tp2, double lots)
+{
+   int size = ArraySize(g_PartialTPList);
+   ArrayResize(g_PartialTPList, size + 1);
+
+   g_PartialTPList[size].ticket = ticket;
+   g_PartialTPList[size].tp1Price = tp1;
+   g_PartialTPList[size].tp2Price = tp2;
+   g_PartialTPList[size].tp1Hit = false;
+   g_PartialTPList[size].originalLots = lots;
+}
+
+//+------------------------------------------------------------------+
+//| 分割決済: TP1到達チェック & 部分決済                               |
+//+------------------------------------------------------------------+
+void CheckPartialTakeProfit()
+{
+   double bid = SymbolInfoDouble(g_Symbol, SYMBOL_BID);
+   double ask = SymbolInfoDouble(g_Symbol, SYMBOL_ASK);
+
+   for(int i = ArraySize(g_PartialTPList) - 1; i >= 0; i--)
+   {
+      // ポジションが存在するか確認
+      if(!PositionSelectByTicket(g_PartialTPList[i].ticket))
+      {
+         // ポジションが閉じられた → リストから削除
+         RemovePartialTPEntry(i);
+         continue;
+      }
+
+      // 既にTP1で部分決済済みならスキップ
+      if(g_PartialTPList[i].tp1Hit)
+         continue;
+
+      // TP1価格が有効か確認
+      if(g_PartialTPList[i].tp1Price <= 0)
+         continue;
+
+      ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+      double currentLots = PositionGetDouble(POSITION_VOLUME);
+      bool tp1Reached = false;
+
+      if(posType == POSITION_TYPE_BUY)
+      {
+         // BUY: bidがTP1以上なら到達
+         tp1Reached = (bid >= g_PartialTPList[i].tp1Price);
+      }
+      else if(posType == POSITION_TYPE_SELL)
+      {
+         // SELL: askがTP1以下なら到達
+         tp1Reached = (ask <= g_PartialTPList[i].tp1Price);
+      }
+
+      if(tp1Reached)
+      {
+         // 部分決済を実行
+         double closePercent = InpTP1ClosePercent / 100.0;
+         double closeLots = NormalizeVolume(currentLots * closePercent);
+
+         if(closeLots > 0 && closeLots < currentLots)
+         {
+            bool closeResult = g_Trade.PositionClosePartial(g_PartialTPList[i].ticket, closeLots);
+
+            if(closeResult)
+            {
+               g_PartialTPList[i].tp1Hit = true;
+               PrintFormat("[EA] ★TP1 Partial Close★ Ticket=%I64u | Closed %.2f lots (%.0f%%) at %.5f",
+                           g_PartialTPList[i].ticket, closeLots, InpTP1ClosePercent * 1.0,
+                           posType == POSITION_TYPE_BUY ? bid : ask);
+
+               // 残りポジションのSLをエントリー価格に移動（ブレイクイーブン）
+               MoveStopToBreakeven(g_PartialTPList[i].ticket);
+            }
+            else
+            {
+               PrintFormat("[EA] Partial close failed! Error: %d", GetLastError());
+            }
+         }
+         else if(closeLots >= currentLots)
+         {
+            // 全決済になる場合
+            g_PartialTPList[i].tp1Hit = true;
+            PrintFormat("[EA] TP1: Lots too small for partial close, skipping");
+         }
+      }
+   }
+}
+
+//+------------------------------------------------------------------+
+//| ロットサイズを正規化                                               |
+//+------------------------------------------------------------------+
+double NormalizeVolume(double lots)
+{
+   double minLot = SymbolInfoDouble(g_Symbol, SYMBOL_VOLUME_MIN);
+   double maxLot = SymbolInfoDouble(g_Symbol, SYMBOL_VOLUME_MAX);
+   double lotStep = SymbolInfoDouble(g_Symbol, SYMBOL_VOLUME_STEP);
+
+   lots = MathFloor(lots / lotStep) * lotStep;
+   lots = MathMax(minLot, MathMin(maxLot, lots));
+
+   return NormalizeDouble(lots, 2);
+}
+
+//+------------------------------------------------------------------+
+//| 分割決済エントリーを削除                                           |
+//+------------------------------------------------------------------+
+void RemovePartialTPEntry(int index)
+{
+   int size = ArraySize(g_PartialTPList);
+   if(index < 0 || index >= size)
+      return;
+
+   // 最後の要素と入れ替えて削除
+   if(index < size - 1)
+   {
+      g_PartialTPList[index] = g_PartialTPList[size - 1];
+   }
+   ArrayResize(g_PartialTPList, size - 1);
+}
+
+//+------------------------------------------------------------------+
+//| TP1後: SLをブレイクイーブンに移動                                  |
+//+------------------------------------------------------------------+
+void MoveStopToBreakeven(ulong ticket)
+{
+   if(!PositionSelectByTicket(ticket))
+      return;
+
+   double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
+   double currentSL = PositionGetDouble(POSITION_SL);
+   double currentTP = PositionGetDouble(POSITION_TP);
+   ENUM_POSITION_TYPE posType = (ENUM_POSITION_TYPE)PositionGetInteger(POSITION_TYPE);
+
+   double point = SymbolInfoDouble(g_Symbol, SYMBOL_POINT);
+   double newSL = 0;
+
+   if(posType == POSITION_TYPE_BUY)
+   {
+      // BUY: SLをエントリー価格+少しのバッファに
+      newSL = openPrice + 10 * point;
+      if(newSL <= currentSL)
+         return;  // 既にブレイクイーブン以上
+   }
+   else
+   {
+      // SELL: SLをエントリー価格-少しのバッファに
+      newSL = openPrice - 10 * point;
+      if(newSL >= currentSL && currentSL > 0)
+         return;  // 既にブレイクイーブン以下
+   }
+
+   if(g_Trade.PositionModify(ticket, newSL, currentTP))
+   {
+      PrintFormat("[EA] SL moved to breakeven: %.5f → %.5f", currentSL, newSL);
    }
 }
 

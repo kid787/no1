@@ -27,7 +27,9 @@ struct EntrySignal
    ENUM_TREND_DIRECTION direction;
    double            entryPrice;
    double            stopLoss;
-   double            takeProfit;
+   double            takeProfit;    // Final TP (TP2 or RR-based)
+   double            takeProfit1;   // Partial TP1 (近い目標)
+   double            takeProfit2;   // Final TP2 (遠い目標)
    string            reason;
 };
 
@@ -99,6 +101,8 @@ public:
       signal.entryPrice = 0;
       signal.stopLoss = 0;
       signal.takeProfit = 0;
+      signal.takeProfit1 = 0;
+      signal.takeProfit2 = 0;
       signal.reason = "";
 
       // Risk check
@@ -146,6 +150,8 @@ public:
       EntrySignal signal;
       signal.valid = false;
       signal.pattern = PATTERN_SMA_PULLBACK;
+      signal.takeProfit1 = 0;
+      signal.takeProfit2 = 0;
       signal.reason = "";
 
       CSMAManager* sma = m_TrendAnalyzer.GetSMAManager();
@@ -273,6 +279,8 @@ public:
       EntrySignal signal;
       signal.valid = false;
       signal.pattern = PATTERN_TREND_CONTINUATION;
+      signal.takeProfit1 = 0;
+      signal.takeProfit2 = 0;
       signal.reason = "";
 
       CSMAManager* sma = m_TrendAnalyzer.GetSMAManager();
@@ -439,6 +447,49 @@ public:
          default:
             return "None";
       }
+   }
+
+   //+------------------------------------------------------------------+
+   //| 分割決済用: 指定時間足の直近高値/安値を取得                        |
+   //+------------------------------------------------------------------+
+   double GetSwingHighByTimeframe(ENUM_TIMEFRAMES tf, int lookback = 50)
+   {
+      CDowSwingDetector* swing = m_TrendAnalyzer.GetSwingDetector();
+      return swing.FindRecentSwingHigh(tf, lookback);
+   }
+
+   double GetSwingLowByTimeframe(ENUM_TIMEFRAMES tf, int lookback = 50)
+   {
+      CDowSwingDetector* swing = m_TrendAnalyzer.GetSwingDetector();
+      return swing.FindRecentSwingLow(tf, lookback);
+   }
+
+   //--- Calculate TP by timeframe swing high/low
+   double CalculateTPByTimeframe(ENUM_TREND_DIRECTION direction, ENUM_TIMEFRAMES tf, double entryPrice)
+   {
+      double tp = 0;
+      double buffer = 20 * m_Point;  // 20 points buffer
+
+      if(direction == TREND_UP)
+      {
+         // BUY: TPは直近高値
+         tp = GetSwingHighByTimeframe(tf, 50);
+         if(tp > entryPrice)
+            tp = tp - buffer;  // 少し手前で決済
+         else
+            tp = 0;  // 無効
+      }
+      else
+      {
+         // SELL: TPは直近安値
+         tp = GetSwingLowByTimeframe(tf, 50);
+         if(tp < entryPrice)
+            tp = tp + buffer;  // 少し手前で決済
+         else
+            tp = 0;  // 無効
+      }
+
+      return tp;
    }
 };
 
