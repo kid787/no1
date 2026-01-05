@@ -433,8 +433,10 @@ private:
    bool              m_UseADXFilter;
    int               m_ADXPeriod;
    double            m_ADXMinLevel;
+   int               m_HandleADX_D1;
    int               m_HandleADX_H4;
    int               m_HandleADX_H1;
+   double            m_CurrentADX_D1;
    double            m_CurrentADX_H4;
    double            m_CurrentADX_H1;
 
@@ -450,8 +452,10 @@ public:
       m_UseADXFilter = true;
       m_ADXPeriod = 14;
       m_ADXMinLevel = 20.0;
+      m_HandleADX_D1 = INVALID_HANDLE;
       m_HandleADX_H4 = INVALID_HANDLE;
       m_HandleADX_H1 = INVALID_HANDLE;
+      m_CurrentADX_D1 = 0;
       m_CurrentADX_H4 = 0;
       m_CurrentADX_H1 = 0;
    }
@@ -472,10 +476,11 @@ public:
       // Initialize ADX indicators
       if(m_UseADXFilter)
       {
+         m_HandleADX_D1 = iADX(symbol, PERIOD_D1, m_ADXPeriod);
          m_HandleADX_H4 = iADX(symbol, PERIOD_H4, m_ADXPeriod);
          m_HandleADX_H1 = iADX(symbol, PERIOD_H1, m_ADXPeriod);
 
-         if(m_HandleADX_H4 == INVALID_HANDLE || m_HandleADX_H1 == INVALID_HANDLE)
+         if(m_HandleADX_D1 == INVALID_HANDLE || m_HandleADX_H4 == INVALID_HANDLE || m_HandleADX_H1 == INVALID_HANDLE)
          {
             Print("[TrendAnalyzer] Failed to create ADX handles");
             return false;
@@ -484,13 +489,14 @@ public:
                      m_ADXPeriod, m_ADXMinLevel);
       }
 
-      Print("[TrendAnalyzer] Initialized v2.2");
+      Print("[TrendAnalyzer] Initialized v2.3 with D1 Regime Filter");
       return true;
    }
 
    void Deinitialize()
    {
       m_SMAManager.Deinitialize();
+      if(m_HandleADX_D1 != INVALID_HANDLE) IndicatorRelease(m_HandleADX_D1);
       if(m_HandleADX_H4 != INVALID_HANDLE) IndicatorRelease(m_HandleADX_H4);
       if(m_HandleADX_H1 != INVALID_HANDLE) IndicatorRelease(m_HandleADX_H1);
    }
@@ -505,6 +511,7 @@ public:
       // Update ADX values
       if(m_UseADXFilter)
       {
+         m_CurrentADX_D1 = GetADXValue(m_HandleADX_D1);
          m_CurrentADX_H4 = GetADXValue(m_HandleADX_H4);
          m_CurrentADX_H1 = GetADXValue(m_HandleADX_H1);
       }
@@ -533,7 +540,37 @@ public:
       return (m_CurrentADX_H4 >= m_ADXMinLevel);
    }
 
+   //--- ★D1レジーム判定: トレンド相場かレンジ相場か★
+   bool IsD1TrendingMarket(double d1ADXThreshold = 25.0)
+   {
+      if(!m_UseADXFilter)
+         return true;  // フィルターOFF時は常にトレンド扱い
+
+      // D1 ADXが閾値以上 かつ D1 SMAが順配列 → トレンド相場
+      bool adxStrong = (m_CurrentADX_D1 >= d1ADXThreshold);
+      bool smaAligned = (m_TrendD1 != TREND_NEUTRAL);
+
+      return adxStrong && smaAligned;
+   }
+
+   //--- D1トレンド方向を取得 (SMA配列から)
+   ENUM_TREND_DIRECTION GetD1TrendDirection()
+   {
+      double sma20 = m_SMAManager.GetD1_SMA20();
+      double price = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
+      double point = SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
+
+      // 価格がSMA20より上 → 上昇トレンド
+      if(price > sma20 + 100 * point)
+         return TREND_UP;
+      else if(price < sma20 - 100 * point)
+         return TREND_DOWN;
+
+      return TREND_NEUTRAL;
+   }
+
    //--- Get current ADX values
+   double GetADX_D1() { return m_CurrentADX_D1; }
    double GetADX_H4() { return m_CurrentADX_H4; }
    double GetADX_H1() { return m_CurrentADX_H1; }
 

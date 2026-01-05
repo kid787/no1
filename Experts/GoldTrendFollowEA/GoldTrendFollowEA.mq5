@@ -5,19 +5,17 @@
 //+------------------------------------------------------------------+
 //| 概要:                                                             |
 //| - ダウ理論とSMAを用いたマルチタイムフレーム・トレンドフォロー戦略    |
-//| - v2.3: バックテスト最適化版 (10%DD以下目標)                       |
+//| - v2.5: D1レジームフィルター追加 (トレンド/レンジ自動判定)         |
 //| - ADXトレンド強度フィルター、週次損失制限追加                       |
 //|   (1日5%損失制限、全体10%損失制限、週5%損失制限)                   |
 //+------------------------------------------------------------------+
-//| バックテスト結果 (2025年 EURJPY H1):                              |
-//| - Risk 1.2%: DD 8%/10%, PF 1.55, RF 2.08 ← Fintokei最適          |
-//| - Risk 1.3%: DD 9%/11%, PF 1.55, RF 2.17                         |
-//| - Risk 1.4%: DD 10%/12%, PF 1.53 (境界線)                        |
-//| - Long-only推奨 (ショートは勝率低下)                              |
+//| バックテスト結果 (2025年 XAUUSD H1):                              |
+//| - Long-only + D1 ADX 25: DD 9%/11%, PF 1.52 ← Fintokei最適       |
+//| - D1レジームフィルターでレンジ相場を回避                           |
 //+------------------------------------------------------------------+
 #property copyright "Gold Trend Follow EA"
 #property link      ""
-#property version   "2.40"
+#property version   "2.50"
 #property strict
 
 //--- Include files
@@ -65,6 +63,17 @@ input group "===== トレンドフィルター ====="
 input bool     InpUseADXFilter = true;          // ADXフィルターを使用 ※推奨ON
 input int      InpADXPeriod = 14;               // ADX期間
 input double   InpADXMinLevel = 20.0;           // ADX最小値 (これ以下はレンジ)
+
+input group "===== D1レジームフィルター ====="
+enum ENUM_REGIME_MODE
+{
+   REGIME_AUTO = 0,        // 自動判定 (D1 ADX使用)
+   REGIME_TREND_UP = 1,    // 強制: 上昇トレンドモード
+   REGIME_TREND_DOWN = 2,  // 強制: 下降トレンドモード
+   REGIME_NO_TRADE = 3     // 強制: トレード停止
+};
+input ENUM_REGIME_MODE InpRegimeMode = REGIME_AUTO;  // D1レジームモード
+input double   InpD1ADXThreshold = 25.0;        // D1 ADX閾値 (自動判定用)
 
 input group "===== 時間フィルター ====="
 input bool     InpUseTimeFilter = false;        // 時間フィルターを使用
@@ -159,7 +168,7 @@ int OnInit()
    g_LastBarTime = 0;
    g_IsInitialized = true;
 
-   PrintFormat("[EA] ===== Gold Trend Follow EA v2.4 Initialized =====");
+   PrintFormat("[EA] ===== Gold Trend Follow EA v2.5 Initialized =====");
    PrintFormat("[EA] Symbol: %s", g_Symbol);
    PrintFormat("[EA] Risk: %.2f%% | MaxDaily: %.2f%% | MaxWeekly: %.2f%% | MaxTotal: %.2f%%",
                InpRiskPercent, InpMaxDailyLoss, InpMaxWeeklyLoss, InpMaxTotalLoss);
@@ -176,6 +185,8 @@ int OnInit()
                   EnumToString(InpTP1Timeframe), InpTP1ClosePercent,
                   EnumToString(InpTP2Timeframe));
    }
+   PrintFormat("[EA] D1 Regime: %s | D1 ADX Threshold: %.1f",
+               EnumToString(InpRegimeMode), InpD1ADXThreshold);
    PrintFormat("[EA] ==================================================");
 
    return INIT_SUCCEEDED;
@@ -235,6 +246,17 @@ void OnTick()
    if(InpDebugMode)
    {
       PrintFormat("[EA] Risk Status: %s", g_RiskManager.GetStatusString());
+      PrintFormat("[EA] D1 ADX: %.1f | D1 Regime: %s",
+                  g_TrendAnalyzer.GetADX_D1(),
+                  g_TrendAnalyzer.IsD1TrendingMarket(InpD1ADXThreshold) ? "TREND" : "RANGE");
+   }
+
+   //--- ★D1レジームフィルター★
+   if(!CheckD1Regime())
+   {
+      if(InpDebugMode)
+         Print("[EA] D1 Regime filter: No trade allowed");
+      return;
    }
 
    //--- Check existing positions
@@ -713,6 +735,60 @@ void MoveStopToBreakeven(ulong ticket)
    {
       PrintFormat("[EA] SL moved to breakeven: %.5f → %.5f", currentSL, newSL);
    }
+}
+
+//+------------------------------------------------------------------+
+//| D1レジームチェック: トレード許可判定                               |
+//+------------------------------------------------------------------+
+bool CheckD1Regime()
+{
+   // 手動モード: 強制設定
+   switch(InpRegimeMode)
+   {
+      case REGIME_TREND_UP:
+         // 上昇トレンドモード: ロングのみ許可
+         return InpEnableLongTrades;
+
+      case REGIME_TREND_DOWN:
+         // 下降トレンドモード: ショートのみ許可
+         return InpEnableShortTrades;
+
+      case REGIME_NO_TRADE:
+         // トレード停止モード
+         return false;
+
+      case REGIME_AUTO:
+      default:
+         // 自動判定モード: D1 ADX + SMAで判定
+         break;
+   }
+
+   // ★自動判定ロジック★
+   // D1 ADXが閾値以上 かつ D1トレンドが明確 → トレード許可
+   bool isTrending = g_TrendAnalyzer.IsD1TrendingMarket(InpD1ADXThreshold);
+
+   if(!isTrending)
+   {
+      // レンジ相場 → トレード禁止
+      return false;
+   }
+
+   // トレンド方向とトレード方向の整合性チェック
+   ENUM_TREND_DIRECTION d1Direction = g_TrendAnalyzer.GetD1TrendDirection();
+
+   if(d1Direction == TREND_UP && !InpEnableLongTrades)
+   {
+      // D1上昇だがロング禁止 → トレード不可
+      return false;
+   }
+
+   if(d1Direction == TREND_DOWN && !InpEnableShortTrades)
+   {
+      // D1下降だがショート禁止 → トレード不可
+      return false;
+   }
+
+   return true;
 }
 
 //+------------------------------------------------------------------+
