@@ -5,6 +5,7 @@
 //+------------------------------------------------------------------+
 //| 概要:                                                             |
 //| - ダウ理論とSMAを用いたマルチタイムフレーム・トレンドフォロー戦略    |
+//| - v2.6: 自動戦術切り替え追加 (D1レジームに基づき方向+リスク調整)   |
 //| - v2.5: D1レジームフィルター追加 (トレンド/レンジ自動判定)         |
 //| - ADXトレンド強度フィルター、週次損失制限追加                       |
 //|   (1日5%損失制限、全体10%損失制限、週5%損失制限)                   |
@@ -12,10 +13,11 @@
 //| バックテスト結果 (2025年 XAUUSD H1):                              |
 //| - Long-only + D1 ADX 25: DD 9%/11%, PF 1.52 ← Fintokei最適       |
 //| - D1レジームフィルターでレンジ相場を回避                           |
+//| - 自動戦術: 上昇→Long Only, 下降→Short Only, レンジ→停止          |
 //+------------------------------------------------------------------+
 #property copyright "Gold Trend Follow EA"
 #property link      ""
-#property version   "2.50"
+#property version   "2.60"
 #property strict
 
 //--- Include files
@@ -75,6 +77,18 @@ enum ENUM_REGIME_MODE
 input ENUM_REGIME_MODE InpRegimeMode = REGIME_AUTO;  // D1レジームモード
 input double   InpD1ADXThreshold = 25.0;        // D1 ADX閾値 (自動判定用)
 
+input group "===== 自動戦術切り替え ====="
+enum ENUM_TACTIC_MODE
+{
+   TACTIC_MANUAL = 0,          // 手動 (設定通り)
+   TACTIC_AUTO_DIRECTION = 1,  // 自動: 方向のみ切り替え
+   TACTIC_AUTO_FULL = 2        // 自動: 方向+リスク調整
+};
+input ENUM_TACTIC_MODE InpTacticMode = TACTIC_AUTO_DIRECTION;  // 戦術モード
+input double   InpTrendUpRisk = 1.2;            // 上昇トレンド時リスク (%)
+input double   InpTrendDownRisk = 1.0;          // 下降トレンド時リスク (%)
+input double   InpRangeRisk = 0.0;              // レンジ時リスク (0=停止)
+
 input group "===== 時間フィルター ====="
 input bool     InpUseTimeFilter = false;        // 時間フィルターを使用
 input int      InpStartHour = 8;                // 開始時間 (サーバー時間)
@@ -106,6 +120,12 @@ struct PartialTPInfo
    double originalLots; // 元のロットサイズ
 };
 PartialTPInfo g_PartialTPList[];  // 動的配列
+
+//--- 自動戦術切り替え用: 動的に変更される値
+bool   g_DynamicEnableLong;       // 現在のロング許可状態
+bool   g_DynamicEnableShort;      // 現在のショート許可状態
+double g_DynamicRiskPercent;      // 現在のリスク率
+string g_CurrentTacticName;       // 現在の戦術名 (ログ用)
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
@@ -168,7 +188,13 @@ int OnInit()
    g_LastBarTime = 0;
    g_IsInitialized = true;
 
-   PrintFormat("[EA] ===== Gold Trend Follow EA v2.5 Initialized =====");
+   //--- 動的変数を初期化 (初期値は入力パラメータから)
+   g_DynamicEnableLong = InpEnableLongTrades;
+   g_DynamicEnableShort = InpEnableShortTrades;
+   g_DynamicRiskPercent = InpRiskPercent;
+   g_CurrentTacticName = "初期化中";
+
+   PrintFormat("[EA] ===== Gold Trend Follow EA v2.6 Initialized =====");
    PrintFormat("[EA] Symbol: %s", g_Symbol);
    PrintFormat("[EA] Risk: %.2f%% | MaxDaily: %.2f%% | MaxWeekly: %.2f%% | MaxTotal: %.2f%%",
                InpRiskPercent, InpMaxDailyLoss, InpMaxWeeklyLoss, InpMaxTotalLoss);
@@ -187,6 +213,12 @@ int OnInit()
    }
    PrintFormat("[EA] D1 Regime: %s | D1 ADX Threshold: %.1f",
                EnumToString(InpRegimeMode), InpD1ADXThreshold);
+   PrintFormat("[EA] Tactic Mode: %s", EnumToString(InpTacticMode));
+   if(InpTacticMode != TACTIC_MANUAL)
+   {
+      PrintFormat("[EA] Tactic Risk: TrendUp=%.2f%% | TrendDown=%.2f%% | Range=%.2f%%",
+                  InpTrendUpRisk, InpTrendDownRisk, InpRangeRisk);
+   }
    PrintFormat("[EA] ==================================================");
 
    return INIT_SUCCEEDED;
@@ -238,10 +270,14 @@ void OnTick()
    //--- Update trend analysis
    g_TrendAnalyzer.Update();
 
+   //--- ★自動戦術切り替え★ (トレンド更新後、エントリー判定前に実行)
+   ApplyTactic();
+
    //--- Always log trend status on new bar (helps debugging)
-   PrintFormat("[EA] %s | Trend: %s",
+   PrintFormat("[EA] %s | Trend: %s | Tactic: %s",
                TimeToString(currentBarTime, TIME_DATE|TIME_MINUTES),
-               g_TrendAnalyzer.GetTrendString());
+               g_TrendAnalyzer.GetTrendString(),
+               g_CurrentTacticName);
 
    if(InpDebugMode)
    {
@@ -742,16 +778,19 @@ void MoveStopToBreakeven(ulong ticket)
 //+------------------------------------------------------------------+
 bool CheckD1Regime()
 {
+   // ★自動戦術モードの場合は、ApplyTactic()で既に設定済み★
+   // ここでは動的変数を使用してチェック
+
    // 手動モード: 強制設定
    switch(InpRegimeMode)
    {
       case REGIME_TREND_UP:
          // 上昇トレンドモード: ロングのみ許可
-         return InpEnableLongTrades;
+         return g_DynamicEnableLong;
 
       case REGIME_TREND_DOWN:
          // 下降トレンドモード: ショートのみ許可
-         return InpEnableShortTrades;
+         return g_DynamicEnableShort;
 
       case REGIME_NO_TRADE:
          // トレード停止モード
@@ -769,26 +808,144 @@ bool CheckD1Regime()
 
    if(!isTrending)
    {
-      // レンジ相場 → トレード禁止
+      // レンジ相場 → トレード禁止 (ただしRange Riskが設定されていれば許可)
+      if(InpTacticMode != TACTIC_MANUAL && InpRangeRisk > 0)
+         return true;  // ApplyTacticでリスク調整済み
       return false;
    }
 
    // トレンド方向とトレード方向の整合性チェック
    ENUM_TREND_DIRECTION d1Direction = g_TrendAnalyzer.GetD1TrendDirection();
 
-   if(d1Direction == TREND_UP && !InpEnableLongTrades)
+   if(d1Direction == TREND_UP && !g_DynamicEnableLong)
    {
       // D1上昇だがロング禁止 → トレード不可
       return false;
    }
 
-   if(d1Direction == TREND_DOWN && !InpEnableShortTrades)
+   if(d1Direction == TREND_DOWN && !g_DynamicEnableShort)
    {
       // D1下降だがショート禁止 → トレード不可
       return false;
    }
 
    return true;
+}
+
+//+------------------------------------------------------------------+
+//| 自動戦術切り替え: D1レジームに基づいて戦術を適用                    |
+//+------------------------------------------------------------------+
+void ApplyTactic()
+{
+   // 手動モードの場合は何もしない
+   if(InpTacticMode == TACTIC_MANUAL)
+   {
+      g_DynamicEnableLong = InpEnableLongTrades;
+      g_DynamicEnableShort = InpEnableShortTrades;
+      g_DynamicRiskPercent = InpRiskPercent;
+      g_CurrentTacticName = "手動設定";
+      return;
+   }
+
+   // D1 ADXとトレンド方向を取得
+   double d1ADX = g_TrendAnalyzer.GetADX_D1();
+   bool isTrending = g_TrendAnalyzer.IsD1TrendingMarket(InpD1ADXThreshold);
+   ENUM_TREND_DIRECTION d1Direction = g_TrendAnalyzer.GetD1TrendDirection();
+
+   // 前回の状態を保存 (変更検出用)
+   bool prevEnableLong = g_DynamicEnableLong;
+   bool prevEnableShort = g_DynamicEnableShort;
+   double prevRisk = g_DynamicRiskPercent;
+   string prevTactic = g_CurrentTacticName;
+
+   //--- 戦術決定ロジック ---
+
+   if(!isTrending)
+   {
+      // ★レンジ相場★
+      g_CurrentTacticName = "レンジ相場";
+
+      if(InpRangeRisk <= 0)
+      {
+         // レンジ時はトレード停止
+         g_DynamicEnableLong = false;
+         g_DynamicEnableShort = false;
+         g_DynamicRiskPercent = 0;
+         g_CurrentTacticName = "レンジ相場 (停止)";
+      }
+      else
+      {
+         // レンジでもトレードする場合 (両方向許可、低リスク)
+         g_DynamicEnableLong = true;
+         g_DynamicEnableShort = true;
+         g_DynamicRiskPercent = InpRangeRisk;
+         g_CurrentTacticName = StringFormat("レンジ相場 (Risk: %.2f%%)", InpRangeRisk);
+      }
+   }
+   else if(d1Direction == TREND_UP)
+   {
+      // ★上昇トレンド★
+      g_DynamicEnableLong = true;
+      g_DynamicEnableShort = false;  // 上昇時はショート禁止
+
+      if(InpTacticMode == TACTIC_AUTO_FULL)
+      {
+         g_DynamicRiskPercent = InpTrendUpRisk;
+         g_CurrentTacticName = StringFormat("上昇トレンド (Risk: %.2f%%)", InpTrendUpRisk);
+      }
+      else
+      {
+         g_DynamicRiskPercent = InpRiskPercent;
+         g_CurrentTacticName = "上昇トレンド (Long Only)";
+      }
+   }
+   else if(d1Direction == TREND_DOWN)
+   {
+      // ★下降トレンド★
+      g_DynamicEnableLong = false;  // 下降時はロング禁止
+      g_DynamicEnableShort = true;
+
+      if(InpTacticMode == TACTIC_AUTO_FULL)
+      {
+         g_DynamicRiskPercent = InpTrendDownRisk;
+         g_CurrentTacticName = StringFormat("下降トレンド (Risk: %.2f%%)", InpTrendDownRisk);
+      }
+      else
+      {
+         g_DynamicRiskPercent = InpRiskPercent;
+         g_CurrentTacticName = "下降トレンド (Short Only)";
+      }
+   }
+   else
+   {
+      // ★ニュートラル (SMA付近)★
+      // 保守的にトレード停止
+      g_DynamicEnableLong = false;
+      g_DynamicEnableShort = false;
+      g_DynamicRiskPercent = 0;
+      g_CurrentTacticName = "ニュートラル (停止)";
+   }
+
+   //--- 設定をコンポーネントに反映 ---
+   g_EntryLogic.SetTradeDirections(g_DynamicEnableLong, g_DynamicEnableShort);
+   g_LotCalculator.SetDefaultRiskPercent(g_DynamicRiskPercent);
+
+   //--- 戦術変更をログ出力 ---
+   if(g_CurrentTacticName != prevTactic ||
+      g_DynamicEnableLong != prevEnableLong ||
+      g_DynamicEnableShort != prevEnableShort ||
+      MathAbs(g_DynamicRiskPercent - prevRisk) > 0.001)
+   {
+      PrintFormat("[EA] ★戦術変更★ %s → %s", prevTactic, g_CurrentTacticName);
+      PrintFormat("[EA]   D1 ADX: %.1f | Direction: %s",
+                  d1ADX,
+                  d1Direction == TREND_UP ? "UP" :
+                  d1Direction == TREND_DOWN ? "DOWN" : "NEUTRAL");
+      PrintFormat("[EA]   Long: %s | Short: %s | Risk: %.2f%%",
+                  g_DynamicEnableLong ? "ON" : "OFF",
+                  g_DynamicEnableShort ? "ON" : "OFF",
+                  g_DynamicRiskPercent);
+   }
 }
 
 //+------------------------------------------------------------------+
