@@ -560,10 +560,11 @@ public:
       double price = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
       double point = SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
 
+      // ★閾値拡大: XAUUSD用に$20相当 (2000 * point)★
       // 価格がSMA20より上 → 上昇トレンド
-      if(price > sma20 + 100 * point)
+      if(price > sma20 + 2000 * point)
          return TREND_UP;
-      else if(price < sma20 - 100 * point)
+      else if(price < sma20 - 2000 * point)
          return TREND_DOWN;
 
       return TREND_NEUTRAL;
@@ -589,9 +590,10 @@ public:
 
       double point = SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
 
-      if(price > sma + 100 * point)
+      // ★閾値拡大: XAUUSD用に$20相当 (2000 * point)★
+      if(price > sma + 2000 * point)
          return TREND_UP;
-      else if(price < sma - 100 * point)
+      else if(price < sma - 2000 * point)
          return TREND_DOWN;
 
       return TREND_NEUTRAL;

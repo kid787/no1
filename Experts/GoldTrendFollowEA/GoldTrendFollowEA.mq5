@@ -5,10 +5,9 @@
 //+------------------------------------------------------------------+
 //| 概要:                                                             |
 //| - ダウ理論とSMAを用いたマルチタイムフレーム・トレンドフォロー戦略    |
+//| - v2.61: D1閾値拡大 ($20相当) + リスク1.1%に最適化                |
 //| - v2.6: 自動戦術切り替え追加 (D1レジームに基づき方向+リスク調整)   |
 //| - v2.5: D1レジームフィルター追加 (トレンド/レンジ自動判定)         |
-//| - ADXトレンド強度フィルター、週次損失制限追加                       |
-//|   (1日5%損失制限、全体10%損失制限、週5%損失制限)                   |
 //+------------------------------------------------------------------+
 //| バックテスト結果 (2025年 XAUUSD H1):                              |
 //| - Long-only + D1 ADX 25: DD 9%/11%, PF 1.52 ← Fintokei最適       |
@@ -17,7 +16,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Gold Trend Follow EA"
 #property link      ""
-#property version   "2.60"
+#property version   "2.61"
 #property strict
 
 //--- Include files
@@ -33,7 +32,7 @@
 //+------------------------------------------------------------------+
 input group "===== 資金管理設定 (Fintokei準拠) ====="
 input double   InpInitialBalance = 0;           // 初期資金 (0=自動取得)
-input double   InpRiskPercent = 1.2;            // 1トレードのリスク率 (%) ※1.2%推奨 (Fintokei最適値)
+input double   InpRiskPercent = 1.1;            // 1トレードのリスク率 (%) ※1.1%推奨 (DD10%以内)
 input double   InpMaxDailyLoss = 5.0;           // 1日最大損失率 (%)
 input double   InpMaxWeeklyLoss = 5.0;          // 週間最大損失率 (%) ※追加
 input double   InpMaxTotalLoss = 10.0;          // 全体最大損失率 (%)
@@ -85,7 +84,7 @@ enum ENUM_TACTIC_MODE
    TACTIC_AUTO_FULL = 2        // 自動: 方向+リスク調整
 };
 input ENUM_TACTIC_MODE InpTacticMode = TACTIC_AUTO_DIRECTION;  // 戦術モード
-input double   InpTrendUpRisk = 1.2;            // 上昇トレンド時リスク (%)
+input double   InpTrendUpRisk = 1.1;            // 上昇トレンド時リスク (%)
 input double   InpTrendDownRisk = 1.0;          // 下降トレンド時リスク (%)
 input double   InpRangeRisk = 0.0;              // レンジ時リスク (0=停止)
 
@@ -194,7 +193,7 @@ int OnInit()
    g_DynamicRiskPercent = InpRiskPercent;
    g_CurrentTacticName = "初期化中";
 
-   PrintFormat("[EA] ===== Gold Trend Follow EA v2.6 Initialized =====");
+   PrintFormat("[EA] ===== Gold Trend Follow EA v2.61 Initialized =====");
    PrintFormat("[EA] Symbol: %s", g_Symbol);
    PrintFormat("[EA] Risk: %.2f%% | MaxDaily: %.2f%% | MaxWeekly: %.2f%% | MaxTotal: %.2f%%",
                InpRiskPercent, InpMaxDailyLoss, InpMaxWeeklyLoss, InpMaxTotalLoss);
