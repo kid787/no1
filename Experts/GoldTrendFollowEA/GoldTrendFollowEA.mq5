@@ -5,18 +5,17 @@
 //+------------------------------------------------------------------+
 //| 概要:                                                             |
 //| - ダウ理論とSMAを用いたマルチタイムフレーム・トレンドフォロー戦略    |
-//| - v2.61: D1閾値拡大 ($20相当) + リスク1.1%に最適化                |
+//| - v2.62: D1トレンド閾値パラメータ化 + リスク0.9%最適化            |
 //| - v2.6: 自動戦術切り替え追加 (D1レジームに基づき方向+リスク調整)   |
 //| - v2.5: D1レジームフィルター追加 (トレンド/レンジ自動判定)         |
 //+------------------------------------------------------------------+
-//| バックテスト結果 (2025年 XAUUSD H1):                              |
-//| - Long-only + D1 ADX 25: DD 9%/11%, PF 1.52 ← Fintokei最適       |
-//| - D1レジームフィルターでレンジ相場を回避                           |
-//| - 自動戦術: 上昇→Long Only, 下降→Short Only, レンジ→停止          |
+//| バックテスト結果 (2025年):                                        |
+//| - XAUUSD: DD 9%, PF 1.40 (Risk 0.9%)                             |
+//| - XAUJPY: DD 6%, PF 1.51 (Risk 1.1%) ← 円安トレンドに好相性       |
 //+------------------------------------------------------------------+
 #property copyright "Gold Trend Follow EA"
 #property link      ""
-#property version   "2.61"
+#property version   "2.62"
 #property strict
 
 //--- Include files
@@ -32,7 +31,7 @@
 //+------------------------------------------------------------------+
 input group "===== 資金管理設定 (Fintokei準拠) ====="
 input double   InpInitialBalance = 0;           // 初期資金 (0=自動取得)
-input double   InpRiskPercent = 1.1;            // 1トレードのリスク率 (%) ※1.1%推奨 (DD10%以内)
+input double   InpRiskPercent = 0.9;            // 1トレードのリスク率 (%) ※0.9%推奨 (DD10%未満厳守)
 input double   InpMaxDailyLoss = 5.0;           // 1日最大損失率 (%)
 input double   InpMaxWeeklyLoss = 5.0;          // 週間最大損失率 (%) ※追加
 input double   InpMaxTotalLoss = 10.0;          // 全体最大損失率 (%)
@@ -75,6 +74,7 @@ enum ENUM_REGIME_MODE
 };
 input ENUM_REGIME_MODE InpRegimeMode = REGIME_AUTO;  // D1レジームモード
 input double   InpD1ADXThreshold = 25.0;        // D1 ADX閾値 (自動判定用)
+input int      InpD1TrendThreshold = 2000;      // D1トレンド閾値 (points) ※XAUUSD:2000=$20, 最適化推奨
 
 input group "===== 自動戦術切り替え ====="
 enum ENUM_TACTIC_MODE
@@ -168,6 +168,7 @@ int OnInit()
       Print("[EA] Error: Failed to initialize Trend Analyzer");
       return INIT_FAILED;
    }
+   g_TrendAnalyzer.SetD1TrendThreshold(InpD1TrendThreshold);
 
    //--- Initialize Entry Logic
    if(!g_EntryLogic.Initialize(g_Symbol, &g_TrendAnalyzer, &g_RiskManager))
@@ -193,7 +194,7 @@ int OnInit()
    g_DynamicRiskPercent = InpRiskPercent;
    g_CurrentTacticName = "初期化中";
 
-   PrintFormat("[EA] ===== Gold Trend Follow EA v2.61 Initialized =====");
+   PrintFormat("[EA] ===== Gold Trend Follow EA v2.62 Initialized =====");
    PrintFormat("[EA] Symbol: %s", g_Symbol);
    PrintFormat("[EA] Risk: %.2f%% | MaxDaily: %.2f%% | MaxWeekly: %.2f%% | MaxTotal: %.2f%%",
                InpRiskPercent, InpMaxDailyLoss, InpMaxWeeklyLoss, InpMaxTotalLoss);
@@ -210,8 +211,8 @@ int OnInit()
                   EnumToString(InpTP1Timeframe), InpTP1ClosePercent,
                   EnumToString(InpTP2Timeframe));
    }
-   PrintFormat("[EA] D1 Regime: %s | D1 ADX Threshold: %.1f",
-               EnumToString(InpRegimeMode), InpD1ADXThreshold);
+   PrintFormat("[EA] D1 Regime: %s | D1 ADX: %.1f | D1 Trend: %d pts",
+               EnumToString(InpRegimeMode), InpD1ADXThreshold, InpD1TrendThreshold);
    PrintFormat("[EA] Tactic Mode: %s", EnumToString(InpTacticMode));
    if(InpTacticMode != TACTIC_MANUAL)
    {

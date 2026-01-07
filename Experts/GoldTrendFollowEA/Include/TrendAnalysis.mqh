@@ -440,6 +440,9 @@ private:
    double            m_CurrentADX_H4;
    double            m_CurrentADX_H1;
 
+   // D1トレンド閾値 (points)
+   int               m_D1TrendThreshold;
+
 public:
    CTrendAnalyzer()
    {
@@ -458,6 +461,15 @@ public:
       m_CurrentADX_D1 = 0;
       m_CurrentADX_H4 = 0;
       m_CurrentADX_H1 = 0;
+
+      m_D1TrendThreshold = 2000;  // デフォルト: 2000 points
+   }
+
+   //--- D1トレンド閾値を設定
+   void SetD1TrendThreshold(int threshold)
+   {
+      m_D1TrendThreshold = threshold;
+      PrintFormat("[TrendAnalyzer] D1 Trend Threshold set to %d points", m_D1TrendThreshold);
    }
 
    bool Initialize(string symbol, bool useADX = true, int adxPeriod = 14, double adxMinLevel = 20.0)
@@ -560,11 +572,11 @@ public:
       double price = SymbolInfoDouble(m_Symbol, SYMBOL_BID);
       double point = SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
 
-      // ★閾値拡大: XAUUSD用に$20相当 (2000 * point)★
+      // ★閾値は外部パラメータで設定可能★
       // 価格がSMA20より上 → 上昇トレンド
-      if(price > sma20 + 2000 * point)
+      if(price > sma20 + m_D1TrendThreshold * point)
          return TREND_UP;
-      else if(price < sma20 - 2000 * point)
+      else if(price < sma20 - m_D1TrendThreshold * point)
          return TREND_DOWN;
 
       return TREND_NEUTRAL;
@@ -590,10 +602,10 @@ public:
 
       double point = SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
 
-      // ★閾値拡大: XAUUSD用に$20相当 (2000 * point)★
-      if(price > sma + 2000 * point)
+      // ★閾値は外部パラメータで設定可能★
+      if(price > sma + m_D1TrendThreshold * point)
          return TREND_UP;
-      else if(price < sma - 2000 * point)
+      else if(price < sma - m_D1TrendThreshold * point)
          return TREND_DOWN;
 
       return TREND_NEUTRAL;
