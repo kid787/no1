@@ -35,24 +35,24 @@
 //| ※DD10%で即失格のため、0.9%リスクで安全マージンを確保               |
 //+------------------------------------------------------------------+
 input group "===== 資金管理設定 (Fintokei準拠) ====="
-input double   InpInitialBalance = 0;           // 初期資金 [0=口座残高を自動取得]
-input double   InpRiskPercent = 0.9;            // 1トレードリスク率(%) [0.9%推奨:DD10%未満厳守]
-input double   InpMaxDailyLoss = 5.0;           // 1日最大損失率(%) [Fintokei:5%制限]
-input double   InpMaxWeeklyLoss = 5.0;          // 週間最大損失率(%) [追加の安全装置]
-input double   InpMaxTotalLoss = 10.0;          // 全体最大損失率(%) [Fintokei:10%で失格]
-input double   InpMaxPositionRisk = 3.0;        // 同時ポジション最大リスク(%) [複数ポジ時の上限]
-input int      InpMaxConsecutiveLosses = 3;     // 連続損失制限 [0=無制限, 3推奨]
+input double   InpInitialBalance = 0;           // 初期資金:バックテスト用の開始資金。0で口座残高を自動取得。ライブでは0推奨
+input double   InpRiskPercent = 0.9;            // 1トレードリスク率(%):1回の損切りで失う最大資金の割合。0.9%でDD10%未満を維持
+input double   InpMaxDailyLoss = 5.0;           // 1日最大損失率(%):この値に達すると当日のトレード停止。Fintokei5%ルール対応
+input double   InpMaxWeeklyLoss = 5.0;          // 週間最大損失率(%):週単位の損失上限。連敗時の追加安全装置として機能
+input double   InpMaxTotalLoss = 10.0;          // 全体最大損失率(%):累計損失上限。Fintokeiは10%で即失格のため厳守必須
+input double   InpMaxPositionRisk = 3.0;        // 同時ポジション最大リスク(%):複数ポジション保有時の合計リスク上限
+input int      InpMaxConsecutiveLosses = 3;     // 連続損失制限:この回数連敗するとトレード一時停止。0で無制限。3回推奨
 
 //+------------------------------------------------------------------+
 //| 【トレード設定】                                                   |
 //| 基本的なトレード実行に関する設定                                    |
 //+------------------------------------------------------------------+
 input group "===== トレード設定 ====="
-input double   InpMinRiskReward = 1.5;          // 最小リスクリワード比 [1.5以上でエントリー]
-input int      InpMaxPositions = 1;             // 最大同時ポジション数 [1推奨:リスク分散]
-input int      InpMagicNumber = 123456;         // マジックナンバー [EA識別用の固有番号]
-input string   InpSymbol = "";                  // 取引シンボル [空欄=チャートの銘柄を自動使用]
-input int      InpSlippage = 30;                // 許容スリッページ(points) [30=標準]
+input double   InpMinRiskReward = 1.5;          // 最小リスクリワード比:利益目標÷損失リスク。1.5以上でエントリー許可。低いと回数増加
+input int      InpMaxPositions = 1;             // 最大同時ポジション数:同時に保有できるポジション数。1でリスク分散、複数で積極運用
+input int      InpMagicNumber = 123456;         // マジックナンバー:このEA専用の識別番号。他EAと区別するため変更可能
+input string   InpSymbol = "";                  // 取引シンボル:空欄でチャートの銘柄を自動使用。手動指定も可能(例:XAUJPY)
+input int      InpSlippage = 30;                // 許容スリッページ(points):注文時の価格ずれ許容範囲。30が標準、急変時は拡大
 
 //+------------------------------------------------------------------+
 //| 【エントリー設定】                                                  |
@@ -60,12 +60,12 @@ input int      InpSlippage = 30;                // 許容スリッページ(poin
 //| ※自動戦術モードではD1トレンドに応じて自動切り替え                   |
 //+------------------------------------------------------------------+
 input group "===== エントリー設定 ====="
-input bool     InpEnableLongTrades = true;      // ロング(買い)有効 [ON推奨:ゴールドは上昇傾向]
-input bool     InpEnableShortTrades = false;    // ショート(売り)有効 [OFF推奨:勝率低下リスク]
-input bool     InpEnableH4Pullback = true;      // H4押し目/戻り目 [メイン手法:トレンド中の調整狙い]
-input bool     InpEnableH1Pullback = true;      // H1押し目/戻り目 [短期の調整を狙う]
-input bool     InpEnableD1Pullback = true;      // D1押し目/戻り目 [大きな調整を狙う]
-input bool     InpEnableH4Reversal = true;      // H4トレンド転換 [トレンド初期を狙う]
+input bool     InpEnableLongTrades = true;      // ロング(買い)有効:ONでロングエントリー許可。ゴールドは長期上昇傾向のためON推奨
+input bool     InpEnableShortTrades = false;    // ショート(売り)有効:ONでショートエントリー許可。勝率低下リスクがあるためOFF推奨
+input bool     InpEnableH4Pullback = true;      // H4押し目/戻り目:4時間足トレンド中の調整を狙う。メイン手法のためON推奨
+input bool     InpEnableH1Pullback = true;      // H1押し目/戻り目:1時間足の短期調整を狙う。取引機会を増やすためON推奨
+input bool     InpEnableD1Pullback = true;      // D1押し目/戻り目:日足レベルの大きな調整を狙う。高勝率パターンのためON推奨
+input bool     InpEnableH4Reversal = true;      // H4トレンド転換:4時間足でトレンド初期を狙う。早期エントリーでRR向上
 
 //+------------------------------------------------------------------+
 //| 【分割決済設定】                                                   |
@@ -73,10 +73,10 @@ input bool     InpEnableH4Reversal = true;      // H4トレンド転換 [トレ�
 //| TP1到達時に50%決済→残りはブレイクイーブンで安全確保                 |
 //+------------------------------------------------------------------+
 input group "===== 分割決済設定 ====="
-input bool     InpEnablePartialTP = true;       // 分割決済有効 [ON推奨:利益確定を2段階に分割]
-input ENUM_TIMEFRAMES InpTP1Timeframe = PERIOD_H1;   // TP1時間足 [H1直近高値/安値を第1目標]
-input int      InpTP1ClosePercent = 50;         // TP1決済割合(%) [50%=半分を利確]
-input ENUM_TIMEFRAMES InpTP2Timeframe = PERIOD_H4;   // TP2時間足 [H4直近高値/安値を最終目標]
+input bool     InpEnablePartialTP = true;       // 分割決済有効:ONで2段階利確。TP1で半分決済しSLを建値に移動。リスク軽減効果大
+input ENUM_TIMEFRAMES InpTP1Timeframe = PERIOD_H1;   // TP1時間足:第1利確目標の基準時間足。H1の直近高値/安値を目標に設定
+input int      InpTP1ClosePercent = 50;         // TP1決済割合(%):TP1到達時に決済する割合。50%で半分を確実に利確
+input ENUM_TIMEFRAMES InpTP2Timeframe = PERIOD_H4;   // TP2時間足:最終利確目標の基準時間足。H4の直近高値/安値でRR判定にも使用
 
 //+------------------------------------------------------------------+
 //| 【トレンドフィルター】                                             |
@@ -84,9 +84,9 @@ input ENUM_TIMEFRAMES InpTP2Timeframe = PERIOD_H4;   // TP2時間足 [H4直近�
 //| レンジ相場でのエントリーを回避し、勝率を向上                        |
 //+------------------------------------------------------------------+
 input group "===== トレンドフィルター ====="
-input bool     InpUseADXFilter = true;          // ADXフィルター有効 [ON推奨:レンジ回避]
-input int      InpADXPeriod = 14;               // ADX期間 [14=標準設定]
-input double   InpADXMinLevel = 20.0;           // ADX最小値 [20以下=レンジ相場と判定]
+input bool     InpUseADXFilter = true;          // ADXフィルター有効:ONでADXによるトレンド判定。レンジ相場を回避し勝率向上
+input int      InpADXPeriod = 14;               // ADX期間:ADX計算に使用するローソク足本数。14が標準。短いと敏感、長いと鈍感
+input double   InpADXMinLevel = 20.0;           // ADX最小値:この値以下はレンジ相場と判定しエントリー禁止。20が一般的な基準
 
 //+------------------------------------------------------------------+
 //| 【D1レジームフィルター】                                           |
@@ -96,14 +96,14 @@ input double   InpADXMinLevel = 20.0;           // ADX最小値 [20以下=レン
 input group "===== D1レジームフィルター ====="
 enum ENUM_REGIME_MODE
 {
-   REGIME_AUTO = 0,        // 自動判定 [推奨:D1 ADX+SMAで自動判定]
-   REGIME_TREND_UP = 1,    // 強制:上昇トレンド [ロングのみ許可]
-   REGIME_TREND_DOWN = 2,  // 強制:下降トレンド [ショートのみ許可]
-   REGIME_NO_TRADE = 3     // 強制:トレード停止 [EA一時停止]
+   REGIME_AUTO = 0,        // 自動判定:D1のADXとSMA20乖離で相場環境を自動判定。推奨設定
+   REGIME_TREND_UP = 1,    // 強制:上昇トレンド:手動で上昇相場と設定。ロングのみ許可される
+   REGIME_TREND_DOWN = 2,  // 強制:下降トレンド:手動で下降相場と設定。ショートのみ許可される
+   REGIME_NO_TRADE = 3     // 強制:トレード停止:EAを一時停止。重要指標前などに使用
 };
-input ENUM_REGIME_MODE InpRegimeMode = REGIME_AUTO;  // D1レジームモード [自動判定推奨]
-input double   InpD1ADXThreshold = 25.0;        // D1 ADX閾値 [25=最適化済み:XAUJPY]
-input int      InpD1TrendThreshold = 1000;      // D1トレンド閾値(points) [1000=最適化済み:XAUJPY]
+input ENUM_REGIME_MODE InpRegimeMode = REGIME_AUTO;  // D1レジームモード:日足の相場環境判定方法。自動判定が推奨
+input double   InpD1ADXThreshold = 25.0;        // D1 ADX閾値:日足ADXがこの値以上でトレンド相場と判定。25はXAUJPY最適化値
+input int      InpD1TrendThreshold = 1000;      // D1トレンド閾値(points):SMA20からの乖離幅。1000ptsでトレンド方向確定。XAUJPY最適化値
 
 //+------------------------------------------------------------------+
 //| 【自動戦術切り替え】                                               |
@@ -113,14 +113,14 @@ input int      InpD1TrendThreshold = 1000;      // D1トレンド閾値(points) 
 input group "===== 自動戦術切り替え ====="
 enum ENUM_TACTIC_MODE
 {
-   TACTIC_MANUAL = 0,          // 手動 [エントリー設定をそのまま使用]
-   TACTIC_AUTO_DIRECTION = 1,  // 自動:方向切替 [推奨:D1に連動してL/S自動選択]
-   TACTIC_AUTO_FULL = 2        // 自動:方向+リスク [トレンド強度でリスク調整]
+   TACTIC_MANUAL = 0,          // 手動:エントリー設定をそのまま使用。自動切り替えなし
+   TACTIC_AUTO_DIRECTION = 1,  // 自動:方向切替:D1トレンドに連動してLong/Shortを自動選択。推奨
+   TACTIC_AUTO_FULL = 2        // 自動:方向+リスク:方向切替に加えトレンド強度でリスク率も調整
 };
-input ENUM_TACTIC_MODE InpTacticMode = TACTIC_AUTO_DIRECTION;  // 戦術モード [自動:方向切替推奨]
-input double   InpTrendUpRisk = 1.1;            // 上昇トレンド時リスク(%) [AUTO_FULL時のみ有効]
-input double   InpTrendDownRisk = 1.0;          // 下降トレンド時リスク(%) [AUTO_FULL時のみ有効]
-input double   InpRangeRisk = 0.0;              // レンジ時リスク(%) [0=トレード停止]
+input ENUM_TACTIC_MODE InpTacticMode = TACTIC_AUTO_DIRECTION;  // 戦術モード:D1トレンドに応じた自動切り替え設定。方向切替推奨
+input double   InpTrendUpRisk = 1.1;            // 上昇トレンド時リスク(%):AUTO_FULL時の上昇相場でのリスク率。強気設定可能
+input double   InpTrendDownRisk = 1.0;          // 下降トレンド時リスク(%):AUTO_FULL時の下降相場でのリスク率。やや控えめ推奨
+input double   InpRangeRisk = 0.0;              // レンジ時リスク(%):レンジ相場でのリスク率。0でトレード完全停止。安全重視
 
 //+------------------------------------------------------------------+
 //| 【時間フィルター】                                                 |
@@ -128,9 +128,9 @@ input double   InpRangeRisk = 0.0;              // レンジ時リスク(%) [0=�
 //| ※デフォルトOFF: 24時間稼働                                        |
 //+------------------------------------------------------------------+
 input group "===== 時間フィルター ====="
-input bool     InpUseTimeFilter = false;        // 時間フィルター有効 [OFF=24時間稼働]
-input int      InpStartHour = 8;                // 開始時間 [サーバー時間:0-23]
-input int      InpEndHour = 22;                 // 終了時間 [サーバー時間:0-23]
+input bool     InpUseTimeFilter = false;        // 時間フィルター有効:ONで指定時間帯のみトレード。OFFで24時間稼働
+input int      InpStartHour = 8;                // 開始時間:トレード開始時刻(サーバー時間0-23)。東京時間開始なら8推奨
+input int      InpEndHour = 22;                 // 終了時間:トレード終了時刻(サーバー時間0-23)。NY終了前の22推奨
 
 //+------------------------------------------------------------------+
 //| Global Variables                                                  |
