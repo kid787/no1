@@ -1,21 +1,22 @@
 //+------------------------------------------------------------------+
 //|                                           GoldTrendFollowEA.mq5  |
-//|          XAUUSD Multi-Timeframe Trend Follow EA                  |
+//|          XAUJPY/XAUUSD Multi-Timeframe Trend Follow EA           |
 //|                  Fintokei Challenge Compatible                   |
 //+------------------------------------------------------------------+
 //| 概要:                                                             |
 //| - ダウ理論とSMAを用いたマルチタイムフレーム・トレンドフォロー戦略    |
-//| - v2.62: D1トレンド閾値パラメータ化 + リスク0.9%最適化            |
-//| - v2.6: 自動戦術切り替え追加 (D1レジームに基づき方向+リスク調整)   |
-//| - v2.5: D1レジームフィルター追加 (トレンド/レンジ自動判定)         |
+//| - D1レジームフィルター搭載 (トレンド/レンジ自動判定)               |
+//| - 自動戦術切り替え機能 (D1トレンドに応じてLong/Short自動選択)      |
+//| - 分割決済対応 (2段階利確でリスク管理)                             |
 //+------------------------------------------------------------------+
-//| バックテスト結果 (2025年):                                        |
-//| - XAUUSD: DD 9%, PF 1.40 (Risk 0.9%)                             |
-//| - XAUJPY: DD 6%, PF 1.51 (Risk 1.1%) ← 円安トレンドに好相性       |
+//| 推奨設定 (XAUJPY 2025年最適化済み):                               |
+//| - D1 ADX閾値: 25 | D1トレンド閾値: 1000                           |
+//| - 最大ドローダウン: 4% (Fintokei 10%制限に対し6%の安全マージン)    |
+//| - プロフィットファクター: 1.52 | シャープレシオ: 2.24              |
 //+------------------------------------------------------------------+
 #property copyright "Gold Trend Follow EA"
 #property link      ""
-#property version   "2.62"
+#property version   "3.0"
 #property strict
 
 //--- Include files
@@ -29,72 +30,107 @@
 //+------------------------------------------------------------------+
 //| Input Parameters                                                  |
 //+------------------------------------------------------------------+
+//| 【資金管理設定】                                                   |
+//| Fintokeiチャレンジの厳格なリスク管理ルールに準拠した設定            |
+//| ※DD10%で即失格のため、0.9%リスクで安全マージンを確保               |
+//+------------------------------------------------------------------+
 input group "===== 資金管理設定 (Fintokei準拠) ====="
-input double   InpInitialBalance = 0;           // 初期資金 (0=自動取得)
-input double   InpRiskPercent = 0.9;            // 1トレードのリスク率 (%) ※0.9%推奨 (DD10%未満厳守)
-input double   InpMaxDailyLoss = 5.0;           // 1日最大損失率 (%)
-input double   InpMaxWeeklyLoss = 5.0;          // 週間最大損失率 (%) ※追加
-input double   InpMaxTotalLoss = 10.0;          // 全体最大損失率 (%)
-input double   InpMaxPositionRisk = 3.0;        // 同時ポジション最大リスク (%)
-input int      InpMaxConsecutiveLosses = 3;     // 連続損失制限 (0=無制限)
+input double   InpInitialBalance = 0;           // 初期資金 [0=口座残高を自動取得]
+input double   InpRiskPercent = 0.9;            // 1トレードリスク率(%) [0.9%推奨:DD10%未満厳守]
+input double   InpMaxDailyLoss = 5.0;           // 1日最大損失率(%) [Fintokei:5%制限]
+input double   InpMaxWeeklyLoss = 5.0;          // 週間最大損失率(%) [追加の安全装置]
+input double   InpMaxTotalLoss = 10.0;          // 全体最大損失率(%) [Fintokei:10%で失格]
+input double   InpMaxPositionRisk = 3.0;        // 同時ポジション最大リスク(%) [複数ポジ時の上限]
+input int      InpMaxConsecutiveLosses = 3;     // 連続損失制限 [0=無制限, 3推奨]
 
+//+------------------------------------------------------------------+
+//| 【トレード設定】                                                   |
+//| 基本的なトレード実行に関する設定                                    |
+//+------------------------------------------------------------------+
 input group "===== トレード設定 ====="
-input double   InpMinRiskReward = 1.5;          // 最小リスクリワード比
-input int      InpMaxPositions = 1;             // 最大同時ポジション数 ※1推奨
-input int      InpMagicNumber = 123456;         // マジックナンバー
-input string   InpSymbol = "";                  // 取引シンボル (空=チャートシンボル自動)
-input int      InpSlippage = 30;                // 許容スリッページ (points)
+input double   InpMinRiskReward = 1.5;          // 最小リスクリワード比 [1.5以上でエントリー]
+input int      InpMaxPositions = 1;             // 最大同時ポジション数 [1推奨:リスク分散]
+input int      InpMagicNumber = 123456;         // マジックナンバー [EA識別用の固有番号]
+input string   InpSymbol = "";                  // 取引シンボル [空欄=チャートの銘柄を自動使用]
+input int      InpSlippage = 30;                // 許容スリッページ(points) [30=標準]
 
+//+------------------------------------------------------------------+
+//| 【エントリー設定】                                                  |
+//| トレード方向とエントリーパターンの有効化設定                         |
+//| ※自動戦術モードではD1トレンドに応じて自動切り替え                   |
+//+------------------------------------------------------------------+
 input group "===== エントリー設定 ====="
-input bool     InpEnableLongTrades = true;      // ロング（買い）を有効化 ※ON推奨 (勝率46%)
-input bool     InpEnableShortTrades = false;    // ショート（売り）を有効化 ※OFF推奨 (勝率低下)
-input bool     InpEnableH4Pullback = true;      // H4押し目・戻り目を有効化
-input bool     InpEnableH1Pullback = true;      // H1押し目・戻り目を有効化
-input bool     InpEnableD1Pullback = true;      // D1押し目・戻り目を有効化
-input bool     InpEnableH4Reversal = true;      // H4トレンド転換を有効化
+input bool     InpEnableLongTrades = true;      // ロング(買い)有効 [ON推奨:ゴールドは上昇傾向]
+input bool     InpEnableShortTrades = false;    // ショート(売り)有効 [OFF推奨:勝率低下リスク]
+input bool     InpEnableH4Pullback = true;      // H4押し目/戻り目 [メイン手法:トレンド中の調整狙い]
+input bool     InpEnableH1Pullback = true;      // H1押し目/戻り目 [短期の調整を狙う]
+input bool     InpEnableD1Pullback = true;      // D1押し目/戻り目 [大きな調整を狙う]
+input bool     InpEnableH4Reversal = true;      // H4トレンド転換 [トレンド初期を狙う]
 
+//+------------------------------------------------------------------+
+//| 【分割決済設定】                                                   |
+//| 2段階利確でリスク管理を強化                                        |
+//| TP1到達時に50%決済→残りはブレイクイーブンで安全確保                 |
+//+------------------------------------------------------------------+
 input group "===== 分割決済設定 ====="
-input bool     InpEnablePartialTP = true;       // 分割決済を有効化
-input ENUM_TIMEFRAMES InpTP1Timeframe = PERIOD_H1;   // TP1 時間足 (直近高値/安値)
-input int      InpTP1ClosePercent = 50;         // TP1 決済割合 (%)
-input ENUM_TIMEFRAMES InpTP2Timeframe = PERIOD_H4;   // TP2 時間足 (直近高値/安値)
+input bool     InpEnablePartialTP = true;       // 分割決済有効 [ON推奨:利益確定を2段階に分割]
+input ENUM_TIMEFRAMES InpTP1Timeframe = PERIOD_H1;   // TP1時間足 [H1直近高値/安値を第1目標]
+input int      InpTP1ClosePercent = 50;         // TP1決済割合(%) [50%=半分を利確]
+input ENUM_TIMEFRAMES InpTP2Timeframe = PERIOD_H4;   // TP2時間足 [H4直近高値/安値を最終目標]
 
+//+------------------------------------------------------------------+
+//| 【トレンドフィルター】                                             |
+//| ADX(Average Directional Index)でトレンド強度を測定                 |
+//| レンジ相場でのエントリーを回避し、勝率を向上                        |
+//+------------------------------------------------------------------+
 input group "===== トレンドフィルター ====="
-input bool     InpUseADXFilter = true;          // ADXフィルターを使用 ※推奨ON
-input int      InpADXPeriod = 14;               // ADX期間
-input double   InpADXMinLevel = 20.0;           // ADX最小値 (これ以下はレンジ)
+input bool     InpUseADXFilter = true;          // ADXフィルター有効 [ON推奨:レンジ回避]
+input int      InpADXPeriod = 14;               // ADX期間 [14=標準設定]
+input double   InpADXMinLevel = 20.0;           // ADX最小値 [20以下=レンジ相場と判定]
 
+//+------------------------------------------------------------------+
+//| 【D1レジームフィルター】                                           |
+//| 日足のトレンド状況を自動判定し、相場環境に応じたトレードを実行       |
+//| ※D1 ADXとSMA20からの乖離でトレンド/レンジを判定                    |
+//+------------------------------------------------------------------+
 input group "===== D1レジームフィルター ====="
 enum ENUM_REGIME_MODE
 {
-   REGIME_AUTO = 0,        // 自動判定 (D1 ADX使用)
-   REGIME_TREND_UP = 1,    // 強制: 上昇トレンドモード
-   REGIME_TREND_DOWN = 2,  // 強制: 下降トレンドモード
-   REGIME_NO_TRADE = 3     // 強制: トレード停止
+   REGIME_AUTO = 0,        // 自動判定 [推奨:D1 ADX+SMAで自動判定]
+   REGIME_TREND_UP = 1,    // 強制:上昇トレンド [ロングのみ許可]
+   REGIME_TREND_DOWN = 2,  // 強制:下降トレンド [ショートのみ許可]
+   REGIME_NO_TRADE = 3     // 強制:トレード停止 [EA一時停止]
 };
-input ENUM_REGIME_MODE InpRegimeMode = REGIME_AUTO;  // D1レジームモード
-input double   InpD1ADXThreshold = 25.0;        // D1 ADX閾値 (自動判定用)
-input int      InpD1TrendThreshold = 2000;      // D1トレンド閾値 (points) ※XAUUSD:2000=$20, 最適化推奨
+input ENUM_REGIME_MODE InpRegimeMode = REGIME_AUTO;  // D1レジームモード [自動判定推奨]
+input double   InpD1ADXThreshold = 25.0;        // D1 ADX閾値 [25=最適化済み:XAUJPY]
+input int      InpD1TrendThreshold = 1000;      // D1トレンド閾値(points) [1000=最適化済み:XAUJPY]
 
+//+------------------------------------------------------------------+
+//| 【自動戦術切り替え】                                               |
+//| D1トレンドに応じてLong/Shortを自動切り替え                         |
+//| 上昇トレンド→Longのみ、下降トレンド→Shortのみ、レンジ→停止         |
+//+------------------------------------------------------------------+
 input group "===== 自動戦術切り替え ====="
 enum ENUM_TACTIC_MODE
 {
-   TACTIC_MANUAL = 0,          // 手動 (設定通り)
-   TACTIC_AUTO_DIRECTION = 1,  // 自動: 方向のみ切り替え
-   TACTIC_AUTO_FULL = 2        // 自動: 方向+リスク調整
+   TACTIC_MANUAL = 0,          // 手動 [エントリー設定をそのまま使用]
+   TACTIC_AUTO_DIRECTION = 1,  // 自動:方向切替 [推奨:D1に連動してL/S自動選択]
+   TACTIC_AUTO_FULL = 2        // 自動:方向+リスク [トレンド強度でリスク調整]
 };
-input ENUM_TACTIC_MODE InpTacticMode = TACTIC_AUTO_DIRECTION;  // 戦術モード
-input double   InpTrendUpRisk = 1.1;            // 上昇トレンド時リスク (%)
-input double   InpTrendDownRisk = 1.0;          // 下降トレンド時リスク (%)
-input double   InpRangeRisk = 0.0;              // レンジ時リスク (0=停止)
+input ENUM_TACTIC_MODE InpTacticMode = TACTIC_AUTO_DIRECTION;  // 戦術モード [自動:方向切替推奨]
+input double   InpTrendUpRisk = 1.1;            // 上昇トレンド時リスク(%) [AUTO_FULL時のみ有効]
+input double   InpTrendDownRisk = 1.0;          // 下降トレンド時リスク(%) [AUTO_FULL時のみ有効]
+input double   InpRangeRisk = 0.0;              // レンジ時リスク(%) [0=トレード停止]
 
+//+------------------------------------------------------------------+
+//| 【時間フィルター】                                                 |
+//| 特定の時間帯のみトレードを許可する設定                              |
+//| ※デフォルトOFF: 24時間稼働                                        |
+//+------------------------------------------------------------------+
 input group "===== 時間フィルター ====="
-input bool     InpUseTimeFilter = false;        // 時間フィルターを使用
-input int      InpStartHour = 8;                // 開始時間 (サーバー時間)
-input int      InpEndHour = 22;                 // 終了時間 (サーバー時間)
-
-input group "===== デバッグ設定 ====="
-input bool     InpDebugMode = true;             // デバッグモード (デフォルト有効)
+input bool     InpUseTimeFilter = false;        // 時間フィルター有効 [OFF=24時間稼働]
+input int      InpStartHour = 8;                // 開始時間 [サーバー時間:0-23]
+input int      InpEndHour = 22;                 // 終了時間 [サーバー時間:0-23]
 
 //+------------------------------------------------------------------+
 //| Global Variables                                                  |
@@ -273,36 +309,14 @@ void OnTick()
    //--- ★自動戦術切り替え★ (トレンド更新後、エントリー判定前に実行)
    ApplyTactic();
 
-   //--- Always log trend status on new bar (helps debugging)
-   PrintFormat("[EA] %s | Trend: %s | Tactic: %s",
-               TimeToString(currentBarTime, TIME_DATE|TIME_MINUTES),
-               g_TrendAnalyzer.GetTrendString(),
-               g_CurrentTacticName);
-
-   if(InpDebugMode)
-   {
-      PrintFormat("[EA] Risk Status: %s", g_RiskManager.GetStatusString());
-      PrintFormat("[EA] D1 ADX: %.1f | D1 Regime: %s",
-                  g_TrendAnalyzer.GetADX_D1(),
-                  g_TrendAnalyzer.IsD1TrendingMarket(InpD1ADXThreshold) ? "TREND" : "RANGE");
-   }
-
    //--- ★D1レジームフィルター★
    if(!CheckD1Regime())
-   {
-      if(InpDebugMode)
-         Print("[EA] D1 Regime filter: No trade allowed");
       return;
-   }
 
    //--- Check existing positions
    int currentPositions = CountMyPositions();
    if(currentPositions >= InpMaxPositions)
-   {
-      if(InpDebugMode)
-         Print("[EA] Max positions reached");
       return;
-   }
 
    //--- Update entry logic state
    g_EntryLogic.UpdateState();
@@ -311,11 +325,7 @@ void OnTick()
    EntrySignal signal = g_EntryLogic.CheckEntrySignals();
 
    if(!signal.valid)
-   {
-      if(InpDebugMode && signal.reason != "")
-         PrintFormat("[EA] No signal: %s", signal.reason);
       return;
-   }
 
    //--- ★分割決済用: TP1/TP2を計算★
    if(InpEnablePartialTP)
@@ -326,23 +336,11 @@ void OnTick()
       // TP2が有効ならTPとして設定
       if(signal.takeProfit2 > 0)
          signal.takeProfit = signal.takeProfit2;
-
-      if(InpDebugMode)
-      {
-         PrintFormat("[EA] Partial TP: TP1=%.5f (%s) | TP2=%.5f (%s)",
-                     signal.takeProfit1, EnumToString(InpTP1Timeframe),
-                     signal.takeProfit2, EnumToString(InpTP2Timeframe));
-      }
    }
 
    //--- Check minimum RR
    if(!g_LotCalculator.MeetsMinimumRR(signal.entryPrice, signal.stopLoss, signal.takeProfit, InpMinRiskReward))
-   {
-      if(InpDebugMode)
-         PrintFormat("[EA] Signal rejected: RR below minimum (%.2f)",
-                     g_LotCalculator.CalculateRiskRewardRatio(signal.entryPrice, signal.stopLoss, signal.takeProfit));
       return;
-   }
 
    //--- Calculate lot size
    double lots = g_LotCalculator.CalculateLotSize(signal.entryPrice, signal.stopLoss);
@@ -605,12 +603,9 @@ void OnTradeTransaction(const MqlTradeTransaction& trans,
    // Record trade result
    g_RiskManager.RecordTradeResult(totalPnL);
 
-   if(InpDebugMode)
-   {
-      PrintFormat("[EA] Trade closed: Profit=%.2f, Total=%.2f | %s",
-                  profit, totalPnL,
-                  totalPnL >= 0 ? "WIN" : "LOSS");
-   }
+   PrintFormat("[EA] Trade closed: Profit=%.2f, Total=%.2f | %s",
+               profit, totalPnL,
+               totalPnL >= 0 ? "WIN" : "LOSS");
 }
 
 //+------------------------------------------------------------------+
