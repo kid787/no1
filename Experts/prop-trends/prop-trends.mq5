@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|                                           GoldTrendFollowEA.mq5  |
+//|                                               prop-trends.mq5    |
 //|          XAUJPY/XAUUSD Multi-Timeframe Trend Follow EA           |
 //|                  Fintokei Challenge Compatible                   |
 //+------------------------------------------------------------------+
@@ -14,7 +14,7 @@
 //| - 最大ドローダウン: 4% (Fintokei 10%制限に対し6%の安全マージン)    |
 //| - プロフィットファクター: 1.52 | シャープレシオ: 2.24              |
 //+------------------------------------------------------------------+
-#property copyright "Gold Trend Follow EA"
+#property copyright "prop-trends"
 #property link      ""
 #property version   "3.0"
 #property strict
@@ -230,7 +230,7 @@ int OnInit()
    g_DynamicRiskPercent = InpRiskPercent;
    g_CurrentTacticName = "初期化中";
 
-   PrintFormat("[EA] ===== Gold Trend Follow EA v2.62 Initialized =====");
+   PrintFormat("[EA] ===== prop-trends v3.0 Initialized =====");
    PrintFormat("[EA] Symbol: %s", g_Symbol);
    PrintFormat("[EA] Risk: %.2f%% | MaxDaily: %.2f%% | MaxWeekly: %.2f%% | MaxTotal: %.2f%%",
                InpRiskPercent, InpMaxDailyLoss, InpMaxWeeklyLoss, InpMaxTotalLoss);
