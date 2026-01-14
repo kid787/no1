@@ -1,14 +1,19 @@
 //+------------------------------------------------------------------+
 //|                                              TrendMonitoring.mq5 |
-//|                        Market Regime Detection Sample EA         |
-//|                     Demonstrates MarketRegime.mqh Usage          |
+//|                    Multi-Symbol Market Regime Detection EA       |
+//|                     Based on D1 (Daily) Chart Analysis           |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
 #property link      ""
-#property version   "1.00"
+#property version   "2.00"
 #property strict
 
 #include "MarketRegime.mqh"
+
+//+------------------------------------------------------------------+
+//| Constants                                                         |
+//+------------------------------------------------------------------+
+#define MAX_SYMBOLS 17   // 監視シンボル最大数
 
 //+------------------------------------------------------------------+
 //| Input Parameters - Moving Averages                                |
@@ -17,8 +22,6 @@ input group "=== Moving Average Settings ==="
 input int      InpMAShortPeriod     = 20;       // 短期MA期間
 input int      InpMAMediumPeriod    = 50;       // 中期MA期間
 input int      InpMALongPeriod      = 200;      // 長期MA期間
-input int      InpMASlopePeriod     = 5;        // MA傾き計算期間
-input double   InpMASlopeThreshold  = 0.0001;   // MA傾き閾値
 
 //+------------------------------------------------------------------+
 //| Input Parameters - ADX                                            |
@@ -26,129 +29,62 @@ input double   InpMASlopeThreshold  = 0.0001;   // MA傾き閾値
 input group "=== ADX Settings ==="
 input int      InpADXPeriod         = 14;       // ADX期間
 input double   InpADXTrendThreshold = 25.0;     // トレンド判定閾値
-input double   InpADXTrendlessThreshold = 20.0; // トレンドレス判定閾値
-
-//+------------------------------------------------------------------+
-//| Input Parameters - Bollinger Bands                                |
-//+------------------------------------------------------------------+
-input group "=== Bollinger Bands Settings ==="
-input int      InpBBPeriod          = 20;       // BB期間
-input double   InpBBDeviation       = 2.0;      // BB偏差
-input double   InpBBExpansionRatio  = 1.5;      // エクスパンション判定比率
-input double   InpBBSqueezeRatio    = 0.5;      // スクイーズ判定比率
-
-//+------------------------------------------------------------------+
-//| Input Parameters - RSI                                            |
-//+------------------------------------------------------------------+
-input group "=== RSI Settings ==="
-input int      InpRSIPeriod         = 14;       // RSI期間
-input double   InpRSIUpper          = 70.0;     // RSI上限
-input double   InpRSILower          = 30.0;     // RSI下限
-input double   InpRSICenterRange    = 10.0;     // RSI中心帯範囲
-
-//+------------------------------------------------------------------+
-//| Input Parameters - ATR                                            |
-//+------------------------------------------------------------------+
-input group "=== ATR Settings ==="
-input int      InpATRPeriod         = 14;       // ATR期間
-input int      InpATRLookback       = 20;       // ATR比較期間
-input double   InpATRLowThreshold   = 0.7;      // 低ATR判定比率
-
-//+------------------------------------------------------------------+
-//| Input Parameters - Ichimoku                                       |
-//+------------------------------------------------------------------+
-input group "=== Ichimoku Settings ==="
-input int      InpIchiTenkan        = 9;        // 転換線期間
-input int      InpIchiKijun         = 26;       // 基準線期間
-input int      InpIchiSenkou        = 52;       // 先行スパン期間
-
-//+------------------------------------------------------------------+
-//| Input Parameters - Swing Analysis                                 |
-//+------------------------------------------------------------------+
-input group "=== Swing Analysis Settings ==="
-input int      InpSwingLookback     = 20;       // スイングH/L検出期間
-input int      InpSwingStrength     = 3;        // スイング強度
 
 //+------------------------------------------------------------------+
 //| Input Parameters - Display                                        |
 //+------------------------------------------------------------------+
 input group "=== Display Settings ==="
-input bool     InpShowPanel         = true;     // パネル表示
 input bool     InpShowAlerts        = true;     // レジーム変更アラート
+input int      InpPanelX            = 10;       // パネルX位置
+input int      InpPanelY            = 30;       // パネルY位置
 input color    InpTrendUpColor      = clrLime;  // 上昇トレンド色
 input color    InpTrendDownColor    = clrRed;   // 下降トレンド色
 input color    InpRangeColor        = clrYellow;// レンジ色
 input color    InpTrendlessColor    = clrGray;  // トレンドレス色
+input color    InpBackgroundColor   = C'20,20,30'; // 背景色
+input color    InpHeaderColor       = C'40,40,60'; // ヘッダー色
 
 //+------------------------------------------------------------------+
 //| Global Variables                                                  |
 //+------------------------------------------------------------------+
-CMarketRegime  g_regime;
-ENUM_MARKET_REGIME g_last_regime;
-bool           g_first_run = true;
+string g_symbols[MAX_SYMBOLS];                    // 監視シンボル配列
+CMarketRegime g_regimes[MAX_SYMBOLS];             // 各シンボルのRegime検出器
+ENUM_MARKET_REGIME g_last_regimes[MAX_SYMBOLS];   // 前回のRegime
+int g_symbol_count = 0;                           // 有効なシンボル数
+bool g_first_run = true;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
 //+------------------------------------------------------------------+
 int OnInit()
 {
-   // Set up parameters
+   // シンボルリスト初期化
+   InitSymbolList();
+
+   // パラメータ設定
    SMarketRegimeParams params;
    InitDefaultParams(params);
-
-   // Moving Averages
    params.ma_short_period = InpMAShortPeriod;
    params.ma_medium_period = InpMAMediumPeriod;
    params.ma_long_period = InpMALongPeriod;
-   params.ma_slope_period = InpMASlopePeriod;
-   params.ma_slope_threshold = InpMASlopeThreshold;
-
-   // ADX
    params.adx_period = InpADXPeriod;
    params.adx_trend_threshold = InpADXTrendThreshold;
-   params.adx_trendless_threshold = InpADXTrendlessThreshold;
 
-   // Bollinger Bands
-   params.bb_period = InpBBPeriod;
-   params.bb_deviation = InpBBDeviation;
-   params.bb_expansion_ratio = InpBBExpansionRatio;
-   params.bb_squeeze_ratio = InpBBSqueezeRatio;
-
-   // RSI
-   params.rsi_period = InpRSIPeriod;
-   params.rsi_upper = InpRSIUpper;
-   params.rsi_lower = InpRSILower;
-   params.rsi_center_range = InpRSICenterRange;
-
-   // ATR
-   params.atr_period = InpATRPeriod;
-   params.atr_lookback = InpATRLookback;
-   params.atr_low_threshold = InpATRLowThreshold;
-
-   // Ichimoku
-   params.ichi_tenkan = InpIchiTenkan;
-   params.ichi_kijun = InpIchiKijun;
-   params.ichi_senkou = InpIchiSenkou;
-
-   // Swing Analysis
-   params.swing_lookback = InpSwingLookback;
-   params.swing_strength = InpSwingStrength;
-
-   // Initialize the market regime detector
-   if(!g_regime.Init(_Symbol, params))
+   // 各シンボルのRegime検出器を初期化
+   for(int i = 0; i < g_symbol_count; i++)
    {
-      Print("Failed to initialize Market Regime detector");
-      return INIT_FAILED;
+      g_last_regimes[i] = REGIME_TRENDLESS;
+      if(!g_regimes[i].Init(g_symbols[i], params))
+      {
+         Print("Failed to initialize regime detector for ", g_symbols[i]);
+      }
    }
 
-   g_last_regime = REGIME_TRENDLESS;
+   // パネル作成
+   CreateMultiSymbolPanel();
 
-   // Create info panel
-   if(InpShowPanel)
-      CreatePanel();
-
-   Print("Trend Monitoring EA initialized successfully");
-   Print("Analyzing ", _Symbol, " using D1 (Daily) timeframe data");
+   Print("=== Trend Monitoring EA v2.0 ===");
+   Print("Monitoring ", g_symbol_count, " symbols on D1 timeframe");
 
    return INIT_SUCCEEDED;
 }
@@ -158,10 +94,15 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
-   g_regime.Deinit();
+   // Regime検出器の解放
+   for(int i = 0; i < g_symbol_count; i++)
+   {
+      g_regimes[i].Deinit();
+   }
 
-   // Remove panel objects
-   ObjectsDeleteAll(0, "MR_");
+   // パネル削除
+   ObjectsDeleteAll(0, "TM_");
+   Comment("");
 
    Print("Trend Monitoring EA deinitialized");
 }
@@ -171,196 +112,283 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
-   // Analyze market regime (automatically cached per D1 bar)
-   ENUM_MARKET_REGIME current_regime = g_regime.Analyze(false);
-
-   // Check for regime change
-   if(current_regime != g_last_regime || g_first_run)
+   // 全シンボルの分析を実行
+   for(int i = 0; i < g_symbol_count; i++)
    {
-      OnRegimeChange(g_last_regime, current_regime);
-      g_last_regime = current_regime;
-      g_first_run = false;
+      ENUM_MARKET_REGIME current = g_regimes[i].Analyze(false);
+
+      // Regime変更検出
+      if(current != g_last_regimes[i] || g_first_run)
+      {
+         if(!g_first_run && InpShowAlerts)
+         {
+            string msg = StringFormat("%s: %s -> %s",
+               g_symbols[i],
+               GetRegimeShortName(g_last_regimes[i]),
+               GetRegimeShortName(current));
+            Alert(msg);
+         }
+         g_last_regimes[i] = current;
+      }
    }
 
-   // Update panel
-   if(InpShowPanel)
-      UpdatePanel();
+   g_first_run = false;
 
-   // Execute trading logic based on regime
-   ExecuteTradingLogic(current_regime);
+   // パネル更新
+   UpdateMultiSymbolPanel();
 }
 
 //+------------------------------------------------------------------+
-//| Handle Regime Change                                              |
+//| Initialize Symbol List                                            |
 //+------------------------------------------------------------------+
-void OnRegimeChange(ENUM_MARKET_REGIME old_regime, ENUM_MARKET_REGIME new_regime)
+void InitSymbolList()
 {
-   string old_str = GetRegimeDisplayName(old_regime);
-   string new_str = GetRegimeDisplayName(new_regime);
+   g_symbol_count = 0;
 
-   string message = StringFormat("Market Regime Changed: %s -> %s\n%s",
-                                  old_str, new_str,
-                                  g_regime.GetRegimeDescription());
+   // メジャー通貨ペア (USD関連)
+   AddSymbolIfExists("EURUSD");
+   AddSymbolIfExists("GBPUSD");
+   AddSymbolIfExists("AUDUSD");
+   AddSymbolIfExists("USDJPY");
+   AddSymbolIfExists("USDCAD");
 
-   Print(message);
+   // クロス円
+   AddSymbolIfExists("EURJPY");
+   AddSymbolIfExists("GBPJPY");
+   AddSymbolIfExists("AUDJPY");
+   AddSymbolIfExists("CADJPY");
 
-   if(InpShowAlerts && !g_first_run)
-   {
-      Alert(message);
-   }
+   // 欧州クロス
+   AddSymbolIfExists("EURGBP");
+   AddSymbolIfExists("EURAUD");
+   AddSymbolIfExists("EURCAD");
 
-   // Log detailed analysis
-   SMarketAnalysisResult result;
-   g_regime.GetAnalysisResult(result);
-   Print(StringFormat("Scores - Trend: %d, Range: %d, Trendless: %d",
-                       result.trend_score, result.range_score, result.trendless_score));
-   Print(StringFormat("ADX: %.2f, RSI: %.2f, ATR: %.5f",
-                       result.adx_value, result.rsi_value, result.atr_value));
+   // その他のクロス
+   AddSymbolIfExists("GBPAUD");
+   AddSymbolIfExists("GBPCAD");
+   AddSymbolIfExists("AUDCAD");
+
+   // ゴールド
+   AddSymbolIfExists("XAUUSD");
+   AddSymbolIfExists("XAUJPY");
+
+   Print("Initialized ", g_symbol_count, " symbols for monitoring");
 }
 
 //+------------------------------------------------------------------+
-//| Execute Trading Logic Based on Regime                             |
+//| Add Symbol if Exists in Market Watch                              |
 //+------------------------------------------------------------------+
-void ExecuteTradingLogic(ENUM_MARKET_REGIME regime)
+void AddSymbolIfExists(string symbol)
 {
-   // This is where you implement your trading strategy
-   // Different strategies for different market conditions
+   if(g_symbol_count >= MAX_SYMBOLS) return;
 
+   // シンボルが存在するか確認
+   if(SymbolSelect(symbol, true))
+   {
+      g_symbols[g_symbol_count] = symbol;
+      g_symbol_count++;
+      Print("Added symbol: ", symbol);
+   }
+   else
+   {
+      Print("Symbol not available: ", symbol);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Create Multi-Symbol Panel                                         |
+//+------------------------------------------------------------------+
+void CreateMultiSymbolPanel()
+{
+   int x = InpPanelX;
+   int y = InpPanelY;
+   int row_height = 20;
+   int panel_width = 750;
+   int header_height = 25;
+   int panel_height = header_height + (g_symbol_count + 1) * row_height + 10;
+
+   // メイン背景
+   CreateRectangle("TM_BG", x, y, panel_width, panel_height, InpBackgroundColor);
+
+   // タイトルバー
+   CreateRectangle("TM_Header", x, y, panel_width, header_height, InpHeaderColor);
+   CreateLabel("TM_Title", x + 10, y + 5, "Multi-Symbol Trend Monitor (D1)", clrWhite, 11);
+   CreateLabel("TM_Time", x + panel_width - 200, y + 5, "", clrSilver, 9);
+
+   // カラムヘッダー
+   int header_y = y + header_height + 5;
+   CreateLabel("TM_H_Symbol", x + 10, header_y, "Symbol", clrSilver, 9);
+   CreateLabel("TM_H_Regime", x + 100, header_y, "Regime", clrSilver, 9);
+   CreateLabel("TM_H_TScore", x + 200, header_y, "Trend", clrSilver, 9);
+   CreateLabel("TM_H_RScore", x + 260, header_y, "Range", clrSilver, 9);
+   CreateLabel("TM_H_ADX", x + 320, header_y, "ADX", clrSilver, 9);
+   CreateLabel("TM_H_RSI", x + 380, header_y, "RSI", clrSilver, 9);
+   CreateLabel("TM_H_Signals", x + 440, header_y, "Signals", clrSilver, 9);
+
+   // 各シンボル行
+   for(int i = 0; i < g_symbol_count; i++)
+   {
+      int row_y = header_y + (i + 1) * row_height;
+      string prefix = "TM_R" + IntegerToString(i) + "_";
+
+      // 行背景（交互色）
+      color row_bg = (i % 2 == 0) ? InpBackgroundColor : C'25,25,35';
+      CreateRectangle(prefix + "BG", x + 5, row_y - 2, panel_width - 10, row_height, row_bg);
+
+      // シンボル名
+      CreateLabel(prefix + "Symbol", x + 10, row_y, g_symbols[i], clrWhite, 9);
+
+      // Regime
+      CreateLabel(prefix + "Regime", x + 100, row_y, "---", clrGray, 9);
+
+      // スコア
+      CreateLabel(prefix + "TScore", x + 200, row_y, "0", clrGray, 9);
+      CreateLabel(prefix + "RScore", x + 260, row_y, "0", clrGray, 9);
+
+      // インジケーター値
+      CreateLabel(prefix + "ADX", x + 320, row_y, "0.0", clrGray, 9);
+      CreateLabel(prefix + "RSI", x + 380, row_y, "0.0", clrGray, 9);
+
+      // シグナル
+      CreateLabel(prefix + "Signals", x + 440, row_y, "", clrGray, 8);
+   }
+
+   // 凡例
+   int legend_y = y + panel_height + 5;
+   CreateLabel("TM_Legend", x + 10, legend_y, "Legend:", clrSilver, 8);
+   CreateLabel("TM_Leg1", x + 60, legend_y, "UP", InpTrendUpColor, 8);
+   CreateLabel("TM_Leg2", x + 90, legend_y, "DOWN", InpTrendDownColor, 8);
+   CreateLabel("TM_Leg3", x + 140, legend_y, "RANGE", InpRangeColor, 8);
+   CreateLabel("TM_Leg4", x + 200, legend_y, "TRENDLESS", InpTrendlessColor, 8);
+}
+
+//+------------------------------------------------------------------+
+//| Update Multi-Symbol Panel                                         |
+//+------------------------------------------------------------------+
+void UpdateMultiSymbolPanel()
+{
+   // 時刻更新
+   ObjectSetString(0, "TM_Time", OBJPROP_TEXT,
+      "Updated: " + TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES));
+
+   // 各シンボルの情報更新
+   for(int i = 0; i < g_symbol_count; i++)
+   {
+      string prefix = "TM_R" + IntegerToString(i) + "_";
+
+      SMarketAnalysisResult result;
+      g_regimes[i].GetAnalysisResult(result);
+
+      // Regime表示
+      string regime_str = GetRegimeShortName(result.regime);
+      color regime_color = GetRegimeColor(result.regime);
+
+      ObjectSetString(0, prefix + "Regime", OBJPROP_TEXT, regime_str);
+      ObjectSetInteger(0, prefix + "Regime", OBJPROP_COLOR, regime_color);
+
+      // スコア表示
+      ObjectSetString(0, prefix + "TScore", OBJPROP_TEXT, IntegerToString(result.trend_score));
+      ObjectSetInteger(0, prefix + "TScore", OBJPROP_COLOR,
+         result.trend_score >= 60 ? InpTrendUpColor : clrGray);
+
+      ObjectSetString(0, prefix + "RScore", OBJPROP_TEXT, IntegerToString(result.range_score));
+      ObjectSetInteger(0, prefix + "RScore", OBJPROP_COLOR,
+         result.range_score >= 50 ? InpRangeColor : clrGray);
+
+      // ADX
+      ObjectSetString(0, prefix + "ADX", OBJPROP_TEXT, DoubleToString(result.adx_value, 1));
+      ObjectSetInteger(0, prefix + "ADX", OBJPROP_COLOR,
+         result.is_adx_trending ? InpTrendUpColor : clrGray);
+
+      // RSI
+      ObjectSetString(0, prefix + "RSI", OBJPROP_TEXT, DoubleToString(result.rsi_value, 1));
+      color rsi_color = clrGray;
+      if(result.rsi_value >= 70) rsi_color = InpTrendUpColor;
+      else if(result.rsi_value <= 30) rsi_color = InpTrendDownColor;
+      else if(result.is_rsi_near_center) rsi_color = InpRangeColor;
+      ObjectSetInteger(0, prefix + "RSI", OBJPROP_COLOR, rsi_color);
+
+      // シグナル
+      string signals = BuildSignalString(result);
+      ObjectSetString(0, prefix + "Signals", OBJPROP_TEXT, signals);
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Build Signal String                                               |
+//+------------------------------------------------------------------+
+string BuildSignalString(SMarketAnalysisResult &result)
+{
+   string signals = "";
+
+   // トレンドシグナル
+   if(result.is_perfect_order_bullish) signals += "PO+ ";
+   if(result.is_perfect_order_bearish) signals += "PO- ";
+   if(result.is_bb_expanding) signals += "BBEx ";
+   if(result.is_band_walk_upper) signals += "BW+ ";
+   if(result.is_band_walk_lower) signals += "BW- ";
+
+   // レンジシグナル
+   if(result.is_bb_squeezing) signals += "BBSq ";
+   if(result.is_ma_horizontal) signals += "MAH ";
+
+   // 雲
+   if(result.is_in_ichimoku_cloud) signals += "Cloud ";
+
+   // ダウ理論
+   if(result.is_higher_highs && result.is_higher_lows) signals += "HH/HL ";
+   if(result.is_lower_highs && result.is_lower_lows) signals += "LH/LL ";
+
+   if(signals == "") signals = "-";
+
+   return signals;
+}
+
+//+------------------------------------------------------------------+
+//| Get Regime Short Name                                             |
+//+------------------------------------------------------------------+
+string GetRegimeShortName(ENUM_MARKET_REGIME regime)
+{
    switch(regime)
    {
-      case REGIME_TREND_UP:
-         // Implement trend-following buy strategy
-         // Example: Look for pullbacks to MA, breakout entries
-         TrendFollowingStrategy(true);
-         break;
-
-      case REGIME_TREND_DOWN:
-         // Implement trend-following sell strategy
-         TrendFollowingStrategy(false);
-         break;
-
-      case REGIME_RANGE:
-         // Implement mean-reversion strategy
-         // Example: Buy at support, sell at resistance
-         RangeTradingStrategy();
-         break;
-
-      case REGIME_TRENDLESS:
-         // Reduce or avoid trading
-         // Example: Tighten stops, reduce position sizes
-         TrendlessStrategy();
-         break;
+      case REGIME_TREND_UP:   return "UP";
+      case REGIME_TREND_DOWN: return "DOWN";
+      case REGIME_RANGE:      return "RANGE";
+      case REGIME_TRENDLESS:  return "FLAT";
+      default:                return "---";
    }
 }
 
 //+------------------------------------------------------------------+
-//| Trend Following Strategy Placeholder                              |
+//| Get Regime Color                                                  |
 //+------------------------------------------------------------------+
-void TrendFollowingStrategy(bool is_bullish)
+color GetRegimeColor(ENUM_MARKET_REGIME regime)
 {
-   // Implement your trend following logic here
-   // Examples:
-   // - Enter on MA pullbacks
-   // - Use ATR for stop loss placement
-   // - Trail stops using MA or swing points
-
-   // This is a placeholder - implement your actual strategy
-   static datetime last_log = 0;
-   datetime current = TimeCurrent();
-
-   if(current - last_log > 3600)  // Log once per hour
+   switch(regime)
    {
-      string direction = is_bullish ? "BULLISH" : "BEARISH";
-      Comment("Strategy: Trend Following (", direction, ")\n",
-              "Looking for trend continuation setups...");
-      last_log = current;
+      case REGIME_TREND_UP:   return InpTrendUpColor;
+      case REGIME_TREND_DOWN: return InpTrendDownColor;
+      case REGIME_RANGE:      return InpRangeColor;
+      case REGIME_TRENDLESS:  return InpTrendlessColor;
+      default:                return clrGray;
    }
 }
 
 //+------------------------------------------------------------------+
-//| Range Trading Strategy Placeholder                                |
+//| Create Rectangle Helper                                           |
 //+------------------------------------------------------------------+
-void RangeTradingStrategy()
+void CreateRectangle(string name, int x, int y, int width, int height, color bg_color)
 {
-   // Implement your range trading logic here
-   // Examples:
-   // - Buy at support levels
-   // - Sell at resistance levels
-   // - Use oscillators for entry timing
-
-   static datetime last_log = 0;
-   datetime current = TimeCurrent();
-
-   if(current - last_log > 3600)
-   {
-      Comment("Strategy: Range Trading\n",
-              "Looking for mean reversion setups...");
-      last_log = current;
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Trendless Strategy Placeholder                                    |
-//+------------------------------------------------------------------+
-void TrendlessStrategy()
-{
-   // Implement your trendless market logic here
-   // Examples:
-   // - Reduce position sizes
-   // - Widen stops or avoid new entries
-   // - Wait for clearer signals
-
-   static datetime last_log = 0;
-   datetime current = TimeCurrent();
-
-   if(current - last_log > 3600)
-   {
-      Comment("Strategy: Trendless/Waiting\n",
-              "Market conditions unclear - reducing exposure...");
-      last_log = current;
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Create Info Panel                                                 |
-//+------------------------------------------------------------------+
-void CreatePanel()
-{
-   int x = 10;
-   int y = 30;
-   int width = 300;
-   int height = 250;
-
-   // Background
-   ObjectCreate(0, "MR_Background", OBJ_RECTANGLE_LABEL, 0, 0, 0);
-   ObjectSetInteger(0, "MR_Background", OBJPROP_XDISTANCE, x);
-   ObjectSetInteger(0, "MR_Background", OBJPROP_YDISTANCE, y);
-   ObjectSetInteger(0, "MR_Background", OBJPROP_XSIZE, width);
-   ObjectSetInteger(0, "MR_Background", OBJPROP_YSIZE, height);
-   ObjectSetInteger(0, "MR_Background", OBJPROP_BGCOLOR, clrBlack);
-   ObjectSetInteger(0, "MR_Background", OBJPROP_BORDER_TYPE, BORDER_FLAT);
-   ObjectSetInteger(0, "MR_Background", OBJPROP_COLOR, clrWhite);
-   ObjectSetInteger(0, "MR_Background", OBJPROP_CORNER, CORNER_LEFT_UPPER);
-
-   // Title
-   CreateLabel("MR_Title", x + 10, y + 5, "Trend Monitoring - Market Regime", clrWhite, 12);
-
-   // Regime display
-   CreateLabel("MR_Regime", x + 10, y + 30, "Regime: ---", clrWhite, 10);
-   CreateLabel("MR_Description", x + 10, y + 50, "", clrGray, 8);
-
-   // Scores
-   CreateLabel("MR_TrendScore", x + 10, y + 80, "Trend Score: 0", clrWhite, 9);
-   CreateLabel("MR_RangeScore", x + 10, y + 100, "Range Score: 0", clrWhite, 9);
-   CreateLabel("MR_TrendlessScore", x + 10, y + 120, "Trendless Score: 0", clrWhite, 9);
-
-   // Indicators
-   CreateLabel("MR_ADX", x + 10, y + 150, "ADX: ---", clrWhite, 9);
-   CreateLabel("MR_RSI", x + 10, y + 170, "RSI: ---", clrWhite, 9);
-   CreateLabel("MR_ATR", x + 10, y + 190, "ATR: ---", clrWhite, 9);
-
-   // Conditions
-   CreateLabel("MR_Conditions", x + 10, y + 220, "Analyzing...", clrGray, 8);
+   ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, width);
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, height);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, bg_color);
+   ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, bg_color);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
 }
 
 //+------------------------------------------------------------------+
@@ -374,103 +402,14 @@ void CreateLabel(string name, int x, int y, string text, color clr, int font_siz
    ObjectSetString(0, name, OBJPROP_TEXT, text);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, font_size);
-   ObjectSetString(0, name, OBJPROP_FONT, "Arial");
+   ObjectSetString(0, name, OBJPROP_FONT, "Consolas");
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
 }
 
 //+------------------------------------------------------------------+
-//| Update Info Panel                                                 |
-//+------------------------------------------------------------------+
-void UpdatePanel()
-{
-   SMarketAnalysisResult result;
-   g_regime.GetAnalysisResult(result);
-   ENUM_MARKET_REGIME regime = result.regime;
-
-   // Get regime color
-   color regime_color;
-   switch(regime)
-   {
-      case REGIME_TREND_UP:   regime_color = InpTrendUpColor;   break;
-      case REGIME_TREND_DOWN: regime_color = InpTrendDownColor; break;
-      case REGIME_RANGE:      regime_color = InpRangeColor;     break;
-      default:                regime_color = InpTrendlessColor; break;
-   }
-
-   // Update regime
-   ObjectSetString(0, "MR_Regime", OBJPROP_TEXT, "Regime: " + GetRegimeDisplayName(regime));
-   ObjectSetInteger(0, "MR_Regime", OBJPROP_COLOR, regime_color);
-
-   // Update description
-   ObjectSetString(0, "MR_Description", OBJPROP_TEXT, result.regime_description);
-
-   // Update scores
-   ObjectSetString(0, "MR_TrendScore", OBJPROP_TEXT,
-                    StringFormat("Trend Score: %d", result.trend_score));
-   ObjectSetInteger(0, "MR_TrendScore", OBJPROP_COLOR,
-                    result.trend_score >= 60 ? clrLime : clrWhite);
-
-   ObjectSetString(0, "MR_RangeScore", OBJPROP_TEXT,
-                    StringFormat("Range Score: %d", result.range_score));
-   ObjectSetInteger(0, "MR_RangeScore", OBJPROP_COLOR,
-                    result.range_score >= 50 ? clrYellow : clrWhite);
-
-   ObjectSetString(0, "MR_TrendlessScore", OBJPROP_TEXT,
-                    StringFormat("Trendless Score: %d", result.trendless_score));
-   ObjectSetInteger(0, "MR_TrendlessScore", OBJPROP_COLOR,
-                    result.trendless_score >= 50 ? clrGray : clrWhite);
-
-   // Update indicators
-   ObjectSetString(0, "MR_ADX", OBJPROP_TEXT,
-                    StringFormat("ADX: %.2f %s",
-                                  result.adx_value,
-                                  result.is_adx_trending ? "(Trending)" : ""));
-
-   ObjectSetString(0, "MR_RSI", OBJPROP_TEXT,
-                    StringFormat("RSI: %.2f %s",
-                                  result.rsi_value,
-                                  result.is_rsi_near_center ? "(Center)" : ""));
-
-   ObjectSetString(0, "MR_ATR", OBJPROP_TEXT,
-                    StringFormat("ATR: %.5f %s",
-                                  result.atr_value,
-                                  result.is_atr_low ? "(Low)" : ""));
-
-   // Update conditions summary
-   string conditions = "";
-   if(result.is_perfect_order_bullish) conditions += "PO(Up) ";
-   if(result.is_perfect_order_bearish) conditions += "PO(Down) ";
-   if(result.is_bb_expanding) conditions += "BBExp ";
-   if(result.is_bb_squeezing) conditions += "BBSqz ";
-   if(result.is_band_walk_upper) conditions += "BW(Up) ";
-   if(result.is_band_walk_lower) conditions += "BW(Down) ";
-   if(result.is_in_ichimoku_cloud) conditions += "Cloud ";
-
-   if(conditions == "") conditions = "No strong signals";
-   ObjectSetString(0, "MR_Conditions", OBJPROP_TEXT, conditions);
-}
-
-//+------------------------------------------------------------------+
-//| Get Regime Display Name                                           |
-//+------------------------------------------------------------------+
-string GetRegimeDisplayName(ENUM_MARKET_REGIME regime)
-{
-   switch(regime)
-   {
-      case REGIME_TREND_UP:   return "TREND UP";
-      case REGIME_TREND_DOWN: return "TREND DOWN";
-      case REGIME_RANGE:      return "RANGE";
-      case REGIME_TRENDLESS:  return "TRENDLESS";
-      default:                return "UNKNOWN";
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Timer function (optional - for periodic updates)                  |
+//| Timer function                                                    |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
-   // Can be used for periodic regime checks independent of ticks
-   // Enable with EventSetTimer(3600) in OnInit for hourly updates
 }
 //+------------------------------------------------------------------+
