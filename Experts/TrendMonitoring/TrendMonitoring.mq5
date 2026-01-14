@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
 #property link      ""
-#property version   "2.00"
+#property version   "2.10"
 #property strict
 
 #include "MarketRegime.mqh"
@@ -35,14 +35,10 @@ input double   InpADXTrendThreshold = 25.0;     // トレンド判定閾値
 //+------------------------------------------------------------------+
 input group "=== Display Settings ==="
 input bool     InpShowAlerts        = true;     // レジーム変更アラート
-input int      InpPanelX            = 10;       // パネルX位置
-input int      InpPanelY            = 30;       // パネルY位置
-input color    InpTrendUpColor      = clrLime;  // 上昇トレンド色
-input color    InpTrendDownColor    = clrRed;   // 下降トレンド色
-input color    InpRangeColor        = clrYellow;// レンジ色
-input color    InpTrendlessColor    = clrGray;  // トレンドレス色
-input color    InpBackgroundColor   = C'20,20,30'; // 背景色
-input color    InpHeaderColor       = C'40,40,60'; // ヘッダー色
+input color    InpTrendColor        = clrLime;  // トレンド色（蛍光緑）
+input color    InpRangeColor        = clrRed;   // レンジ色（赤）
+input color    InpTrendlessColor    = clrDimGray; // トレンドレス色（グレー）
+input color    InpBackgroundColor   = clrBlack; // 背景色
 
 //+------------------------------------------------------------------+
 //| Global Variables                                                  |
@@ -52,12 +48,26 @@ CMarketRegime g_regimes[MAX_SYMBOLS];             // 各シンボルのRegime検
 ENUM_MARKET_REGIME g_last_regimes[MAX_SYMBOLS];   // 前回のRegime
 int g_symbol_count = 0;                           // 有効なシンボル数
 bool g_first_run = true;
+int g_chart_width = 0;
+int g_chart_height = 0;
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   // チャートサイズ取得
+   g_chart_width = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   g_chart_height = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+
+   // チャート設定（フルスクリーン用）
+   ChartSetInteger(0, CHART_SHOW_GRID, false);
+   ChartSetInteger(0, CHART_SHOW_PERIOD_SEP, false);
+   ChartSetInteger(0, CHART_SHOW_VOLUMES, false);
+   ChartSetInteger(0, CHART_COLOR_BACKGROUND, InpBackgroundColor);
+   ChartSetInteger(0, CHART_COLOR_FOREGROUND, clrWhite);
+   ChartSetInteger(0, CHART_FOREGROUND, false);
+
    // シンボルリスト初期化
    InitSymbolList();
 
@@ -81,10 +91,14 @@ int OnInit()
    }
 
    // パネル作成
-   CreateMultiSymbolPanel();
+   CreateFullScreenPanel();
 
-   Print("=== Trend Monitoring EA v2.0 ===");
+   Print("=== Trend Monitoring EA v2.1 (Full Screen) ===");
    Print("Monitoring ", g_symbol_count, " symbols on D1 timeframe");
+
+   // チャートイベント有効化
+   ChartSetInteger(0, CHART_EVENT_OBJECT_CREATE, true);
+   ChartSetInteger(0, CHART_EVENT_OBJECT_DELETE, true);
 
    return INIT_SUCCEEDED;
 }
@@ -135,7 +149,29 @@ void OnTick()
    g_first_run = false;
 
    // パネル更新
-   UpdateMultiSymbolPanel();
+   UpdateFullScreenPanel();
+}
+
+//+------------------------------------------------------------------+
+//| Chart Event Handler                                               |
+//+------------------------------------------------------------------+
+void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
+{
+   if(id == CHARTEVENT_CHART_CHANGE)
+   {
+      // チャートサイズ変更時にパネル再描画
+      int new_width = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+      int new_height = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+
+      if(new_width != g_chart_width || new_height != g_chart_height)
+      {
+         g_chart_width = new_width;
+         g_chart_height = new_height;
+         ObjectsDeleteAll(0, "TM_");
+         CreateFullScreenPanel();
+         UpdateFullScreenPanel();
+      }
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -182,94 +218,114 @@ void AddSymbolIfExists(string symbol)
 {
    if(g_symbol_count >= MAX_SYMBOLS) return;
 
-   // シンボルが存在するか確認
    if(SymbolSelect(symbol, true))
    {
       g_symbols[g_symbol_count] = symbol;
       g_symbol_count++;
-      Print("Added symbol: ", symbol);
-   }
-   else
-   {
-      Print("Symbol not available: ", symbol);
    }
 }
 
 //+------------------------------------------------------------------+
-//| Create Multi-Symbol Panel                                         |
+//| Create Full Screen Panel                                          |
 //+------------------------------------------------------------------+
-void CreateMultiSymbolPanel()
+void CreateFullScreenPanel()
 {
-   int x = InpPanelX;
-   int y = InpPanelY;
-   int row_height = 20;
-   int panel_width = 750;
-   int header_height = 25;
-   int panel_height = header_height + (g_symbol_count + 1) * row_height + 10;
+   int margin = 20;
+   int title_height = 60;
+   int legend_height = 50;
+   int available_height = g_chart_height - title_height - legend_height - margin * 2;
+   int row_height = available_height / (g_symbol_count + 1);
+   if(row_height < 30) row_height = 30;
+   if(row_height > 50) row_height = 50;
 
-   // メイン背景
-   CreateRectangle("TM_BG", x, y, panel_width, panel_height, InpBackgroundColor);
+   int col_width = (g_chart_width - margin * 2) / 6;
 
-   // タイトルバー
-   CreateRectangle("TM_Header", x, y, panel_width, header_height, InpHeaderColor);
-   CreateLabel("TM_Title", x + 10, y + 5, "Multi-Symbol Trend Monitor (D1)", clrWhite, 11);
-   CreateLabel("TM_Time", x + panel_width - 200, y + 5, "", clrSilver, 9);
+   // 背景
+   CreateRectangle("TM_BG", 0, 0, g_chart_width, g_chart_height, InpBackgroundColor);
 
-   // カラムヘッダー
-   int header_y = y + header_height + 5;
-   CreateLabel("TM_H_Symbol", x + 10, header_y, "Symbol", clrSilver, 9);
-   CreateLabel("TM_H_Regime", x + 100, header_y, "Regime", clrSilver, 9);
-   CreateLabel("TM_H_TScore", x + 200, header_y, "Trend", clrSilver, 9);
-   CreateLabel("TM_H_RScore", x + 260, header_y, "Range", clrSilver, 9);
-   CreateLabel("TM_H_ADX", x + 320, header_y, "ADX", clrSilver, 9);
-   CreateLabel("TM_H_RSI", x + 380, header_y, "RSI", clrSilver, 9);
-   CreateLabel("TM_H_Signals", x + 440, header_y, "Signals", clrSilver, 9);
+   // タイトル
+   int title_font = 24;
+   CreateLabelEx("TM_Title", g_chart_width / 2, margin,
+      "MULTI-SYMBOL TREND MONITOR (D1)", clrWhite, title_font, true, true);
+
+   // 更新時刻
+   CreateLabelEx("TM_Time", g_chart_width / 2, margin + 35,
+      "", clrSilver, 12, false, true);
+
+   // ヘッダー行
+   int header_y = title_height + margin;
+   int header_font = 14;
+   CreateLabelEx("TM_H1", margin + col_width * 0 + col_width/2, header_y, "SYMBOL", clrSilver, header_font, true, true);
+   CreateLabelEx("TM_H2", margin + col_width * 1 + col_width/2, header_y, "STATUS", clrSilver, header_font, true, true);
+   CreateLabelEx("TM_H3", margin + col_width * 2 + col_width/2, header_y, "TREND", clrSilver, header_font, true, true);
+   CreateLabelEx("TM_H4", margin + col_width * 3 + col_width/2, header_y, "ADX", clrSilver, header_font, true, true);
+   CreateLabelEx("TM_H5", margin + col_width * 4 + col_width/2, header_y, "RSI", clrSilver, header_font, true, true);
+   CreateLabelEx("TM_H6", margin + col_width * 5 + col_width/2, header_y, "SIGNALS", clrSilver, header_font, true, true);
+
+   // 区切り線
+   CreateHLine("TM_Line1", header_y + 25, clrDimGray);
 
    // 各シンボル行
+   int data_font = 16;
+   int start_y = header_y + 35;
+
    for(int i = 0; i < g_symbol_count; i++)
    {
-      int row_y = header_y + (i + 1) * row_height;
+      int row_y = start_y + i * row_height;
       string prefix = "TM_R" + IntegerToString(i) + "_";
 
-      // 行背景（交互色）
-      color row_bg = (i % 2 == 0) ? InpBackgroundColor : C'25,25,35';
-      CreateRectangle(prefix + "BG", x + 5, row_y - 2, panel_width - 10, row_height, row_bg);
+      // 行背景（交互）
+      if(i % 2 == 1)
+      {
+         CreateRectangle(prefix + "BG", margin, row_y - 5, g_chart_width - margin * 2, row_height, C'20,20,20');
+      }
 
-      // シンボル名
-      CreateLabel(prefix + "Symbol", x + 10, row_y, g_symbols[i], clrWhite, 9);
+      // シンボル
+      CreateLabelEx(prefix + "Symbol", margin + col_width * 0 + col_width/2, row_y,
+         g_symbols[i], clrWhite, data_font, true, true);
 
-      // Regime
-      CreateLabel(prefix + "Regime", x + 100, row_y, "---", clrGray, 9);
+      // ステータス
+      CreateLabelEx(prefix + "Status", margin + col_width * 1 + col_width/2, row_y,
+         "---", clrGray, data_font + 2, false, true);
 
-      // スコア
-      CreateLabel(prefix + "TScore", x + 200, row_y, "0", clrGray, 9);
-      CreateLabel(prefix + "RScore", x + 260, row_y, "0", clrGray, 9);
+      // トレンドスコア
+      CreateLabelEx(prefix + "TScore", margin + col_width * 2 + col_width/2, row_y,
+         "0", clrGray, data_font, false, true);
 
-      // インジケーター値
-      CreateLabel(prefix + "ADX", x + 320, row_y, "0.0", clrGray, 9);
-      CreateLabel(prefix + "RSI", x + 380, row_y, "0.0", clrGray, 9);
+      // ADX
+      CreateLabelEx(prefix + "ADX", margin + col_width * 3 + col_width/2, row_y,
+         "0.0", clrGray, data_font, false, true);
+
+      // RSI
+      CreateLabelEx(prefix + "RSI", margin + col_width * 4 + col_width/2, row_y,
+         "0.0", clrGray, data_font, false, true);
 
       // シグナル
-      CreateLabel(prefix + "Signals", x + 440, row_y, "", clrGray, 8);
+      CreateLabelEx(prefix + "Signals", margin + col_width * 5 + col_width/2, row_y,
+         "-", clrGray, data_font - 2, false, true);
    }
 
    // 凡例
-   int legend_y = y + panel_height + 5;
-   CreateLabel("TM_Legend", x + 10, legend_y, "Legend:", clrSilver, 8);
-   CreateLabel("TM_Leg1", x + 60, legend_y, "UP", InpTrendUpColor, 8);
-   CreateLabel("TM_Leg2", x + 90, legend_y, "DOWN", InpTrendDownColor, 8);
-   CreateLabel("TM_Leg3", x + 140, legend_y, "RANGE", InpRangeColor, 8);
-   CreateLabel("TM_Leg4", x + 200, legend_y, "TRENDLESS", InpTrendlessColor, 8);
+   int legend_y = g_chart_height - legend_height + 10;
+   int legend_font = 14;
+
+   CreateLabelEx("TM_Leg0", g_chart_width / 2 - 300, legend_y, "Legend:", clrWhite, legend_font, false, false);
+   CreateLabelEx("TM_Leg1", g_chart_width / 2 - 180, legend_y, "TREND", InpTrendColor, legend_font, true, false);
+   CreateLabelEx("TM_Leg2", g_chart_width / 2 - 50, legend_y, "RANGE", InpRangeColor, legend_font, true, false);
+   CreateLabelEx("TM_Leg3", g_chart_width / 2 + 80, legend_y, "FLAT", InpTrendlessColor, legend_font, false, false);
+
+   CreateLabelEx("TM_Leg4", g_chart_width / 2, legend_y + 25,
+      "Trend=蛍光緑(太字) | Range=赤(太字) | Trendless=グレー(普通字)", clrDimGray, 10, false, true);
 }
 
 //+------------------------------------------------------------------+
-//| Update Multi-Symbol Panel                                         |
+//| Update Full Screen Panel                                          |
 //+------------------------------------------------------------------+
-void UpdateMultiSymbolPanel()
+void UpdateFullScreenPanel()
 {
    // 時刻更新
    ObjectSetString(0, "TM_Time", OBJPROP_TEXT,
-      "Updated: " + TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES));
+      "Last Update: " + TimeToString(TimeCurrent(), TIME_DATE|TIME_MINUTES));
 
    // 各シンボルの情報更新
    for(int i = 0; i < g_symbol_count; i++)
@@ -279,39 +335,69 @@ void UpdateMultiSymbolPanel()
       SMarketAnalysisResult result;
       g_regimes[i].GetAnalysisResult(result);
 
-      // Regime表示
-      string regime_str = GetRegimeShortName(result.regime);
-      color regime_color = GetRegimeColor(result.regime);
+      // ステータス（色と太字を変更）
+      string status_str = "";
+      color status_color = InpTrendlessColor;
+      bool is_bold = false;
 
-      ObjectSetString(0, prefix + "Regime", OBJPROP_TEXT, regime_str);
-      ObjectSetInteger(0, prefix + "Regime", OBJPROP_COLOR, regime_color);
+      switch(result.regime)
+      {
+         case REGIME_TREND_UP:
+            status_str = "▲ TREND UP";
+            status_color = InpTrendColor;
+            is_bold = true;
+            break;
+         case REGIME_TREND_DOWN:
+            status_str = "▼ TREND DOWN";
+            status_color = InpTrendColor;
+            is_bold = true;
+            break;
+         case REGIME_RANGE:
+            status_str = "◆ RANGE";
+            status_color = InpRangeColor;
+            is_bold = true;
+            break;
+         case REGIME_TRENDLESS:
+            status_str = "― FLAT";
+            status_color = InpTrendlessColor;
+            is_bold = false;
+            break;
+      }
 
-      // スコア表示
-      ObjectSetString(0, prefix + "TScore", OBJPROP_TEXT, IntegerToString(result.trend_score));
-      ObjectSetInteger(0, prefix + "TScore", OBJPROP_COLOR,
-         result.trend_score >= 60 ? InpTrendUpColor : clrGray);
+      ObjectSetString(0, prefix + "Status", OBJPROP_TEXT, status_str);
+      ObjectSetInteger(0, prefix + "Status", OBJPROP_COLOR, status_color);
+      ObjectSetString(0, prefix + "Status", OBJPROP_FONT, is_bold ? "Arial Bold" : "Arial");
 
-      ObjectSetString(0, prefix + "RScore", OBJPROP_TEXT, IntegerToString(result.range_score));
-      ObjectSetInteger(0, prefix + "RScore", OBJPROP_COLOR,
-         result.range_score >= 50 ? InpRangeColor : clrGray);
+      // シンボル名の色も連動
+      ObjectSetInteger(0, prefix + "Symbol", OBJPROP_COLOR, status_color);
+      ObjectSetString(0, prefix + "Symbol", OBJPROP_FONT, is_bold ? "Arial Bold" : "Arial");
+
+      // トレンドスコア
+      string tscore_str = IntegerToString(result.trend_score);
+      ObjectSetString(0, prefix + "TScore", OBJPROP_TEXT, tscore_str);
+      ObjectSetInteger(0, prefix + "TScore", OBJPROP_COLOR, status_color);
+      ObjectSetString(0, prefix + "TScore", OBJPROP_FONT, is_bold ? "Arial Bold" : "Arial");
 
       // ADX
-      ObjectSetString(0, prefix + "ADX", OBJPROP_TEXT, DoubleToString(result.adx_value, 1));
-      ObjectSetInteger(0, prefix + "ADX", OBJPROP_COLOR,
-         result.is_adx_trending ? InpTrendUpColor : clrGray);
+      string adx_str = DoubleToString(result.adx_value, 1);
+      ObjectSetString(0, prefix + "ADX", OBJPROP_TEXT, adx_str);
+      ObjectSetInteger(0, prefix + "ADX", OBJPROP_COLOR, status_color);
+      ObjectSetString(0, prefix + "ADX", OBJPROP_FONT, is_bold ? "Arial Bold" : "Arial");
 
       // RSI
-      ObjectSetString(0, prefix + "RSI", OBJPROP_TEXT, DoubleToString(result.rsi_value, 1));
-      color rsi_color = clrGray;
-      if(result.rsi_value >= 70) rsi_color = InpTrendUpColor;
-      else if(result.rsi_value <= 30) rsi_color = InpTrendDownColor;
-      else if(result.is_rsi_near_center) rsi_color = InpRangeColor;
-      ObjectSetInteger(0, prefix + "RSI", OBJPROP_COLOR, rsi_color);
+      string rsi_str = DoubleToString(result.rsi_value, 1);
+      ObjectSetString(0, prefix + "RSI", OBJPROP_TEXT, rsi_str);
+      ObjectSetInteger(0, prefix + "RSI", OBJPROP_COLOR, status_color);
+      ObjectSetString(0, prefix + "RSI", OBJPROP_FONT, is_bold ? "Arial Bold" : "Arial");
 
       // シグナル
       string signals = BuildSignalString(result);
       ObjectSetString(0, prefix + "Signals", OBJPROP_TEXT, signals);
+      ObjectSetInteger(0, prefix + "Signals", OBJPROP_COLOR, status_color);
+      ObjectSetString(0, prefix + "Signals", OBJPROP_FONT, is_bold ? "Arial Bold" : "Arial");
    }
+
+   ChartRedraw(0);
 }
 
 //+------------------------------------------------------------------+
@@ -321,21 +407,13 @@ string BuildSignalString(SMarketAnalysisResult &result)
 {
    string signals = "";
 
-   // トレンドシグナル
    if(result.is_perfect_order_bullish) signals += "PO+ ";
    if(result.is_perfect_order_bearish) signals += "PO- ";
    if(result.is_bb_expanding) signals += "BBEx ";
    if(result.is_band_walk_upper) signals += "BW+ ";
    if(result.is_band_walk_lower) signals += "BW- ";
-
-   // レンジシグナル
    if(result.is_bb_squeezing) signals += "BBSq ";
-   if(result.is_ma_horizontal) signals += "MAH ";
-
-   // 雲
    if(result.is_in_ichimoku_cloud) signals += "Cloud ";
-
-   // ダウ理論
    if(result.is_higher_highs && result.is_higher_lows) signals += "HH/HL ";
    if(result.is_lower_highs && result.is_lower_lows) signals += "LH/LL ";
 
@@ -360,21 +438,6 @@ string GetRegimeShortName(ENUM_MARKET_REGIME regime)
 }
 
 //+------------------------------------------------------------------+
-//| Get Regime Color                                                  |
-//+------------------------------------------------------------------+
-color GetRegimeColor(ENUM_MARKET_REGIME regime)
-{
-   switch(regime)
-   {
-      case REGIME_TREND_UP:   return InpTrendUpColor;
-      case REGIME_TREND_DOWN: return InpTrendDownColor;
-      case REGIME_RANGE:      return InpRangeColor;
-      case REGIME_TRENDLESS:  return InpTrendlessColor;
-      default:                return clrGray;
-   }
-}
-
-//+------------------------------------------------------------------+
 //| Create Rectangle Helper                                           |
 //+------------------------------------------------------------------+
 void CreateRectangle(string name, int x, int y, int width, int height, color bg_color)
@@ -388,13 +451,30 @@ void CreateRectangle(string name, int x, int y, int width, int height, color bg_
    ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
    ObjectSetInteger(0, name, OBJPROP_COLOR, bg_color);
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_BACK, true);
 }
 
 //+------------------------------------------------------------------+
-//| Create Label Helper                                               |
+//| Create Horizontal Line Helper                                     |
 //+------------------------------------------------------------------+
-void CreateLabel(string name, int x, int y, string text, color clr, int font_size)
+void CreateHLine(string name, int y, color line_color)
+{
+   ObjectCreate(0, name, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, 20);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, name, OBJPROP_XSIZE, g_chart_width - 40);
+   ObjectSetInteger(0, name, OBJPROP_YSIZE, 1);
+   ObjectSetInteger(0, name, OBJPROP_BGCOLOR, line_color);
+   ObjectSetInteger(0, name, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, line_color);
+   ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_BACK, true);
+}
+
+//+------------------------------------------------------------------+
+//| Create Label Extended Helper                                      |
+//+------------------------------------------------------------------+
+void CreateLabelEx(string name, int x, int y, string text, color clr, int font_size, bool bold, bool center)
 {
    ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
@@ -402,8 +482,9 @@ void CreateLabel(string name, int x, int y, string text, color clr, int font_siz
    ObjectSetString(0, name, OBJPROP_TEXT, text);
    ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
    ObjectSetInteger(0, name, OBJPROP_FONTSIZE, font_size);
-   ObjectSetString(0, name, OBJPROP_FONT, "Consolas");
+   ObjectSetString(0, name, OBJPROP_FONT, bold ? "Arial Bold" : "Arial");
    ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, center ? ANCHOR_CENTER : ANCHOR_LEFT);
 }
 
 //+------------------------------------------------------------------+
