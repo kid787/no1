@@ -332,6 +332,21 @@ void UpdateFullScreenPanel()
    {
       string prefix = "TM_R" + IntegerToString(i) + "_";
 
+      // データ準備チェック
+      if(!g_regimes[i].IsReady())
+      {
+         // ローディング表示
+         ObjectSetString(0, prefix + "Status", OBJPROP_TEXT, "Loading...");
+         ObjectSetInteger(0, prefix + "Status", OBJPROP_COLOR, clrDarkGray);
+         ObjectSetString(0, prefix + "Status", OBJPROP_FONT, "Arial");
+         ObjectSetInteger(0, prefix + "Symbol", OBJPROP_COLOR, clrDarkGray);
+         ObjectSetString(0, prefix + "TScore", OBJPROP_TEXT, "-");
+         ObjectSetString(0, prefix + "ADX", OBJPROP_TEXT, "-");
+         ObjectSetString(0, prefix + "RSI", OBJPROP_TEXT, "-");
+         ObjectSetString(0, prefix + "Signals", OBJPROP_TEXT, "-");
+         continue;
+      }
+
       SMarketAnalysisResult result;
       g_regimes[i].GetAnalysisResult(result);
 

@@ -245,6 +245,7 @@ private:
    double   CalculateBBWidth(int shift);
    double   GetAverageBBWidth(int lookback);
    double   GetAverageATR(int lookback);
+   bool     IsDataReady(void);
 
 public:
    // Constructor / Destructor
@@ -274,6 +275,7 @@ public:
    bool              IsTrending(void) { return m_result.is_adx_trending; }
    bool              IsRanging(void) { return m_result.is_bb_squeezing && m_result.is_rsi_ranging; }
    bool              IsTrendless(void) { return m_result.is_adx_very_low; }
+   bool              IsReady(void) { return m_is_initialized && IsDataReady(); }
 
    // Update Parameters
    void              SetParams(SMarketRegimeParams &params) { m_params = params; }
@@ -438,19 +440,50 @@ void CMarketRegime::ReleaseIndicators(void)
 }
 
 //+------------------------------------------------------------------+
+//| Check if indicators are ready                                     |
+//+------------------------------------------------------------------+
+bool CMarketRegime::IsDataReady(void)
+{
+   int bars_needed = m_params.bars_to_analyze;
+
+   // 各シンボルのバー数をチェック
+   int available_bars = Bars(m_symbol, m_timeframe);
+   if(available_bars < bars_needed)
+      return false;
+
+   // 各インジケーターの計算完了をチェック
+   if(BarsCalculated(m_ma_short_handle) < bars_needed) return false;
+   if(BarsCalculated(m_ma_medium_handle) < bars_needed) return false;
+   if(BarsCalculated(m_ma_long_handle) < bars_needed) return false;
+   if(BarsCalculated(m_adx_handle) < bars_needed) return false;
+   if(BarsCalculated(m_bb_handle) < bars_needed) return false;
+   if(BarsCalculated(m_rsi_handle) < bars_needed) return false;
+   if(BarsCalculated(m_atr_handle) < bars_needed) return false;
+   if(BarsCalculated(m_ichimoku_handle) < bars_needed) return false;
+
+   return true;
+}
+
+//+------------------------------------------------------------------+
 //| Main Analysis Function                                            |
 //+------------------------------------------------------------------+
 ENUM_MARKET_REGIME CMarketRegime::Analyze(bool force_update = false)
 {
    if(!m_is_initialized)
    {
-      Print("CMarketRegime: Not initialized");
       return REGIME_TRENDLESS;
+   }
+
+   // データ準備チェック
+   if(!IsDataReady())
+   {
+      // データ未準備の場合は前回の結果を返す（エラーメッセージは出さない）
+      return m_result.regime;
    }
 
    // 新しい日足が確定したかチェック（計算負荷軽減）
    datetime current_bar_time = iTime(m_symbol, m_timeframe, 0);
-   if(!force_update && current_bar_time == m_last_calc_time)
+   if(!force_update && current_bar_time == m_last_calc_time && m_last_calc_time != 0)
    {
       return m_result.regime;  // キャッシュされた結果を返す
    }
@@ -458,26 +491,11 @@ ENUM_MARKET_REGIME CMarketRegime::Analyze(bool force_update = false)
    // Reset result
    InitAnalysisResult(m_result);
 
-   // Analyze all conditions
-   if(!AnalyzeTrendConditions())
-   {
-      Print("CMarketRegime: Failed to analyze trend conditions");
-   }
-
-   if(!AnalyzeRangeConditions())
-   {
-      Print("CMarketRegime: Failed to analyze range conditions");
-   }
-
-   if(!AnalyzeTrendlessConditions())
-   {
-      Print("CMarketRegime: Failed to analyze trendless conditions");
-   }
-
-   if(!AnalyzePriceAction())
-   {
-      Print("CMarketRegime: Failed to analyze price action");
-   }
+   // Analyze all conditions (エラーは静かに処理)
+   AnalyzeTrendConditions();
+   AnalyzeRangeConditions();
+   AnalyzeTrendlessConditions();
+   AnalyzePriceAction();
 
    // Calculate scores and determine regime
    CalculateScores();
