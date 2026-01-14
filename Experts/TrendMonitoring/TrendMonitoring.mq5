@@ -1,5 +1,5 @@
 //+------------------------------------------------------------------+
-//|                                              MarketRegimeEA.mq5 |
+//|                                              TrendMonitoring.mq5 |
 //|                        Market Regime Detection Sample EA         |
 //|                     Demonstrates MarketRegime.mqh Usage          |
 //+------------------------------------------------------------------+
@@ -8,7 +8,7 @@
 #property version   "1.00"
 #property strict
 
-#include <MarketRegime.mqh>
+#include "MarketRegime.mqh"
 
 //+------------------------------------------------------------------+
 //| Input Parameters - Moving Averages                                |
@@ -84,7 +84,7 @@ input color    InpTrendlessColor    = clrGray;  // トレンドレス色
 //| Global Variables                                                  |
 //+------------------------------------------------------------------+
 CMarketRegime  g_regime;
-ENUM_MARKET_REGIME g_last_regime = MARKET_REGIME_TRENDLESS;
+ENUM_MARKET_REGIME g_last_regime;
 bool           g_first_run = true;
 
 //+------------------------------------------------------------------+
@@ -93,7 +93,8 @@ bool           g_first_run = true;
 int OnInit()
 {
    // Set up parameters
-   MarketRegimeParams params;
+   SMarketRegimeParams params;
+   InitDefaultParams(params);
 
    // Moving Averages
    params.ma_short_period = InpMAShortPeriod;
@@ -140,11 +141,13 @@ int OnInit()
       return INIT_FAILED;
    }
 
+   g_last_regime = REGIME_TRENDLESS;
+
    // Create info panel
    if(InpShowPanel)
       CreatePanel();
 
-   Print("Market Regime EA initialized successfully");
+   Print("Trend Monitoring EA initialized successfully");
    Print("Analyzing ", _Symbol, " using D1 (Daily) timeframe data");
 
    return INIT_SUCCEEDED;
@@ -160,7 +163,7 @@ void OnDeinit(const int reason)
    // Remove panel objects
    ObjectsDeleteAll(0, "MR_");
 
-   Print("Market Regime EA deinitialized");
+   Print("Trend Monitoring EA deinitialized");
 }
 
 //+------------------------------------------------------------------+
@@ -169,7 +172,7 @@ void OnDeinit(const int reason)
 void OnTick()
 {
    // Analyze market regime (automatically cached per D1 bar)
-   ENUM_MARKET_REGIME current_regime = g_regime.Analyze();
+   ENUM_MARKET_REGIME current_regime = g_regime.Analyze(false);
 
    // Check for regime change
    if(current_regime != g_last_regime || g_first_run)
@@ -195,7 +198,7 @@ void OnRegimeChange(ENUM_MARKET_REGIME old_regime, ENUM_MARKET_REGIME new_regime
    string old_str = GetRegimeDisplayName(old_regime);
    string new_str = GetRegimeDisplayName(new_regime);
 
-   string message = StringFormat("Market Regime Changed: %s → %s\n%s",
+   string message = StringFormat("Market Regime Changed: %s -> %s\n%s",
                                   old_str, new_str,
                                   g_regime.GetRegimeDescription());
 
@@ -207,7 +210,8 @@ void OnRegimeChange(ENUM_MARKET_REGIME old_regime, ENUM_MARKET_REGIME new_regime
    }
 
    // Log detailed analysis
-   MarketAnalysisResult result = g_regime.GetAnalysisResult();
+   SMarketAnalysisResult result;
+   g_regime.GetAnalysisResult(result);
    Print(StringFormat("Scores - Trend: %d, Range: %d, Trendless: %d",
                        result.trend_score, result.range_score, result.trendless_score));
    Print(StringFormat("ADX: %.2f, RSI: %.2f, ATR: %.5f",
@@ -224,24 +228,24 @@ void ExecuteTradingLogic(ENUM_MARKET_REGIME regime)
 
    switch(regime)
    {
-      case MARKET_REGIME_TREND_UP:
+      case REGIME_TREND_UP:
          // Implement trend-following buy strategy
          // Example: Look for pullbacks to MA, breakout entries
          TrendFollowingStrategy(true);
          break;
 
-      case MARKET_REGIME_TREND_DOWN:
+      case REGIME_TREND_DOWN:
          // Implement trend-following sell strategy
          TrendFollowingStrategy(false);
          break;
 
-      case MARKET_REGIME_RANGE:
+      case REGIME_RANGE:
          // Implement mean-reversion strategy
          // Example: Buy at support, sell at resistance
          RangeTradingStrategy();
          break;
 
-      case MARKET_REGIME_TRENDLESS:
+      case REGIME_TRENDLESS:
          // Reduce or avoid trading
          // Example: Tighten stops, reduce position sizes
          TrendlessStrategy();
@@ -339,7 +343,7 @@ void CreatePanel()
    ObjectSetInteger(0, "MR_Background", OBJPROP_CORNER, CORNER_LEFT_UPPER);
 
    // Title
-   CreateLabel("MR_Title", x + 10, y + 5, "Market Regime Analyzer", clrWhite, 12);
+   CreateLabel("MR_Title", x + 10, y + 5, "Trend Monitoring - Market Regime", clrWhite, 12);
 
    // Regime display
    CreateLabel("MR_Regime", x + 10, y + 30, "Regime: ---", clrWhite, 10);
@@ -379,17 +383,18 @@ void CreateLabel(string name, int x, int y, string text, color clr, int font_siz
 //+------------------------------------------------------------------+
 void UpdatePanel()
 {
-   MarketAnalysisResult result = g_regime.GetAnalysisResult();
+   SMarketAnalysisResult result;
+   g_regime.GetAnalysisResult(result);
    ENUM_MARKET_REGIME regime = result.regime;
 
    // Get regime color
    color regime_color;
    switch(regime)
    {
-      case MARKET_REGIME_TREND_UP:   regime_color = InpTrendUpColor;   break;
-      case MARKET_REGIME_TREND_DOWN: regime_color = InpTrendDownColor; break;
-      case MARKET_REGIME_RANGE:      regime_color = InpRangeColor;     break;
-      default:                        regime_color = InpTrendlessColor; break;
+      case REGIME_TREND_UP:   regime_color = InpTrendUpColor;   break;
+      case REGIME_TREND_DOWN: regime_color = InpTrendDownColor; break;
+      case REGIME_RANGE:      regime_color = InpRangeColor;     break;
+      default:                regime_color = InpTrendlessColor; break;
    }
 
    // Update regime
@@ -433,12 +438,12 @@ void UpdatePanel()
 
    // Update conditions summary
    string conditions = "";
-   if(result.is_perfect_order_bullish) conditions += "PO↑ ";
-   if(result.is_perfect_order_bearish) conditions += "PO↓ ";
+   if(result.is_perfect_order_bullish) conditions += "PO(Up) ";
+   if(result.is_perfect_order_bearish) conditions += "PO(Down) ";
    if(result.is_bb_expanding) conditions += "BBExp ";
    if(result.is_bb_squeezing) conditions += "BBSqz ";
-   if(result.is_band_walk_upper) conditions += "BW↑ ";
-   if(result.is_band_walk_lower) conditions += "BW↓ ";
+   if(result.is_band_walk_upper) conditions += "BW(Up) ";
+   if(result.is_band_walk_lower) conditions += "BW(Down) ";
    if(result.is_in_ichimoku_cloud) conditions += "Cloud ";
 
    if(conditions == "") conditions = "No strong signals";
@@ -452,11 +457,11 @@ string GetRegimeDisplayName(ENUM_MARKET_REGIME regime)
 {
    switch(regime)
    {
-      case MARKET_REGIME_TREND_UP:   return "上昇トレンド (TREND UP)";
-      case MARKET_REGIME_TREND_DOWN: return "下降トレンド (TREND DOWN)";
-      case MARKET_REGIME_RANGE:      return "レンジ (RANGE)";
-      case MARKET_REGIME_TRENDLESS:  return "トレンドレス (TRENDLESS)";
-      default:                        return "不明 (UNKNOWN)";
+      case REGIME_TREND_UP:   return "TREND UP";
+      case REGIME_TREND_DOWN: return "TREND DOWN";
+      case REGIME_RANGE:      return "RANGE";
+      case REGIME_TRENDLESS:  return "TRENDLESS";
+      default:                return "UNKNOWN";
    }
 }
 

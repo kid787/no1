@@ -13,16 +13,16 @@
 //+------------------------------------------------------------------+
 enum ENUM_MARKET_REGIME
 {
-   MARKET_REGIME_TREND_UP,      // 上昇トレンド
-   MARKET_REGIME_TREND_DOWN,    // 下降トレンド
-   MARKET_REGIME_RANGE,         // レンジ（ボックス）相場
-   MARKET_REGIME_TRENDLESS      // ノントレンド（トレンドレス）
+   REGIME_TREND_UP = 0,      // 上昇トレンド
+   REGIME_TREND_DOWN = 1,    // 下降トレンド
+   REGIME_RANGE = 2,         // レンジ（ボックス）相場
+   REGIME_TRENDLESS = 3      // ノントレンド（トレンドレス）
 };
 
 //+------------------------------------------------------------------+
 //| Market Regime Detection Parameters Structure                     |
 //+------------------------------------------------------------------+
-struct MarketRegimeParams
+struct SMarketRegimeParams
 {
    // Moving Average Parameters
    int      ma_short_period;          // 短期MA期間（デフォルト: 20）
@@ -64,49 +64,51 @@ struct MarketRegimeParams
 
    // General Parameters
    int      bars_to_analyze;          // 分析に使用するバー数
-
-   // Default Constructor
-   MarketRegimeParams()
-   {
-      ma_short_period = 20;
-      ma_medium_period = 50;
-      ma_long_period = 200;
-      ma_slope_period = 5;
-      ma_slope_threshold = 0.0001;
-
-      adx_period = 14;
-      adx_trend_threshold = 25.0;
-      adx_trendless_threshold = 20.0;
-
-      bb_period = 20;
-      bb_deviation = 2.0;
-      bb_expansion_ratio = 1.5;
-      bb_squeeze_ratio = 0.5;
-
-      rsi_period = 14;
-      rsi_upper = 70.0;
-      rsi_lower = 30.0;
-      rsi_center_range = 10.0;
-
-      atr_period = 14;
-      atr_lookback = 20;
-      atr_low_threshold = 0.7;
-
-      ichi_tenkan = 9;
-      ichi_kijun = 26;
-      ichi_senkou = 52;
-
-      swing_lookback = 20;
-      swing_strength = 3;
-
-      bars_to_analyze = 100;
-   }
 };
+
+//+------------------------------------------------------------------+
+//| Initialize default parameters                                     |
+//+------------------------------------------------------------------+
+void InitDefaultParams(SMarketRegimeParams &params)
+{
+   params.ma_short_period = 20;
+   params.ma_medium_period = 50;
+   params.ma_long_period = 200;
+   params.ma_slope_period = 5;
+   params.ma_slope_threshold = 0.0001;
+
+   params.adx_period = 14;
+   params.adx_trend_threshold = 25.0;
+   params.adx_trendless_threshold = 20.0;
+
+   params.bb_period = 20;
+   params.bb_deviation = 2.0;
+   params.bb_expansion_ratio = 1.5;
+   params.bb_squeeze_ratio = 0.5;
+
+   params.rsi_period = 14;
+   params.rsi_upper = 70.0;
+   params.rsi_lower = 30.0;
+   params.rsi_center_range = 10.0;
+
+   params.atr_period = 14;
+   params.atr_lookback = 20;
+   params.atr_low_threshold = 0.7;
+
+   params.ichi_tenkan = 9;
+   params.ichi_kijun = 26;
+   params.ichi_senkou = 52;
+
+   params.swing_lookback = 20;
+   params.swing_strength = 3;
+
+   params.bars_to_analyze = 100;
+}
 
 //+------------------------------------------------------------------+
 //| Market Analysis Results Structure                                 |
 //+------------------------------------------------------------------+
-struct MarketAnalysisResult
+struct SMarketAnalysisResult
 {
    // Trend Indicators
    bool     is_perfect_order_bullish;    // 強気パーフェクトオーダー
@@ -153,50 +155,53 @@ struct MarketAnalysisResult
    // Final Regime
    ENUM_MARKET_REGIME regime;            // 判定結果
    string   regime_description;          // 判定説明
-
-   MarketAnalysisResult()
-   {
-      is_perfect_order_bullish = false;
-      is_perfect_order_bearish = false;
-      is_ma_sloping_up = false;
-      is_ma_sloping_down = false;
-      is_bb_expanding = false;
-      is_band_walk_upper = false;
-      is_band_walk_lower = false;
-      is_adx_trending = false;
-      is_adx_rising = false;
-      is_higher_highs = false;
-      is_higher_lows = false;
-      is_lower_highs = false;
-      is_lower_lows = false;
-
-      is_bb_squeezing = false;
-      is_bb_horizontal = false;
-      is_rsi_ranging = false;
-      is_rsi_near_center = false;
-      is_ma_horizontal = false;
-      is_price_crossing_ma = false;
-
-      is_adx_very_low = false;
-      is_in_ichimoku_cloud = false;
-      is_atr_declining = false;
-      is_atr_low = false;
-
-      adx_value = 0;
-      rsi_value = 0;
-      atr_value = 0;
-      atr_average = 0;
-      bb_width = 0;
-      bb_width_average = 0;
-
-      trend_score = 0;
-      range_score = 0;
-      trendless_score = 0;
-
-      regime = MARKET_REGIME_TRENDLESS;
-      regime_description = "";
-   }
 };
+
+//+------------------------------------------------------------------+
+//| Initialize analysis result                                        |
+//+------------------------------------------------------------------+
+void InitAnalysisResult(SMarketAnalysisResult &result)
+{
+   result.is_perfect_order_bullish = false;
+   result.is_perfect_order_bearish = false;
+   result.is_ma_sloping_up = false;
+   result.is_ma_sloping_down = false;
+   result.is_bb_expanding = false;
+   result.is_band_walk_upper = false;
+   result.is_band_walk_lower = false;
+   result.is_adx_trending = false;
+   result.is_adx_rising = false;
+   result.is_higher_highs = false;
+   result.is_higher_lows = false;
+   result.is_lower_highs = false;
+   result.is_lower_lows = false;
+
+   result.is_bb_squeezing = false;
+   result.is_bb_horizontal = false;
+   result.is_rsi_ranging = false;
+   result.is_rsi_near_center = false;
+   result.is_ma_horizontal = false;
+   result.is_price_crossing_ma = false;
+
+   result.is_adx_very_low = false;
+   result.is_in_ichimoku_cloud = false;
+   result.is_atr_declining = false;
+   result.is_atr_low = false;
+
+   result.adx_value = 0;
+   result.rsi_value = 0;
+   result.atr_value = 0;
+   result.atr_average = 0;
+   result.bb_width = 0;
+   result.bb_width_average = 0;
+
+   result.trend_score = 0;
+   result.range_score = 0;
+   result.trendless_score = 0;
+
+   result.regime = REGIME_TRENDLESS;
+   result.regime_description = "";
+}
 
 //+------------------------------------------------------------------+
 //| CMarketRegime Class - Market Condition Recognition               |
@@ -206,8 +211,8 @@ class CMarketRegime
 private:
    string               m_symbol;           // シンボル
    ENUM_TIMEFRAMES      m_timeframe;        // タイムフレーム（D1固定）
-   MarketRegimeParams   m_params;           // パラメータ
-   MarketAnalysisResult m_result;           // 分析結果
+   SMarketRegimeParams  m_params;           // パラメータ
+   SMarketAnalysisResult m_result;          // 分析結果
 
    // Indicator Handles
    int      m_ma_short_handle;
@@ -224,62 +229,61 @@ private:
    bool     m_is_initialized;              // 初期化フラグ
 
    // Private Methods
-   bool     CreateIndicators();
-   void     ReleaseIndicators();
-   bool     AnalyzeTrendConditions();
-   bool     AnalyzeRangeConditions();
-   bool     AnalyzeTrendlessConditions();
-   bool     AnalyzePriceAction();
-   void     CalculateScores();
-   ENUM_MARKET_REGIME DetermineRegime();
+   bool     CreateIndicators(void);
+   void     ReleaseIndicators(void);
+   bool     AnalyzeTrendConditions(void);
+   bool     AnalyzeRangeConditions(void);
+   bool     AnalyzeTrendlessConditions(void);
+   bool     AnalyzePriceAction(void);
+   void     CalculateScores(void);
+   ENUM_MARKET_REGIME DetermineRegime(void);
 
    // Helper Methods
    double   GetMASlope(int ma_handle, int period);
    bool     IsBandWalk(bool upper);
    int      CountMACrossings(int lookback);
-   bool     FindSwingHighLow(double &swing_high, double &swing_low, int lookback);
    double   CalculateBBWidth(int shift);
    double   GetAverageBBWidth(int lookback);
    double   GetAverageATR(int lookback);
 
 public:
    // Constructor / Destructor
-                     CMarketRegime();
-                    ~CMarketRegime();
+                     CMarketRegime(void);
+                    ~CMarketRegime(void);
 
    // Initialization
-   bool              Init(string symbol, MarketRegimeParams &params);
+   bool              Init(string symbol, SMarketRegimeParams &params);
    bool              Init(string symbol);  // Use default params
-   void              Deinit();
+   void              Deinit(void);
 
    // Main Analysis Function
-   ENUM_MARKET_REGIME Analyze(bool force_update = false);
+   ENUM_MARKET_REGIME Analyze(bool force_update);
 
    // Getters
-   ENUM_MARKET_REGIME GetCurrentRegime() const { return m_result.regime; }
-   MarketAnalysisResult GetAnalysisResult() const { return m_result; }
-   string            GetRegimeString() const;
-   string            GetRegimeDescription() const { return m_result.regime_description; }
+   ENUM_MARKET_REGIME GetCurrentRegime(void) { return m_result.regime; }
+   void               GetAnalysisResult(SMarketAnalysisResult &result) { result = m_result; }
+   string             GetRegimeString(void);
+   string             GetRegimeDescription(void) { return m_result.regime_description; }
 
    // Score Getters
-   int               GetTrendScore() const { return m_result.trend_score; }
-   int               GetRangeScore() const { return m_result.range_score; }
-   int               GetTrendlessScore() const { return m_result.trendless_score; }
+   int               GetTrendScore(void) { return m_result.trend_score; }
+   int               GetRangeScore(void) { return m_result.range_score; }
+   int               GetTrendlessScore(void) { return m_result.trendless_score; }
 
    // Individual Indicator Checks
-   bool              IsTrending() const { return m_result.is_adx_trending; }
-   bool              IsRanging() const { return m_result.is_bb_squeezing && m_result.is_rsi_ranging; }
-   bool              IsTrendless() const { return m_result.is_adx_very_low; }
+   bool              IsTrending(void) { return m_result.is_adx_trending; }
+   bool              IsRanging(void) { return m_result.is_bb_squeezing && m_result.is_rsi_ranging; }
+   bool              IsTrendless(void) { return m_result.is_adx_very_low; }
 
    // Update Parameters
-   void              SetParams(MarketRegimeParams &params) { m_params = params; }
-   MarketRegimeParams GetParams() const { return m_params; }
+   void              SetParams(SMarketRegimeParams &params) { m_params = params; }
+   void              GetParams(SMarketRegimeParams &params) { params = m_params; }
 };
 
 //+------------------------------------------------------------------+
 //| Constructor                                                       |
 //+------------------------------------------------------------------+
-CMarketRegime::CMarketRegime()
+CMarketRegime::CMarketRegime(void)
 {
    m_symbol = "";
    m_timeframe = PERIOD_D1;  // 日足固定
@@ -294,12 +298,15 @@ CMarketRegime::CMarketRegime()
    m_rsi_handle = INVALID_HANDLE;
    m_atr_handle = INVALID_HANDLE;
    m_ichimoku_handle = INVALID_HANDLE;
+
+   InitDefaultParams(m_params);
+   InitAnalysisResult(m_result);
 }
 
 //+------------------------------------------------------------------+
 //| Destructor                                                        |
 //+------------------------------------------------------------------+
-CMarketRegime::~CMarketRegime()
+CMarketRegime::~CMarketRegime(void)
 {
    Deinit();
 }
@@ -307,7 +314,7 @@ CMarketRegime::~CMarketRegime()
 //+------------------------------------------------------------------+
 //| Initialize with custom parameters                                 |
 //+------------------------------------------------------------------+
-bool CMarketRegime::Init(string symbol, MarketRegimeParams &params)
+bool CMarketRegime::Init(string symbol, SMarketRegimeParams &params)
 {
    if(m_is_initialized)
       Deinit();
@@ -331,14 +338,15 @@ bool CMarketRegime::Init(string symbol, MarketRegimeParams &params)
 //+------------------------------------------------------------------+
 bool CMarketRegime::Init(string symbol)
 {
-   MarketRegimeParams default_params;
+   SMarketRegimeParams default_params;
+   InitDefaultParams(default_params);
    return Init(symbol, default_params);
 }
 
 //+------------------------------------------------------------------+
 //| Deinitialize                                                      |
 //+------------------------------------------------------------------+
-void CMarketRegime::Deinit()
+void CMarketRegime::Deinit(void)
 {
    ReleaseIndicators();
    m_is_initialized = false;
@@ -347,7 +355,7 @@ void CMarketRegime::Deinit()
 //+------------------------------------------------------------------+
 //| Create all indicator handles                                      |
 //+------------------------------------------------------------------+
-bool CMarketRegime::CreateIndicators()
+bool CMarketRegime::CreateIndicators(void)
 {
    // Moving Averages (EMA)
    m_ma_short_handle = iMA(m_symbol, m_timeframe, m_params.ma_short_period, 0, MODE_EMA, PRICE_CLOSE);
@@ -417,7 +425,7 @@ bool CMarketRegime::CreateIndicators()
 //+------------------------------------------------------------------+
 //| Release all indicator handles                                     |
 //+------------------------------------------------------------------+
-void CMarketRegime::ReleaseIndicators()
+void CMarketRegime::ReleaseIndicators(void)
 {
    if(m_ma_short_handle != INVALID_HANDLE)  { IndicatorRelease(m_ma_short_handle);  m_ma_short_handle = INVALID_HANDLE; }
    if(m_ma_medium_handle != INVALID_HANDLE) { IndicatorRelease(m_ma_medium_handle); m_ma_medium_handle = INVALID_HANDLE; }
@@ -432,12 +440,12 @@ void CMarketRegime::ReleaseIndicators()
 //+------------------------------------------------------------------+
 //| Main Analysis Function                                            |
 //+------------------------------------------------------------------+
-ENUM_MARKET_REGIME CMarketRegime::Analyze(bool force_update)
+ENUM_MARKET_REGIME CMarketRegime::Analyze(bool force_update = false)
 {
    if(!m_is_initialized)
    {
       Print("CMarketRegime: Not initialized");
-      return MARKET_REGIME_TRENDLESS;
+      return REGIME_TRENDLESS;
    }
 
    // 新しい日足が確定したかチェック（計算負荷軽減）
@@ -448,8 +456,7 @@ ENUM_MARKET_REGIME CMarketRegime::Analyze(bool force_update)
    }
 
    // Reset result
-   MarketAnalysisResult new_result;
-   m_result = new_result;
+   InitAnalysisResult(m_result);
 
    // Analyze all conditions
    if(!AnalyzeTrendConditions())
@@ -485,7 +492,7 @@ ENUM_MARKET_REGIME CMarketRegime::Analyze(bool force_update)
 //+------------------------------------------------------------------+
 //| Analyze Trend Conditions                                          |
 //+------------------------------------------------------------------+
-bool CMarketRegime::AnalyzeTrendConditions()
+bool CMarketRegime::AnalyzeTrendConditions(void)
 {
    double ma_short[], ma_medium[], ma_long[];
    double adx_main[], adx_plus[], adx_minus[];
@@ -555,7 +562,7 @@ bool CMarketRegime::AnalyzeTrendConditions()
 //+------------------------------------------------------------------+
 //| Analyze Range Conditions                                          |
 //+------------------------------------------------------------------+
-bool CMarketRegime::AnalyzeRangeConditions()
+bool CMarketRegime::AnalyzeRangeConditions(void)
 {
    double rsi[];
    double bb_upper[], bb_middle[], bb_lower[];
@@ -607,7 +614,7 @@ bool CMarketRegime::AnalyzeRangeConditions()
 //+------------------------------------------------------------------+
 //| Analyze Trendless Conditions                                      |
 //+------------------------------------------------------------------+
-bool CMarketRegime::AnalyzeTrendlessConditions()
+bool CMarketRegime::AnalyzeTrendlessConditions(void)
 {
    double adx_main[];
    double atr[];
@@ -641,11 +648,11 @@ bool CMarketRegime::AnalyzeTrendlessConditions()
    m_result.is_atr_declining = (atr[0] < atr[1]) && (atr[1] < atr[2]) && (atr[2] < atr[3]);
 
    // === Ichimoku Cloud Check ===
-   double close = iClose(m_symbol, m_timeframe, 0);
+   double close_price = iClose(m_symbol, m_timeframe, 0);
    double cloud_top = MathMax(senkou_a[0], senkou_b[0]);
    double cloud_bottom = MathMin(senkou_a[0], senkou_b[0]);
 
-   m_result.is_in_ichimoku_cloud = (close >= cloud_bottom) && (close <= cloud_top);
+   m_result.is_in_ichimoku_cloud = (close_price >= cloud_bottom) && (close_price <= cloud_top);
 
    return true;
 }
@@ -653,27 +660,33 @@ bool CMarketRegime::AnalyzeTrendlessConditions()
 //+------------------------------------------------------------------+
 //| Analyze Price Action (Swing High/Low)                             |
 //+------------------------------------------------------------------+
-bool CMarketRegime::AnalyzePriceAction()
+bool CMarketRegime::AnalyzePriceAction(void)
 {
-   double high[], low[], close[];
+   double high[], low[], close_arr[];
 
    ArraySetAsSeries(high, true);
    ArraySetAsSeries(low, true);
-   ArraySetAsSeries(close, true);
+   ArraySetAsSeries(close_arr, true);
 
    int bars_needed = m_params.bars_to_analyze;
 
    if(CopyHigh(m_symbol, m_timeframe, 0, bars_needed, high) <= 0) return false;
    if(CopyLow(m_symbol, m_timeframe, 0, bars_needed, low) <= 0) return false;
-   if(CopyClose(m_symbol, m_timeframe, 0, bars_needed, close) <= 0) return false;
+   if(CopyClose(m_symbol, m_timeframe, 0, bars_needed, close_arr) <= 0) return false;
 
    // Find recent swing points
    int strength = m_params.swing_strength;
    int lookback = m_params.swing_lookback;
 
-   double swing_highs[4] = {0, 0, 0, 0};
-   double swing_lows[4] = {0, 0, 0, 0};
-   int sh_count = 0, sl_count = 0;
+   double swing_highs[];
+   double swing_lows[];
+   ArrayResize(swing_highs, 4);
+   ArrayResize(swing_lows, 4);
+   ArrayInitialize(swing_highs, 0);
+   ArrayInitialize(swing_lows, 0);
+
+   int sh_count = 0;
+   int sl_count = 0;
 
    for(int i = strength; i < lookback - strength && (sh_count < 4 || sl_count < 4); i++)
    {
@@ -691,7 +704,8 @@ bool CMarketRegime::AnalyzePriceAction()
          }
          if(is_swing_high)
          {
-            swing_highs[sh_count++] = high[i];
+            swing_highs[sh_count] = high[i];
+            sh_count++;
          }
       }
 
@@ -709,7 +723,8 @@ bool CMarketRegime::AnalyzePriceAction()
          }
          if(is_swing_low)
          {
-            swing_lows[sl_count++] = low[i];
+            swing_lows[sl_count] = low[i];
+            sl_count++;
          }
       }
    }
@@ -733,7 +748,7 @@ bool CMarketRegime::AnalyzePriceAction()
 //+------------------------------------------------------------------+
 //| Calculate Scores for Each Regime                                  |
 //+------------------------------------------------------------------+
-void CMarketRegime::CalculateScores()
+void CMarketRegime::CalculateScores(void)
 {
    // === Trend Score (0-100) ===
    int trend_score = 0;
@@ -767,7 +782,7 @@ void CMarketRegime::CalculateScores()
       (m_result.is_lower_highs && m_result.is_lower_lows))
       trend_score += 10;
 
-   m_result.trend_score = MathMin(trend_score, 100);
+   m_result.trend_score = (int)MathMin(trend_score, 100);
 
    // === Range Score (0-100) ===
    int range_score = 0;
@@ -796,7 +811,7 @@ void CMarketRegime::CalculateScores()
    if(m_result.is_price_crossing_ma)
       range_score += 15;
 
-   m_result.range_score = MathMin(range_score, 100);
+   m_result.range_score = (int)MathMin(range_score, 100);
 
    // === Trendless Score (0-100) ===
    int trendless_score = 0;
@@ -821,15 +836,15 @@ void CMarketRegime::CalculateScores()
    if(!m_result.is_higher_highs && !m_result.is_lower_lows)
       trendless_score += 10;
 
-   m_result.trendless_score = MathMin(trendless_score, 100);
+   m_result.trendless_score = (int)MathMin(trendless_score, 100);
 }
 
 //+------------------------------------------------------------------+
 //| Determine Final Market Regime                                     |
 //+------------------------------------------------------------------+
-ENUM_MARKET_REGIME CMarketRegime::DetermineRegime()
+ENUM_MARKET_REGIME CMarketRegime::DetermineRegime(void)
 {
-   ENUM_MARKET_REGIME regime = MARKET_REGIME_TRENDLESS;
+   ENUM_MARKET_REGIME regime = REGIME_TRENDLESS;
    string description = "";
 
    // === Decision Logic ===
@@ -856,7 +871,7 @@ ENUM_MARKET_REGIME CMarketRegime::DetermineRegime()
 
       if(bullish && !bearish)
       {
-         regime = MARKET_REGIME_TREND_UP;
+         regime = REGIME_TREND_UP;
          description = "上昇トレンド: ";
          if(m_result.is_perfect_order_bullish) description += "パーフェクトオーダー ";
          if(m_result.is_bb_expanding) description += "BBエクスパンション ";
@@ -864,7 +879,7 @@ ENUM_MARKET_REGIME CMarketRegime::DetermineRegime()
       }
       else if(bearish && !bullish)
       {
-         regime = MARKET_REGIME_TREND_DOWN;
+         regime = REGIME_TREND_DOWN;
          description = "下降トレンド: ";
          if(m_result.is_perfect_order_bearish) description += "パーフェクトオーダー ";
          if(m_result.is_bb_expanding) description += "BBエクスパンション ";
@@ -873,9 +888,9 @@ ENUM_MARKET_REGIME CMarketRegime::DetermineRegime()
    }
 
    // Range判定: レンジスコアが高くトレンドスコアが低い
-   if(regime == MARKET_REGIME_TRENDLESS && m_result.range_score >= 50 && m_result.trend_score < 40)
+   if(regime == REGIME_TRENDLESS && m_result.range_score >= 50 && m_result.trend_score < 40)
    {
-      regime = MARKET_REGIME_RANGE;
+      regime = REGIME_RANGE;
       description = "レンジ相場: ";
       if(m_result.is_bb_squeezing) description += "BBスクイーズ ";
       if(m_result.is_rsi_near_center) description += StringFormat("RSI=%.1f ", m_result.rsi_value);
@@ -883,7 +898,7 @@ ENUM_MARKET_REGIME CMarketRegime::DetermineRegime()
    }
 
    // Trendless判定: デフォルトまたは明確なトレンドレス条件
-   if(regime == MARKET_REGIME_TRENDLESS)
+   if(regime == REGIME_TRENDLESS)
    {
       description = "トレンドレス: ";
       if(m_result.is_adx_very_low) description += StringFormat("ADX=%.1f(低) ", m_result.adx_value);
@@ -915,16 +930,16 @@ double CMarketRegime::GetMASlope(int ma_handle, int period)
 //+------------------------------------------------------------------+
 bool CMarketRegime::IsBandWalk(bool upper)
 {
-   double close[], bb_upper[], bb_lower[], bb_middle[];
+   double close_arr[], bb_upper[], bb_lower[], bb_middle[];
 
-   ArraySetAsSeries(close, true);
+   ArraySetAsSeries(close_arr, true);
    ArraySetAsSeries(bb_upper, true);
    ArraySetAsSeries(bb_lower, true);
    ArraySetAsSeries(bb_middle, true);
 
    int lookback = 5;  // 直近5本のバーをチェック
 
-   if(CopyClose(m_symbol, m_timeframe, 0, lookback, close) <= 0) return false;
+   if(CopyClose(m_symbol, m_timeframe, 0, lookback, close_arr) <= 0) return false;
    if(CopyBuffer(m_bb_handle, 0, 0, lookback, bb_middle) <= 0) return false;
    if(CopyBuffer(m_bb_handle, 1, 0, lookback, bb_upper) <= 0) return false;
    if(CopyBuffer(m_bb_handle, 2, 0, lookback, bb_lower) <= 0) return false;
@@ -936,14 +951,14 @@ bool CMarketRegime::IsBandWalk(bool upper)
       {
          // 価格がミドルバンドより上にあり、アッパーバンドに近い
          double upper_zone = bb_middle[i] + (bb_upper[i] - bb_middle[i]) * 0.5;
-         if(close[i] > upper_zone)
+         if(close_arr[i] > upper_zone)
             count++;
       }
       else
       {
          // 価格がミドルバンドより下にあり、ローワーバンドに近い
          double lower_zone = bb_middle[i] - (bb_middle[i] - bb_lower[i]) * 0.5;
-         if(close[i] < lower_zone)
+         if(close_arr[i] < lower_zone)
             count++;
       }
    }
@@ -956,20 +971,20 @@ bool CMarketRegime::IsBandWalk(bool upper)
 //+------------------------------------------------------------------+
 int CMarketRegime::CountMACrossings(int lookback)
 {
-   double close[], ma[];
+   double close_arr[], ma[];
 
-   ArraySetAsSeries(close, true);
+   ArraySetAsSeries(close_arr, true);
    ArraySetAsSeries(ma, true);
 
-   if(CopyClose(m_symbol, m_timeframe, 0, lookback, close) <= 0) return 0;
+   if(CopyClose(m_symbol, m_timeframe, 0, lookback, close_arr) <= 0) return 0;
    if(CopyBuffer(m_ma_medium_handle, 0, 0, lookback, ma) <= 0) return 0;
 
    int crossings = 0;
-   bool was_above = close[lookback - 1] > ma[lookback - 1];
+   bool was_above = close_arr[lookback - 1] > ma[lookback - 1];
 
    for(int i = lookback - 2; i >= 0; i--)
    {
-      bool is_above = close[i] > ma[i];
+      bool is_above = close_arr[i] > ma[i];
       if(is_above != was_above)
       {
          crossings++;
@@ -1038,43 +1053,15 @@ double CMarketRegime::GetAverageATR(int lookback)
 //+------------------------------------------------------------------+
 //| Get Regime as String                                              |
 //+------------------------------------------------------------------+
-string CMarketRegime::GetRegimeString() const
+string CMarketRegime::GetRegimeString(void)
 {
    switch(m_result.regime)
    {
-      case MARKET_REGIME_TREND_UP:   return "TREND_UP";
-      case MARKET_REGIME_TREND_DOWN: return "TREND_DOWN";
-      case MARKET_REGIME_RANGE:      return "RANGE";
-      case MARKET_REGIME_TRENDLESS:  return "TRENDLESS";
-      default:                        return "UNKNOWN";
+      case REGIME_TREND_UP:   return "TREND_UP";
+      case REGIME_TREND_DOWN: return "TREND_DOWN";
+      case REGIME_RANGE:      return "RANGE";
+      case REGIME_TRENDLESS:  return "TRENDLESS";
+      default:                return "UNKNOWN";
    }
-}
-
-//+------------------------------------------------------------------+
-//| Utility Function: Get Market Regime (Standalone)                  |
-//+------------------------------------------------------------------+
-ENUM_MARKET_REGIME GetMarketRegime(string symbol, MarketRegimeParams &params)
-{
-   static CMarketRegime regime_detector;
-   static bool is_init = false;
-   static string last_symbol = "";
-
-   if(!is_init || symbol != last_symbol)
-   {
-      regime_detector.Init(symbol, params);
-      is_init = true;
-      last_symbol = symbol;
-   }
-
-   return regime_detector.Analyze();
-}
-
-//+------------------------------------------------------------------+
-//| Utility Function: Get Market Regime with Default Params           |
-//+------------------------------------------------------------------+
-ENUM_MARKET_REGIME GetMarketRegime(string symbol)
-{
-   MarketRegimeParams default_params;
-   return GetMarketRegime(symbol, default_params);
 }
 //+------------------------------------------------------------------+
