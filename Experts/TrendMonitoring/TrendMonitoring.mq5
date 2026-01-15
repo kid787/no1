@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
 #property link      ""
-#property version   "3.00"
+#property version   "3.10"
 #property strict
 
 #include "MarketRegime.mqh"
@@ -68,13 +68,26 @@ int OnInit()
    g_chart_width = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
    g_chart_height = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
 
-   // チャート設定（フルスクリーン用）
+   // チャート設定（フルスクリーン用 - ローソク足非表示）
    ChartSetInteger(0, CHART_SHOW_GRID, false);
    ChartSetInteger(0, CHART_SHOW_PERIOD_SEP, false);
    ChartSetInteger(0, CHART_SHOW_VOLUMES, false);
+   ChartSetInteger(0, CHART_SHOW_OHLC, false);
+   ChartSetInteger(0, CHART_SHOW_BID_LINE, false);
+   ChartSetInteger(0, CHART_SHOW_ASK_LINE, false);
+   ChartSetInteger(0, CHART_SHOW_LAST_LINE, false);
+   ChartSetInteger(0, CHART_SHOW_PRICE_SCALE, false);
+   ChartSetInteger(0, CHART_SHOW_DATE_SCALE, false);
    ChartSetInteger(0, CHART_COLOR_BACKGROUND, InpBackgroundColor);
    ChartSetInteger(0, CHART_COLOR_FOREGROUND, clrWhite);
    ChartSetInteger(0, CHART_FOREGROUND, false);
+
+   // ローソク足を背景色と同じにして非表示
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, InpBackgroundColor);
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, InpBackgroundColor);
+   ChartSetInteger(0, CHART_COLOR_CHART_UP, InpBackgroundColor);
+   ChartSetInteger(0, CHART_COLOR_CHART_DOWN, InpBackgroundColor);
+   ChartSetInteger(0, CHART_COLOR_CHART_LINE, InpBackgroundColor);
 
    // シンボルリスト初期化（ユーザー入力から）
    InitSymbolListFromInput();
