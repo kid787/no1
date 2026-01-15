@@ -5,7 +5,7 @@
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
 #property link      ""
-#property version   "2.10"
+#property version   "3.00"
 #property strict
 
 #include "MarketRegime.mqh"
@@ -13,7 +13,14 @@
 //+------------------------------------------------------------------+
 //| Constants                                                         |
 //+------------------------------------------------------------------+
-#define MAX_SYMBOLS 17   // 監視シンボル最大数
+#define MAX_SYMBOLS 20   // 監視シンボル最大数
+
+//+------------------------------------------------------------------+
+//| Input Parameters - Symbols (カンマ区切りで入力)                    |
+//+------------------------------------------------------------------+
+input group "=== Symbol Settings (カンマ区切り) ==="
+input string InpSymbols = "EURUSD,GBPUSD,AUDUSD,USDJPY,USDCAD,EURJPY,GBPJPY,AUDJPY,CADJPY,EURGBP,EURAUD,EURCAD,GBPAUD,GBPCAD,AUDCAD,XAUUSD,XAUJPY"; // 監視シンボル
+input string InpSymbolSuffix = "";  // シンボル接尾辞 (例: m, .pro, など)
 
 //+------------------------------------------------------------------+
 //| Input Parameters - Moving Averages                                |
@@ -44,6 +51,7 @@ input color    InpBackgroundColor   = clrBlack; // 背景色
 //| Global Variables                                                  |
 //+------------------------------------------------------------------+
 string g_symbols[MAX_SYMBOLS];                    // 監視シンボル配列
+string g_display_names[MAX_SYMBOLS];              // 表示用シンボル名
 CMarketRegime g_regimes[MAX_SYMBOLS];             // 各シンボルのRegime検出器
 ENUM_MARKET_REGIME g_last_regimes[MAX_SYMBOLS];   // 前回のRegime
 int g_symbol_count = 0;                           // 有効なシンボル数
@@ -68,8 +76,8 @@ int OnInit()
    ChartSetInteger(0, CHART_COLOR_FOREGROUND, clrWhite);
    ChartSetInteger(0, CHART_FOREGROUND, false);
 
-   // シンボルリスト初期化
-   InitSymbolList();
+   // シンボルリスト初期化（ユーザー入力から）
+   InitSymbolListFromInput();
 
    // パラメータ設定
    SMarketRegimeParams params;
@@ -93,8 +101,9 @@ int OnInit()
    // パネル作成
    CreateFullScreenPanel();
 
-   Print("=== Trend Monitoring EA v2.1 (Full Screen) ===");
+   Print("=== Trend Monitoring EA v3.0 (Custom Symbols) ===");
    Print("Monitoring ", g_symbol_count, " symbols on D1 timeframe");
+   Print("Symbol suffix: '", InpSymbolSuffix, "'");
 
    // チャートイベント有効化
    ChartSetInteger(0, CHART_EVENT_OBJECT_CREATE, true);
@@ -137,7 +146,7 @@ void OnTick()
          if(!g_first_run && InpShowAlerts)
          {
             string msg = StringFormat("%s: %s -> %s",
-               g_symbols[i],
+               g_display_names[i],
                GetRegimeShortName(g_last_regimes[i]),
                GetRegimeShortName(current));
             Alert(msg);
@@ -175,54 +184,74 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
 }
 
 //+------------------------------------------------------------------+
-//| Initialize Symbol List                                            |
+//| Initialize Symbol List from User Input                            |
 //+------------------------------------------------------------------+
-void InitSymbolList()
+void InitSymbolListFromInput()
 {
    g_symbol_count = 0;
 
-   // メジャー通貨ペア (USD関連)
-   AddSymbolIfExists("EURUSD");
-   AddSymbolIfExists("GBPUSD");
-   AddSymbolIfExists("AUDUSD");
-   AddSymbolIfExists("USDJPY");
-   AddSymbolIfExists("USDCAD");
+   // カンマ区切りの文字列を分割
+   string symbols_input = InpSymbols;
+   string symbol_array[];
 
-   // クロス円
-   AddSymbolIfExists("EURJPY");
-   AddSymbolIfExists("GBPJPY");
-   AddSymbolIfExists("AUDJPY");
-   AddSymbolIfExists("CADJPY");
+   // 空白を除去
+   StringReplace(symbols_input, " ", "");
 
-   // 欧州クロス
-   AddSymbolIfExists("EURGBP");
-   AddSymbolIfExists("EURAUD");
-   AddSymbolIfExists("EURCAD");
+   // カンマで分割
+   int count = StringSplit(symbols_input, ',', symbol_array);
 
-   // その他のクロス
-   AddSymbolIfExists("GBPAUD");
-   AddSymbolIfExists("GBPCAD");
-   AddSymbolIfExists("AUDCAD");
+   for(int i = 0; i < count && g_symbol_count < MAX_SYMBOLS; i++)
+   {
+      string base_symbol = symbol_array[i];
+      if(StringLen(base_symbol) == 0) continue;
 
-   // ゴールド
-   AddSymbolIfExists("XAUUSD");
-   AddSymbolIfExists("XAUJPY");
+      // 接尾辞を追加してシンボル名を構築
+      string full_symbol = base_symbol + InpSymbolSuffix;
 
-   Print("Initialized ", g_symbol_count, " symbols for monitoring");
+      // シンボルが存在するか確認
+      if(AddSymbolIfExists(full_symbol, base_symbol))
+      {
+         Print("Added: ", full_symbol, " (display: ", base_symbol, ")");
+      }
+      else
+      {
+         // 接尾辞なしで再試行
+         if(StringLen(InpSymbolSuffix) > 0 && AddSymbolIfExists(base_symbol, base_symbol))
+         {
+            Print("Added (no suffix): ", base_symbol);
+         }
+         else
+         {
+            Print("Symbol not found: ", full_symbol, " or ", base_symbol);
+         }
+      }
+   }
+
+   Print("Total symbols initialized: ", g_symbol_count);
 }
 
 //+------------------------------------------------------------------+
 //| Add Symbol if Exists in Market Watch                              |
 //+------------------------------------------------------------------+
-void AddSymbolIfExists(string symbol)
+bool AddSymbolIfExists(string symbol, string display_name)
 {
-   if(g_symbol_count >= MAX_SYMBOLS) return;
+   if(g_symbol_count >= MAX_SYMBOLS) return false;
 
+   // シンボルを気配値に追加試行
    if(SymbolSelect(symbol, true))
    {
-      g_symbols[g_symbol_count] = symbol;
-      g_symbol_count++;
+      // シンボルが有効かチェック（価格が取得できるか）
+      double bid = SymbolInfoDouble(symbol, SYMBOL_BID);
+      if(bid > 0)
+      {
+         g_symbols[g_symbol_count] = symbol;
+         g_display_names[g_symbol_count] = display_name;
+         g_symbol_count++;
+         return true;
+      }
    }
+
+   return false;
 }
 
 //+------------------------------------------------------------------+
@@ -235,8 +264,8 @@ void CreateFullScreenPanel()
    int legend_height = 50;
    int available_height = g_chart_height - title_height - legend_height - margin * 2;
    int row_height = available_height / (g_symbol_count + 1);
-   if(row_height < 30) row_height = 30;
-   if(row_height > 50) row_height = 50;
+   if(row_height < 25) row_height = 25;
+   if(row_height > 45) row_height = 45;
 
    int col_width = (g_chart_width - margin * 2) / 6;
 
@@ -244,17 +273,17 @@ void CreateFullScreenPanel()
    CreateRectangle("TM_BG", 0, 0, g_chart_width, g_chart_height, InpBackgroundColor);
 
    // タイトル
-   int title_font = 24;
+   int title_font = 22;
    CreateLabelEx("TM_Title", g_chart_width / 2, margin,
       "MULTI-SYMBOL TREND MONITOR (D1)", clrWhite, title_font, true, true);
 
    // 更新時刻
-   CreateLabelEx("TM_Time", g_chart_width / 2, margin + 35,
-      "", clrSilver, 12, false, true);
+   CreateLabelEx("TM_Time", g_chart_width / 2, margin + 32,
+      "", clrSilver, 11, false, true);
 
    // ヘッダー行
    int header_y = title_height + margin;
-   int header_font = 14;
+   int header_font = 12;
    CreateLabelEx("TM_H1", margin + col_width * 0 + col_width/2, header_y, "SYMBOL", clrSilver, header_font, true, true);
    CreateLabelEx("TM_H2", margin + col_width * 1 + col_width/2, header_y, "STATUS", clrSilver, header_font, true, true);
    CreateLabelEx("TM_H3", margin + col_width * 2 + col_width/2, header_y, "TREND", clrSilver, header_font, true, true);
@@ -263,11 +292,11 @@ void CreateFullScreenPanel()
    CreateLabelEx("TM_H6", margin + col_width * 5 + col_width/2, header_y, "SIGNALS", clrSilver, header_font, true, true);
 
    // 区切り線
-   CreateHLine("TM_Line1", header_y + 25, clrDimGray);
+   CreateHLine("TM_Line1", header_y + 22, clrDimGray);
 
    // 各シンボル行
-   int data_font = 16;
-   int start_y = header_y + 35;
+   int data_font = 14;
+   int start_y = header_y + 30;
 
    for(int i = 0; i < g_symbol_count; i++)
    {
@@ -280,9 +309,9 @@ void CreateFullScreenPanel()
          CreateRectangle(prefix + "BG", margin, row_y - 5, g_chart_width - margin * 2, row_height, C'20,20,20');
       }
 
-      // シンボル
+      // シンボル（表示名を使用）
       CreateLabelEx(prefix + "Symbol", margin + col_width * 0 + col_width/2, row_y,
-         g_symbols[i], clrWhite, data_font, true, true);
+         g_display_names[i], clrWhite, data_font, true, true);
 
       // ステータス
       CreateLabelEx(prefix + "Status", margin + col_width * 1 + col_width/2, row_y,
@@ -307,15 +336,15 @@ void CreateFullScreenPanel()
 
    // 凡例
    int legend_y = g_chart_height - legend_height + 10;
-   int legend_font = 14;
+   int legend_font = 12;
 
-   CreateLabelEx("TM_Leg0", g_chart_width / 2 - 300, legend_y, "Legend:", clrWhite, legend_font, false, false);
+   CreateLabelEx("TM_Leg0", g_chart_width / 2 - 280, legend_y, "Legend:", clrWhite, legend_font, false, false);
    CreateLabelEx("TM_Leg1", g_chart_width / 2 - 180, legend_y, "TREND", InpTrendColor, legend_font, true, false);
-   CreateLabelEx("TM_Leg2", g_chart_width / 2 - 50, legend_y, "RANGE", InpRangeColor, legend_font, true, false);
-   CreateLabelEx("TM_Leg3", g_chart_width / 2 + 80, legend_y, "FLAT", InpTrendlessColor, legend_font, false, false);
+   CreateLabelEx("TM_Leg2", g_chart_width / 2 - 60, legend_y, "RANGE", InpRangeColor, legend_font, true, false);
+   CreateLabelEx("TM_Leg3", g_chart_width / 2 + 60, legend_y, "FLAT", InpTrendlessColor, legend_font, false, false);
 
-   CreateLabelEx("TM_Leg4", g_chart_width / 2, legend_y + 25,
-      "Trend=蛍光緑(太字) | Range=赤(太字) | Trendless=グレー(普通字)", clrDimGray, 10, false, true);
+   CreateLabelEx("TM_Leg4", g_chart_width / 2, legend_y + 22,
+      "Symbols: " + IntegerToString(g_symbol_count) + " | Suffix: '" + InpSymbolSuffix + "'", clrDimGray, 9, false, true);
 }
 
 //+------------------------------------------------------------------+
