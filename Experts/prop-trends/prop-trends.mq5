@@ -15,7 +15,7 @@
 //+------------------------------------------------------------------+
 #property copyright "prop-trends"
 #property link      ""
-#property version   "3.2"
+#property version   "3.3"
 #property strict
 
 //--- Include files
@@ -99,12 +99,12 @@ enum ENUM_REGIME_MODE
 input ENUM_REGIME_MODE InpRegimeMode = REGIME_AUTO;  // 相場レジーム
 
 //+------------------------------------------------------------------+
-//| 【通貨ペア別設定】                                                 |
-//| ※通貨ペアごとにD1トレンド閾値を調整してください                    |
-//| 推奨値: XAUJPY=1000, USDJPY=1000, EURUSD=10000, GBPJPY=1500        |
+//| 【通貨ペア設定】                                                   |
+//| D1トレンド閾値: 自動計算(ATR基準)または手動設定                     |
 //+------------------------------------------------------------------+
-input group "===== 通貨ペア別設定 ====="
-input int      InpD1TrendThreshold = 1000;      // D1トレンド閾値 ※通貨ペアで要調整
+input group "===== 通貨ペア設定 ====="
+input bool     InpAutoThreshold = true;         // 自動閾値 (ATRから自動計算) ※推奨ON
+input int      InpD1TrendThreshold = 1000;      // 手動閾値 (自動=OFFの時のみ使用)
 
 //+------------------------------------------------------------------+
 //| 【戦術設定】                                                       |
@@ -201,7 +201,19 @@ int OnInit()
       Print("[EA] Error: Failed to initialize Trend Analyzer");
       return INIT_FAILED;
    }
-   g_TrendAnalyzer.SetD1TrendThreshold(InpD1TrendThreshold);
+
+   //--- D1トレンド閾値設定 (自動または手動)
+   if(InpAutoThreshold)
+   {
+      // ATRから自動計算 (初回更新してATR値を取得)
+      g_TrendAnalyzer.Update();
+      g_TrendAnalyzer.ApplyAutoThreshold(0.3);  // ATRの30%を閾値に
+   }
+   else
+   {
+      // 手動設定値を使用
+      g_TrendAnalyzer.SetD1TrendThreshold(InpD1TrendThreshold);
+   }
 
    //--- Initialize Entry Logic
    if(!g_EntryLogic.Initialize(g_Symbol, &g_TrendAnalyzer, &g_RiskManager))

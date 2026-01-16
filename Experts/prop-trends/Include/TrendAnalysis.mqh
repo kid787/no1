@@ -443,6 +443,10 @@ private:
    // D1トレンド閾値 (points)
    int               m_D1TrendThreshold;
 
+   // D1 ATR (自動計算用)
+   int               m_HandleATR_D1;
+   double            m_CurrentATR_D1;
+
 public:
    CTrendAnalyzer()
    {
@@ -463,6 +467,8 @@ public:
       m_CurrentADX_H1 = 0;
 
       m_D1TrendThreshold = 2000;  // デフォルト: 2000 points
+      m_HandleATR_D1 = INVALID_HANDLE;
+      m_CurrentATR_D1 = 0;
    }
 
    //--- D1トレンド閾値を設定
@@ -501,7 +507,15 @@ public:
                      m_ADXPeriod, m_ADXMinLevel);
       }
 
-      Print("[TrendAnalyzer] Initialized v2.3 with D1 Regime Filter");
+      // Initialize ATR for auto threshold calculation
+      m_HandleATR_D1 = iATR(symbol, PERIOD_D1, 14);
+      if(m_HandleATR_D1 == INVALID_HANDLE)
+      {
+         Print("[TrendAnalyzer] Failed to create ATR handle");
+         return false;
+      }
+
+      Print("[TrendAnalyzer] Initialized v2.4 with D1 Regime Filter + ATR");
       return true;
    }
 
@@ -511,6 +525,7 @@ public:
       if(m_HandleADX_D1 != INVALID_HANDLE) IndicatorRelease(m_HandleADX_D1);
       if(m_HandleADX_H4 != INVALID_HANDLE) IndicatorRelease(m_HandleADX_H4);
       if(m_HandleADX_H1 != INVALID_HANDLE) IndicatorRelease(m_HandleADX_H1);
+      if(m_HandleATR_D1 != INVALID_HANDLE) IndicatorRelease(m_HandleATR_D1);
    }
 
    void Update()
@@ -528,8 +543,53 @@ public:
          m_CurrentADX_H1 = GetADXValue(m_HandleADX_H1);
       }
 
+      // Update ATR value
+      m_CurrentATR_D1 = GetATRValue(m_HandleATR_D1);
+
       UpdateWarState();
       m_SMAManager.UpdateState();
+   }
+
+   //--- Get ATR value from handle
+   double GetATRValue(int handle, int shift = 0)
+   {
+      double buffer[];
+      ArraySetAsSeries(buffer, true);
+      if(CopyBuffer(handle, 0, shift, 1, buffer) != 1)
+         return 0;
+      return buffer[0];
+   }
+
+   //--- Get current D1 ATR
+   double GetATR_D1() { return m_CurrentATR_D1; }
+
+   //--- ★自動計算: D1 ATRからトレンド閾値を算出★
+   //--- 閾値 = ATR × 係数(0.3) ÷ Point値
+   int CalculateAutoThreshold(double atrMultiplier = 0.3)
+   {
+      if(m_CurrentATR_D1 <= 0)
+         return 1000;  // フォールバック値
+
+      double point = SymbolInfoDouble(m_Symbol, SYMBOL_POINT);
+      if(point <= 0)
+         return 1000;
+
+      // ATRの30%をポイント数に変換
+      int threshold = (int)MathRound((m_CurrentATR_D1 * atrMultiplier) / point);
+
+      // 最小値/最大値を制限
+      threshold = MathMax(500, MathMin(threshold, 50000));
+
+      return threshold;
+   }
+
+   //--- 自動閾値を設定して適用
+   void ApplyAutoThreshold(double atrMultiplier = 0.3)
+   {
+      int autoThreshold = CalculateAutoThreshold(atrMultiplier);
+      m_D1TrendThreshold = autoThreshold;
+      PrintFormat("[TrendAnalyzer] Auto Threshold: ATR=%.2f × %.0f%% = %d points",
+                  m_CurrentATR_D1, atrMultiplier * 100, m_D1TrendThreshold);
    }
 
    //--- Get ADX value from handle
