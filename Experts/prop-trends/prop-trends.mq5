@@ -15,7 +15,7 @@
 //+------------------------------------------------------------------+
 #property copyright "prop-trends"
 #property link      ""
-#property version   "3.1"
+#property version   "3.2"
 #property strict
 
 //--- Include files
@@ -37,7 +37,6 @@
 #define CONST_ADX_PERIOD         14       // ADX期間
 #define CONST_ADX_MIN_LEVEL      20.0     // ADX最小値
 #define CONST_D1_ADX_THRESHOLD   25.0     // D1 ADX閾値
-#define CONST_D1_TREND_THRESHOLD 1000     // D1トレンド閾値
 #define CONST_TP1_CLOSE_PERCENT  50       // TP1決済割合
 
 //+------------------------------------------------------------------+
@@ -98,6 +97,14 @@ enum ENUM_REGIME_MODE
    REGIME_NO_TRADE = 3     // 強制:停止
 };
 input ENUM_REGIME_MODE InpRegimeMode = REGIME_AUTO;  // 相場レジーム
+
+//+------------------------------------------------------------------+
+//| 【通貨ペア別設定】                                                 |
+//| ※通貨ペアごとにD1トレンド閾値を調整してください                    |
+//| 推奨値: XAUJPY=1000, USDJPY=1000, EURUSD=10000, GBPJPY=1500        |
+//+------------------------------------------------------------------+
+input group "===== 通貨ペア別設定 ====="
+input int      InpD1TrendThreshold = 1000;      // D1トレンド閾値 ※通貨ペアで要調整
 
 //+------------------------------------------------------------------+
 //| 【戦術設定】                                                       |
@@ -194,7 +201,7 @@ int OnInit()
       Print("[EA] Error: Failed to initialize Trend Analyzer");
       return INIT_FAILED;
    }
-   g_TrendAnalyzer.SetD1TrendThreshold(CONST_D1_TREND_THRESHOLD);
+   g_TrendAnalyzer.SetD1TrendThreshold(InpD1TrendThreshold);
 
    //--- Initialize Entry Logic
    if(!g_EntryLogic.Initialize(g_Symbol, &g_TrendAnalyzer, &g_RiskManager))
