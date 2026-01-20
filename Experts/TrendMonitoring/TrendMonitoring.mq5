@@ -1,11 +1,11 @@
 //+------------------------------------------------------------------+
 //|                                              TrendMonitoring.mq5 |
 //|                    Multi-Symbol Market Regime Detection EA       |
-//|                     Based on D1 (Daily) Chart Analysis           |
+//|                   Multi-Timeframe Analysis (H1/H4/D1/W1)         |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024"
 #property link      ""
-#property version   "3.10"
+#property version   "3.20"
 #property strict
 
 #include "MarketRegime.mqh"
@@ -14,6 +14,24 @@
 //| Constants                                                         |
 //+------------------------------------------------------------------+
 #define MAX_SYMBOLS 20   // 監視シンボル最大数
+
+//+------------------------------------------------------------------+
+//| Timeframe Selection Enumeration                                   |
+//+------------------------------------------------------------------+
+enum ENUM_TF_SELECTION
+{
+   TF_H1 = 0,    // 1時間足 (H1)
+   TF_H4 = 1,    // 4時間足 (H4)
+   TF_D1 = 2,    // 日足 (D1)
+   TF_W1 = 3     // 週足 (W1)
+};
+
+//+------------------------------------------------------------------+
+//| Input Parameters - Timeframe                                      |
+//+------------------------------------------------------------------+
+input group "=== Timeframe Settings ==="
+input ENUM_TF_SELECTION InpTimeframe = TF_D1;  // 分析タイムフレーム
+input int    InpTimerInterval = 30;            // 更新間隔（秒）※週末用
 
 //+------------------------------------------------------------------+
 //| Input Parameters - Symbols (カンマ区切りで入力)                    |
@@ -58,12 +76,46 @@ int g_symbol_count = 0;                           // 有効なシンボル数
 bool g_first_run = true;
 int g_chart_width = 0;
 int g_chart_height = 0;
+ENUM_TIMEFRAMES g_analysis_timeframe = PERIOD_D1; // 分析タイムフレーム
+
+//+------------------------------------------------------------------+
+//| Convert selection enum to ENUM_TIMEFRAMES                         |
+//+------------------------------------------------------------------+
+ENUM_TIMEFRAMES GetSelectedTimeframe()
+{
+   switch(InpTimeframe)
+   {
+      case TF_H1: return PERIOD_H1;
+      case TF_H4: return PERIOD_H4;
+      case TF_D1: return PERIOD_D1;
+      case TF_W1: return PERIOD_W1;
+      default:    return PERIOD_D1;
+   }
+}
+
+//+------------------------------------------------------------------+
+//| Get timeframe display string                                      |
+//+------------------------------------------------------------------+
+string GetTimeframeString(ENUM_TIMEFRAMES tf)
+{
+   switch(tf)
+   {
+      case PERIOD_H1: return "H1";
+      case PERIOD_H4: return "H4";
+      case PERIOD_D1: return "D1";
+      case PERIOD_W1: return "W1";
+      default:        return "D1";
+   }
+}
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                    |
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   // タイムフレーム設定
+   g_analysis_timeframe = GetSelectedTimeframe();
+
    // チャートサイズ取得
    g_chart_width = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
    g_chart_height = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
@@ -101,11 +153,11 @@ int OnInit()
    params.adx_period = InpADXPeriod;
    params.adx_trend_threshold = InpADXTrendThreshold;
 
-   // 各シンボルのRegime検出器を初期化
+   // 各シンボルのRegime検出器を初期化（選択されたタイムフレームで）
    for(int i = 0; i < g_symbol_count; i++)
    {
       g_last_regimes[i] = REGIME_TRENDLESS;
-      if(!g_regimes[i].Init(g_symbols[i], params))
+      if(!g_regimes[i].Init(g_symbols[i], params, g_analysis_timeframe))
       {
          Print("Failed to initialize regime detector for ", g_symbols[i]);
       }
@@ -114,13 +166,20 @@ int OnInit()
    // パネル作成
    CreateFullScreenPanel();
 
-   Print("=== Trend Monitoring EA v3.0 (Custom Symbols) ===");
-   Print("Monitoring ", g_symbol_count, " symbols on D1 timeframe");
+   // タイマー開始（週末でも分析可能にする）
+   EventSetTimer(InpTimerInterval);
+
+   Print("=== Trend Monitoring EA v3.20 (Multi-Timeframe) ===");
+   Print("Monitoring ", g_symbol_count, " symbols on ", GetTimeframeString(g_analysis_timeframe), " timeframe");
    Print("Symbol suffix: '", InpSymbolSuffix, "'");
+   Print("Timer interval: ", InpTimerInterval, " seconds (for weekend analysis)");
 
    // チャートイベント有効化
    ChartSetInteger(0, CHART_EVENT_OBJECT_CREATE, true);
    ChartSetInteger(0, CHART_EVENT_OBJECT_DELETE, true);
+
+   // 初回分析を実行
+   PerformAnalysis();
 
    return INIT_SUCCEEDED;
 }
@@ -130,6 +189,9 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
 {
+   // タイマー停止
+   EventKillTimer();
+
    // Regime検出器の解放
    for(int i = 0; i < g_symbol_count; i++)
    {
@@ -148,18 +210,29 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
 {
+   // ティック毎に分析実行
+   PerformAnalysis();
+}
+
+//+------------------------------------------------------------------+
+//| Perform Analysis (common function for OnTick and OnTimer)         |
+//+------------------------------------------------------------------+
+void PerformAnalysis()
+{
    // 全シンボルの分析を実行
    for(int i = 0; i < g_symbol_count; i++)
    {
-      ENUM_MARKET_REGIME current = g_regimes[i].Analyze(false);
+      // 強制更新でインジケーターを再計算（週末対応）
+      ENUM_MARKET_REGIME current = g_regimes[i].Analyze(true);
 
       // Regime変更検出
       if(current != g_last_regimes[i] || g_first_run)
       {
          if(!g_first_run && InpShowAlerts)
          {
-            string msg = StringFormat("%s: %s -> %s",
+            string msg = StringFormat("%s (%s): %s -> %s",
                g_display_names[i],
+               GetTimeframeString(g_analysis_timeframe),
                GetRegimeShortName(g_last_regimes[i]),
                GetRegimeShortName(current));
             Alert(msg);
@@ -285,10 +358,11 @@ void CreateFullScreenPanel()
    // 背景
    CreateRectangle("TM_BG", 0, 0, g_chart_width, g_chart_height, InpBackgroundColor);
 
-   // タイトル
+   // タイトル（選択されたタイムフレームを表示）
    int title_font = 22;
+   string title_text = "MULTI-SYMBOL TREND MONITOR (" + GetTimeframeString(g_analysis_timeframe) + ")";
    CreateLabelEx("TM_Title", g_chart_width / 2, margin,
-      "MULTI-SYMBOL TREND MONITOR (D1)", clrWhite, title_font, true, true);
+      title_text, clrWhite, title_font, true, true);
 
    // 更新時刻
    CreateLabelEx("TM_Time", g_chart_width / 2, margin + 32,
@@ -357,7 +431,7 @@ void CreateFullScreenPanel()
    CreateLabelEx("TM_Leg3", g_chart_width / 2 + 60, legend_y, "FLAT", InpTrendlessColor, legend_font, false, false);
 
    CreateLabelEx("TM_Leg4", g_chart_width / 2, legend_y + 22,
-      "Symbols: " + IntegerToString(g_symbol_count) + " | Suffix: '" + InpSymbolSuffix + "'", clrDimGray, 9, false, true);
+      "TF: " + GetTimeframeString(g_analysis_timeframe) + " | Symbols: " + IntegerToString(g_symbol_count) + " | Timer: " + IntegerToString(InpTimerInterval) + "s", clrDimGray, 9, false, true);
 }
 
 //+------------------------------------------------------------------+
@@ -545,9 +619,11 @@ void CreateLabelEx(string name, int x, int y, string text, color clr, int font_s
 }
 
 //+------------------------------------------------------------------+
-//| Timer function                                                    |
+//| Timer function (for weekend analysis)                             |
 //+------------------------------------------------------------------+
 void OnTimer()
 {
+   // 週末やマーケットが閉じている時でもタイマーで分析実行
+   PerformAnalysis();
 }
 //+------------------------------------------------------------------+

@@ -253,9 +253,10 @@ public:
                     ~CMarketRegime(void);
 
    // Initialization
-   bool              Init(string symbol, SMarketRegimeParams &params);
+   bool              Init(string symbol, SMarketRegimeParams &params, ENUM_TIMEFRAMES timeframe = PERIOD_D1);
    bool              Init(string symbol);  // Use default params
    void              Deinit(void);
+   ENUM_TIMEFRAMES   GetTimeframe(void);
 
    // Main Analysis Function
    ENUM_MARKET_REGIME Analyze(bool force_update);
@@ -314,16 +315,16 @@ CMarketRegime::~CMarketRegime(void)
 }
 
 //+------------------------------------------------------------------+
-//| Initialize with custom parameters                                 |
+//| Initialize with custom parameters and timeframe                   |
 //+------------------------------------------------------------------+
-bool CMarketRegime::Init(string symbol, SMarketRegimeParams &params)
+bool CMarketRegime::Init(string symbol, SMarketRegimeParams &params, ENUM_TIMEFRAMES timeframe = PERIOD_D1)
 {
    if(m_is_initialized)
       Deinit();
 
    m_symbol = symbol;
    m_params = params;
-   m_timeframe = PERIOD_D1;  // 常に日足を使用
+   m_timeframe = timeframe;  // 指定されたタイムフレームを使用
 
    if(!CreateIndicators())
    {
@@ -333,6 +334,14 @@ bool CMarketRegime::Init(string symbol, SMarketRegimeParams &params)
 
    m_is_initialized = true;
    return true;
+}
+
+//+------------------------------------------------------------------+
+//| Get current timeframe                                             |
+//+------------------------------------------------------------------+
+ENUM_TIMEFRAMES CMarketRegime::GetTimeframe(void)
+{
+   return m_timeframe;
 }
 
 //+------------------------------------------------------------------+
