@@ -13,7 +13,7 @@
 //+------------------------------------------------------------------+
 //| Constants                                                         |
 //+------------------------------------------------------------------+
-#define MAX_SYMBOLS 20   // 監視シンボル最大数
+#define MAX_SYMBOLS 30   // 監視シンボル最大数
 
 //+------------------------------------------------------------------+
 //| Timeframe Selection Enumeration                                   |
@@ -37,7 +37,7 @@ input int    InpTimerInterval = 30;            // 更新間隔（秒）※週末
 //| Input Parameters - Symbols (カンマ区切りで入力)                    |
 //+------------------------------------------------------------------+
 input group "=== Symbol Settings (カンマ区切り) ==="
-input string InpSymbols = "EURUSD,GBPUSD,AUDUSD,USDJPY,USDCAD,EURJPY,GBPJPY,AUDJPY,CADJPY,EURGBP,EURAUD,EURCAD,GBPAUD,GBPCAD,AUDCAD,XAUUSD,XAUJPY"; // 監視シンボル
+input string InpSymbols = "EURUSD,GBPUSD,AUDUSD,USDJPY,USDCAD,EURJPY,GBPJPY,AUDJPY,CADJPY,EURGBP,EURAUD,EURCAD,GBPAUD,GBPCAD,AUDCAD,XAUUSD,XAUJPY,XAUAUD,XAUCHF,XAUEUR,XAUGBP,XAGUSD,XPTUSD"; // 監視シンボル
 input string InpSymbolSuffix = "";  // シンボル接尾辞 (例: m, .pro, など)
 
 //+------------------------------------------------------------------+
