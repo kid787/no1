@@ -15,7 +15,7 @@
 //+------------------------------------------------------------------+
 #property copyright "prop-trends"
 #property link      ""
-#property version   "3.3"
+#property version   "3.4"
 #property strict
 
 //--- Include files
@@ -23,6 +23,7 @@
 #include "Include/TrendAnalysis.mqh"
 #include "Include/EntryLogic.mqh"
 #include "Include/LotCalculator.mqh"
+#include "Include/NewsFilter.mqh"
 
 #include <Trade/Trade.mqh>
 
@@ -130,6 +131,16 @@ input int      InpStartHour = 8;                // 開始時間
 input int      InpEndHour = 22;                 // 終了時間
 
 //+------------------------------------------------------------------+
+//| 【経済指標フィルター】                                             |
+//| MT5内蔵カレンダーを使用して重要指標発表前後のトレードを回避          |
+//+------------------------------------------------------------------+
+input group "===== 経済指標フィルター ====="
+input bool     InpUseNewsFilter = true;         // 指標フィルター有効 ※推奨ON
+input int      InpNewsMinutesBefore = 5;        // 指標発表前の回避時間(分)
+input int      InpNewsMinutesAfter = 5;         // 指標発表後の回避時間(分)
+input ENUM_NEWS_IMPACT InpNewsMinImpact = NEWS_IMPACT_HIGH;  // フィルター対象インパクト
+
+//+------------------------------------------------------------------+
 //| Global Variables                                                  |
 //+------------------------------------------------------------------+
 CTrade         g_Trade;
@@ -137,6 +148,7 @@ CRiskManager   g_RiskManager;
 CTrendAnalyzer g_TrendAnalyzer;
 CEntryLogic    g_EntryLogic;
 CLotCalculator g_LotCalculator;
+CNewsFilter    g_NewsFilter;
 
 string         g_Symbol;
 datetime       g_LastBarTime;
@@ -230,6 +242,11 @@ int OnInit()
       return INIT_FAILED;
    }
 
+   //--- Initialize News Filter
+   g_NewsFilter.Initialize(InpUseNewsFilter, InpNewsMinutesBefore,
+                           InpNewsMinutesAfter, InpNewsMinImpact);
+   g_NewsFilter.SetCurrenciesFromSymbol(g_Symbol);
+
    g_LastBarTime = 0;
    g_IsInitialized = true;
 
@@ -239,7 +256,7 @@ int OnInit()
    g_DynamicRiskPercent = InpRiskPercent;
    g_CurrentTacticName = "初期化中";
 
-   PrintFormat("[EA] ===== prop-trends v3.0 Initialized =====");
+   PrintFormat("[EA] ===== prop-trends v3.4 Initialized =====");
    PrintFormat("[EA] Symbol: %s", g_Symbol);
    PrintFormat("[EA] Risk: %.2f%% | MaxDaily: %.2f%% | MaxWeekly: %.2f%% | MaxTotal: %.2f%%",
                InpRiskPercent, InpMaxDailyLoss, InpMaxWeeklyLoss, InpMaxTotalLoss);
@@ -261,6 +278,13 @@ int OnInit()
    {
       PrintFormat("[EA] Tactic Risk: TrendUp=%.2f%% | TrendDown=%.2f%% | Range=%.2f%%",
                   InpTrendUpRisk, InpTrendDownRisk, InpRangeRisk);
+   }
+   if(InpUseNewsFilter)
+   {
+      PrintFormat("[EA] News Filter: ON | Before: %d min | After: %d min | Impact: %s",
+                  InpNewsMinutesBefore, InpNewsMinutesAfter,
+                  InpNewsMinImpact == NEWS_IMPACT_HIGH ? "HIGH" :
+                  InpNewsMinImpact == NEWS_IMPACT_MEDIUM ? "MEDIUM" : "LOW");
    }
    PrintFormat("[EA] ==================================================");
 
@@ -308,6 +332,10 @@ void OnTick()
 
    //--- Time filter
    if(InpUseTimeFilter && !IsWithinTradingHours())
+      return;
+
+   //--- News filter (重要経済指標の前後はトレード禁止)
+   if(!g_NewsFilter.IsTradeAllowed())
       return;
 
    //--- Update trend analysis
